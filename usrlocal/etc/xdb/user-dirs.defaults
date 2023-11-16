@@ -1,0 +1,11 @@
+DESKTOP_DIR=desk
+
+DOWNLOAD_DIR=down
+DOCUMENTS_DIR=doc
+
+TEMPLATES_DIR=doc/templates
+
+PUBLICSHARE_DIR=media/share
+MUSIC_DIR=media/music
+PICTURES_DIR=media/pic
+VIDEOS_DIR=media/video

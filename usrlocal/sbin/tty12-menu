@@ -1,0 +1,86 @@
+#!/bin/bash
+trap '' SIGINT
+sleep 10
+while true; do
+  clear
+
+  echo -e "\e[96m==== SYSTEM ====\e[0m"
+  uname -a
+  uptime
+
+  echo ""
+  echo -e "\e[96m==== DISK FREE ====\e[0m"
+  df -h / /home
+  echo ""
+  echo -e "\e[96m==== MEM FREE ====\e[0m"
+  free -h
+
+  echo ""
+  echo -e "\e[96m==== PROCESS CPU ====\e[0m"
+
+ps aux --sort=-%cpu | head -n 6 | awk '{printf "%-8s %-6s %-10s %-10s %-40.40s\n", $1, $2, $3, $4, $11}'
+
+  echo ""
+  echo -e "\e[96m==== PROCESS MEM ====\e[0m"
+ps aux --sort=-%cpu | head -n 3 | awk '{printf "%-8s %-6s %-10s %-10s %-40.40s\n", $1, $2, $3, $4, $11}'
+
+  echo ""
+  echo -e "\e[96m==== IP ====\e[0m"
+  echo "Hostname: `hostname`"
+  ip -4 -o address show
+
+    echo ""
+  echo -e "\e[96m==== ROUTE ====\e[0m"
+  ip route
+
+
+ echo ""
+
+  echo -e "\e[96m==== PING ====\e[0m"
+  ping 1.1.1.1 -W 1 -c 1 | grep from
+  ping www.google.com -W 1 -c 1 | grep from
+
+
+  echo ""
+  echo ""
+  echo -e "\e[96m==== MENU ====\e[0m"
+  echo "  Q) Update system and shutdown"
+  echo "  W) Update system and reboot"
+  echo "  C) Reboot and perform disk checks"
+  echo ""
+
+
+  read -n 1 choice
+
+
+  case "$choice" in
+    "Q" | "q")
+      clear
+      /usr/bin/zypper dup -y
+      echo " !!!!!!!!!!!! SHUTDOWN !!!!!!!!!!!!!!!"
+        echo ""
+         echo ""
+          echo ""
+       sleep 10
+       poweroff
+      ;;
+    "W" | "w")
+        echo ""
+         echo ""
+          echo ""
+      clear
+      /usr/bin/zypper dup -y
+      echo " !!!!!!!!!!!! REBOOT !!!!!!!!!!!!!!!"
+
+        sleep 10
+        reboot
+      ;;
+    "C" | "c")
+    clear
+    touch /forcefsck
+    reboot
+      ;;
+    *)
+      ;;
+  esac
+done
