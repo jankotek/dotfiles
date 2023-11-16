@@ -1,0 +1,42 @@
+#!/bin/bash
+
+IDEA="ideaIC-2023.2.tar.gz"
+
+IDEA_URL="https://download.jetbrains.com/idea/$IDEA"
+EXPECTED_CHECKSUM="b1a5c267ca86850764b0541bee0c27af7d2082e55516e95a0c8d30539571735c"
+TMP_DIR=$(mktemp -d)
+
+
+INSTALL_DIR="/opt/idea"
+
+if [ "$EUID" -ne 0 ]; then
+    INSTALL_DIR="$HOME/.local/idea"
+fi
+
+IDEAF="/mnt/shared/install/$IDEA"
+if [ -e "$IDEAF" ]; then
+  echo "Use cache"
+else
+    IDEAF="$TMP_DIR/idea.tar.gz"
+    wget -O "$IDEAF" "$IDEA_URL"
+
+    ACTUAL_CHECKSUM=$(sha256sum "$IDEAF" | awk '{print $1}')
+    if [ "$ACTUAL_CHECKSUM" != "$EXPECTED_CHECKSUM" ]; then
+        echo "Checksum verification failed. Aborting."
+        rm -rf "$TMP_DIR"
+        exit 1
+    fi
+
+fi
+
+
+
+rm -rf "$INSTALL_DIR"
+mkdir "$INSTALL_DIR"
+tar -xzvf "$IDEAF" -C "$INSTALL_DIR" --strip-components=1
+
+rm -rf "$TMP_DIR"
+
+setup-idea-link
+
+echo "IntelliJ IDEA installation completed."
