@@ -1,6 +1,9 @@
- #!/bin/bash
+#!/bin/bash
 
-# Set the service file content
+#
+# Puts some into and actions on TTY12
+#
+
 SERVICE_FILE_CONTENT="[Unit]
 Description=Menu and info on TTY12
 
@@ -27,7 +30,7 @@ WantedBy=multi-user.target"
 SERVICE_FILE_PATH="/etc/systemd/system/tty12-menu.service"
 
 # Echo the service file content to the file
-echo "$SERVICE_FILE_CONTENT" | sudo tee "$SERVICE_FILE_PATH" > /dev/null
+echo "$SERVICE_FILE_CONTENT" | tee "$SERVICE_FILE_PATH" > /dev/null
 
 # Enable and start the service
 systemctl enable tty12-menu.service
