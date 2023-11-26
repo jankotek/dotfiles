@@ -1,6 +1,16 @@
 #!/bin/bash
+
+#
+# shows system info and gives some option to update system and reboot
+#
+
+# disable ctrl c
 trap '' SIGINT
-sleep 10
+
+#wait for network to init
+sleep 20
+
+# infinitive loop, spacebar refresh info
 while true; do
   clear
 
@@ -34,13 +44,6 @@ ps aux --sort=-%cpu | head -n 3 | awk '{printf "%-8s %-6s %-10s %-10s %-40.40s\n
   ip route
 
 
- echo ""
-
-  echo -e "\e[96m==== PING ====\e[0m"
-  ping 1.1.1.1 -W 1 -c 1 | grep from
-  ping www.google.com -W 1 -c 1 | grep from
-
-
   echo ""
   echo ""
   echo -e "\e[96m==== MENU ====\e[0m"
@@ -49,6 +52,16 @@ ps aux --sort=-%cpu | head -n 3 | awk '{printf "%-8s %-6s %-10s %-10s %-40.40s\n
   echo "  C) Reboot and perform disk checks"
   echo ""
 
+  echo ""
+  echo -e "\e[96m==== PING ====\e[0m"
+
+function runPing() {
+  ping 1.1.1.1 -W 1 -c 1 | grep from
+  ping www.google.com -W 1 -c 1 | grep from
+}
+
+# run in  background, not to block input
+  runPing &
 
   read -n 1 choice
 
@@ -56,29 +69,26 @@ ps aux --sort=-%cpu | head -n 3 | awk '{printf "%-8s %-6s %-10s %-10s %-40.40s\n
   case "$choice" in
     "Q" | "q")
       clear
-      /usr/bin/zypper dup -y
+      setup-upgrade
+      echo ""
       echo " !!!!!!!!!!!! SHUTDOWN !!!!!!!!!!!!!!!"
-        echo ""
-         echo ""
-          echo ""
-       sleep 10
-       poweroff
+      echo ""
+      sleep 10
+      poweroff
       ;;
     "W" | "w")
-        echo ""
-         echo ""
-          echo ""
       clear
-      /usr/bin/zypper dup -y
+      setup-upgrade
+      echo ""
       echo " !!!!!!!!!!!! REBOOT !!!!!!!!!!!!!!!"
-
-        sleep 10
-        reboot
+      echo ""
+      sleep 10
+      reboot
       ;;
     "C" | "c")
-    clear
-    touch /forcefsck
-    reboot
+      clear
+      touch /forcefsck
+      reboot
       ;;
     *)
       ;;

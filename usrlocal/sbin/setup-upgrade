@@ -1,0 +1,20 @@
+#!/bin/bash
+
+if [ "$EUID" -ne 0 ]; then
+  echo "Please run as root"
+  exit 1
+fi
+
+if command -v zypper &> /dev/null; then
+  zypper --non-interactive update
+elif command -v dnf &> /dev/null; then
+  dnf -y update
+elif command -v apt-get &> /dev/null; then
+  apt-get -y update
+  apt-get -y upgrade
+else
+  echo "Unsupported distribution"
+  exit 1
+fi
+
+echo "System updated successfully"
