@@ -4,9 +4,10 @@ f="/home/jan/.config/BraveSoftware/Brave-Browser/Local State"
 dark="enable-force-dark@1"
 light="enable-force-dark@9"
 
-if grep -q "$light"  "$f"; then
+if grep -q "$dark"  "$f"; then
   killall brave
-  simple-file-replace "$f" "$light" "$dark"
+  sleep 2
+  simple-file-replace "$f" "$dark" "$light"
   gtk-launch brave-browser
 fi
 
