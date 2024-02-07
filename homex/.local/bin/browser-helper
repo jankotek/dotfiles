@@ -1,0 +1,20 @@
+#!/bin/bash
+
+if [ -z "$1" ]; then
+	url="www.duckduckgo.com"
+else
+	url="$1"
+fi 
+
+
+
+# Check if Brave is installed
+if command -v brave-browser &>/dev/null; then
+    brave-browser "$url"
+# Check if Firefox is installed
+elif command -v firefox &>/dev/null; then
+    firefox "$url"
+else
+# terminal browser
+  	terminator -x w3m "$url"  
+fi

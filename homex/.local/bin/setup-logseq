@@ -1,0 +1,30 @@
+#!/bin/bash
+
+VER="0.10.5"
+URL="https://github.com/logseq/logseq/releases/download/$VER/Logseq-linux-x64-$VER.zip"
+
+DIR=$HOME/.local/apps
+
+if [[ -d "$DIR/logseq" ]]; then
+    echo "logseq already installed"
+    exit 1
+fi
+
+mkdir $DIR
+ZIP=$DIR/logseq.zip
+
+wget -O "$ZIP" "$URL"
+
+unzip  -q "$ZIP" -d "$DIR"
+mv $DIR/Logseq* "$DIR/logseq"
+rm "$ZIP"
+
+
+
+# bundled git had some LDD issues
+GITFILE=$DIR/logseq/resources/app/node_modules/dugite/git/bin/git
+rm $GITFILE
+ln -s /usr/bin/git $GITFILE
+
+
+setup-logseq-link

@@ -1,0 +1,11 @@
+#!/bin/sh
+
+rm -rf /usr/share/wallpapers
+rm  /usr/bin/xfce4-display-settings
+
+rm /cleanup-zeros /home/cleanup-zeroes /home/jan/cleanup-zeroes
+
+
+
+# needed for systemd, otherwise it will show as failed
+exit 0

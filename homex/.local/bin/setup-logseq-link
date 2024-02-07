@@ -1,0 +1,17 @@
+#!/bin/bash
+
+
+ln -s $DIR/logseq/Logseq $HOME/.local/bin/logseq
+
+DF="[Desktop Entry]
+Name=Logseq
+Exec=$DIR/logseq/Logseq
+Icon=$DIR/logseq/resources/app/icon.png
+Type=Application
+Categories=Utility;"
+
+DIR="$HOME/.local/share/applications/"
+mkdir $DIR
+
+echo "$DF" > $DIR/logseq.desktop
+

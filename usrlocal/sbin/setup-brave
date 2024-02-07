@@ -25,3 +25,5 @@ case $ID in
         exit 1
         ;;
 esac
+
+ln -s /usr/local/bin/brave /usr/bin/brave-browser

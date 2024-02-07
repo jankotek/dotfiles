@@ -1,0 +1,14 @@
+[Desktop Entry]
+Categories=Network;WebBrowser;
+Comment=Opens URL in available browser
+Exec=browser-helper %u
+GenericName=Browser Helper
+Icon=webbrowser-app
+MimeType=
+Name=Browser Helper
+MimeType=text/html;text/xml;application/xhtml+xml;application/vnd.mozilla.xul+xml;text/mml;application/x-xpinstall;x-scheme-handler/http;x-scheme-handler/https;
+StartupNotify=true
+Terminal=false
+TerminalOptions=
+Type=Application
+Version=1.0

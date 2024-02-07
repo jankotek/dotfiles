@@ -1,0 +1,15 @@
+[Desktop Entry]
+Categories=System
+Comment=Suspend system (sleep)
+Exec=xfce4-session-logout  -s
+GenericName=Suspend 
+Icon=system-suspend-hibernate
+MimeType=
+Name=Suspend
+
+StartupNotify=true
+Terminal=false
+TerminalOptions=
+Type=Application
+Version=1.0
+Path=

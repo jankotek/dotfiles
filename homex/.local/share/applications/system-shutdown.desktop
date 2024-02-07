@@ -1,0 +1,16 @@
+[Desktop Entry]
+Categories=System
+Comment=Shutdown system (halt)
+Exec=xfce4-session-logout  -h
+GenericName=Shutdown
+Icon=system-shutdown
+MimeType=
+Name=Shutdown
+Path=
+StartupNotify=true
+Terminal=false
+TerminalOptions=
+Type=Application
+Version=1.0
+X-KDE-SubstituteUID=false
+X-KDE-Username=

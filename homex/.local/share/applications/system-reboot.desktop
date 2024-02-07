@@ -1,0 +1,14 @@
+[Desktop Entry]
+Categories=System
+Comment=Reboot (restart) system 
+Exec=xfce4-session-logout -r
+GenericName=Reboot
+Icon=system-reboot
+MimeType=
+Name=Reboot
+
+StartupNotify=true
+Terminal=false
+TerminalOptions=
+Type=Application
+Version=1.0

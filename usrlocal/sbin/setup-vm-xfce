@@ -1,0 +1,34 @@
+#!/bin/bash
+
+# show installed packages sorted by size
+#  rpm -qa --queryformat '%{SIZE} %{NAME}\n' | sort -n -r
+
+
+
+REM="MozillaThunderbird  argyllcms  ghostscript pulseaudio  xscreensaver  \
+  cups samba tk wicked postfix gutenprint sane  tcl tcl breeze5-wallpapers breeze5-cursors desktop-translations \
+  icewm ModemManager xiccd sane gnome-online-accounts kernel-firmware kernel-firmware-all kernel-default-optional  \
+  pipewire  wireplumber exim pavucontrol samba  wireless-regdb geoclue2 NetworkManager-applet polkit-gnome  bluez firewalld \
+   patterns-fonts-fonts    patterns-base-documentation patterns-base-sw_management patterns-yast-yast2_basis ruby ruby-common \
+   wireless-tools xterm plymouth guile  "
+
+zypper remove -y libwebkit2gtk*  *ghostscript*  *sane*   alsa*  *screensaver*  wireless*    libjavascriptcoregtk* *ModemManager* \
+	libgoa*      kernel-firmware*  *libreoffice* icewm* *openjdk* gstreamer-plugins-bad docbook*  ruby* *libqt* *libQt*  yast2* *plymouth* $REM
+zypper addlock  $REM
+
+
+
+setup-tools-cli
+setup-tools-gui
+
+
+
+
+
+untar-all-in-dir /home/jan/.icons/
+untar-all-in-dir /home/jan/.themes/
+rm /home/jan/.icons/*.tar.xz /home/jan/.themes/*.tar.xz
+
+
+chown jan:users /home/jan -R
+

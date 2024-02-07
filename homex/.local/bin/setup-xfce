@@ -1,3 +1,0 @@
-#!/bin/bash
-
-dconf load / < /home/jan/.config/dconf-import.ini

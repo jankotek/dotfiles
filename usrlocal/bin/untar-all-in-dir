@@ -1,0 +1,23 @@
+#!/bin/bash
+
+# check if a directory was provided as an argument
+if [ -z "$1" ]; then
+  echo "Usage: $0 <directory>"
+  exit 1
+fi
+
+dir="$1"
+
+if [ ! -d "$dir" ]; then
+  echo "Error: '$dir' is not a valid directory."
+  exit 1
+fi
+
+
+
+for file in "$dir"/*; do
+
+  if [[ -f $file ]]; then
+    tar xf "$file" -C "$dir"
+  fi
+done

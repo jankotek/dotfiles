@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<channel name="xsettings" version="1.0">
+  <property name="Net" type="empty">
+    <property name="ThemeName" type="string" value="Sweet-Dark-v40"/>
+    <property name="IconThemeName" type="string" value="Sweet-Purple"/>
+  </property>
+  <property name="Gtk" type="empty">
+    <property name="CursorThemeName" type="string" value="RareAeroW7"/>
+    <property name="MonospaceFontName" type="string" value="Fira Code Light 12"/>
+  </property>
+</channel>
