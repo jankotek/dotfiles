@@ -10,7 +10,8 @@ zypper addlock  $REM
 
 zypper install -y xfce4-session xfce4-appfinder  mousepad  \
      baobab rofi  gitg tig meld  \
-   xfce4-fsguard-plugin xfce4-systemload-plugin  xfce4-taskmanager \
+   xfce4-fsguard-plugin xfce4-systemload-plugin  xfce4-taskmanager  \
+   thunar-plugin-archive \
    fira-code-fonts terminator rofi  xkill catfish seahorse  \
 	libgthread-2_0-0  
 

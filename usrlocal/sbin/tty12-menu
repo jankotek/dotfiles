@@ -43,6 +43,9 @@ ps aux --sort=-%cpu | head -n 3 | awk '{printf "%-8s %-6s %-10s %-10s %-40.40s\n
   echo -e "\e[96m==== ROUTE ====\e[0m"
   ip route
 
+  echo ""
+  echo -e "\e[96m==== SYSTEMD ====\e[0m"
+  systemctl status| head -n 4
 
   echo ""
   echo ""

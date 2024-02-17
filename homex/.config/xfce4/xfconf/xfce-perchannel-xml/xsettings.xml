@@ -6,7 +6,7 @@
     <property name="IconThemeName" type="string" value="Sweet-Purple"/>
   </property>
   <property name="Gtk" type="empty">
-    <property name="CursorThemeName" type="string" value="RareAeroW7"/>
+    <property name="CursorThemeName" type="string" value="simple-ring-24"/>
     <property name="MonospaceFontName" type="string" value="Fira Code Light 12"/>
   </property>
 </channel>

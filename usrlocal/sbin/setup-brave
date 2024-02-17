@@ -26,4 +26,4 @@ case $ID in
         ;;
 esac
 
-ln -s /usr/local/bin/brave /usr/bin/brave-browser
+ln -s  /usr/bin/brave-browser /usr/local/bin/brave
