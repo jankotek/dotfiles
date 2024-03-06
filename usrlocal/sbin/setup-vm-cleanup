@@ -2,7 +2,7 @@
 
 SERVICE_FILE_CONTENT="[Unit]
 Description=VM cleanup
-DefaultDependencies=no
+Before=shutdown.target graphical.target
 
 [Service]
 ExecStart=/usr/local/sbin/vm-cleanup
@@ -10,7 +10,7 @@ Type=oneshot
 User=root
 
 [Install]
-WantedBy=multi-user.target"
+WantedBy=default.target"
 
 # Set the service file path
 SERVICE_FILE_PATH="/etc/systemd/system/vm-cleanup.service"

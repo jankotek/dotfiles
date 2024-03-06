@@ -1,10 +1,11 @@
 #!/bin/sh
 
-rm -rf /usr/share/wallpapers
-rm  /usr/bin/xfce4-display-settings
+rm -rf /usr/share/wallpapers/* /usr/share/backgrounds/*
+rm  -f /usr/bin/xfce4-display-settings /usr/bin/tumblerd /usr/lib64/tumbler-1/tumblerd
 
-rm /cleanup-zeros /home/cleanup-zeroes /home/jan/cleanup-zeroes
+rm -f /cleanup-zeros /home/cleanup-zeroes /home/jan/cleanup-zeroes
 
+rm -rf /lib/firmware/*
 
 
 # needed for systemd, otherwise it will show as failed
