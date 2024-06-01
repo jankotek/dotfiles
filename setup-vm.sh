@@ -33,11 +33,11 @@ chown root:root /usr/local/ /etc/systemd/  -R
 chmod 0755 /usr/local/bin/* /home/jan/.local/bin* /home/jan/.local/share/applications/* /usr/local/share/applications/* -R
 chmod 0700 /usr/local/sbin/  -R
 
-/usr/local/sbin/setup-tty11-root
-/usr/local/sbin/setup-tty12-menu
+/usr/local/sbin/setup-systemd-tty11-root
+/usr/local/sbin/setup-systemd-tty12-menu
 /usr/local/sbin/setup-ipv6-disable
 #TODO /usr/local/sbin/setup-sshd-cert-regenerate
-/usr/local/sbin/setup-vm-cleanup
+/usr/local/sbin/setup-systemd-vm-cleanup
 
 
 # opensuse xf86-video-amdgpu
