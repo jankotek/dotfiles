@@ -8,7 +8,7 @@
 tee /etc/systemd/system/tmp-clean.service > /dev/null << EOF
 [Unit]
 Description=Clear /tmp folder on boot
-Before=sysinit.target
+Before=systemd-udev.service
 
 [Service]
 User=root

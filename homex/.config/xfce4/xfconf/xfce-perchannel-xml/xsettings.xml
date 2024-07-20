@@ -6,7 +6,19 @@
     <property name="IconThemeName" type="string" value="Sweet-Purple"/>
   </property>
   <property name="Gtk" type="empty">
-    <property name="CursorThemeName" type="string" value="simple-ring-24"/>
+    <property name="CursorThemeName" type="string" value="DMZhaloG"/>
+    <property name="CursorThemeSize" type="int" value="48"/>
     <property name="MonospaceFontName" type="string" value="Fira Code Light 12"/>
   </property>
+  <property name="Xfce" type="empty">
+    <property name="LastCustomDPI" type="int" value="120"/>
+  </property>
+  <property name="Xft" type="empty">
+    <property name="DPI" type="int" value="120"/>
+    <property name="Antialias" type="int" value="1"/>
+    <property name="Hinting" type="int" value="1"/>
+    <property name="HintStyle" type="string" value="hintslight"/>
+    <property name="RGBA" type="string" value="rgb"/>
+  </property>
+
 </channel>

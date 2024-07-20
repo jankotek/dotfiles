@@ -39,11 +39,18 @@ chmod 0700 /usr/local/sbin/  -R
 #TODO /usr/local/sbin/setup-sshd-cert-regenerate
 /usr/local/sbin/setup-systemd-vm-cleanup
 
+# opensuse xf86-video-amdgpuapt-get remove -y vim-tiny
 
-# opensuse xf86-video-amdgpu
-apt-mark hold xserver-xorg-video-amdgpu xserver-xorg-video-ati  xserver-xorg-video-intel xserver-xorg-video-nouveau xserver-xorg-video-qxl xserver-xorg-video-radeon
+UBUNTUREM="vim-tiny vim-runtime vim-common video-amdgpu  intel-microcode  amd64-microcode  xserver-xorg-video-ati  xserver-xorg-video-intel xserver-xorg-video-nouveau xserver-xorg-video-qxl xserver-xorg-video-radeon linux-firmware tumbler pulseaudio pipewire xfce4-screensaver colord xiccd xscreensaver light-locker yelp"
+apt-get remove -y *firmware* linux-firmware UBUNTUREM
+apt-get autoremove -y
+echo "Package: $UBUNTUREM
+Pin: release *
+Pin-Priority: -1
+" >> /etc/apt/preferences.d/jan-block
 
-apt-mark hold tumbler pulseaudio pipewire xfce4-screensaver colord xiccd xscreensaver light-locker yelp
+
+
 
 SUSEREM="tumbler pulseaudio pipewire pipewire-modules
          xfce4-screensaver colord xiccd xscreensaver light-locker yelp
@@ -52,36 +59,43 @@ SUSEREM="tumbler pulseaudio pipewire pipewire-modules
             patterns-fonts-fonts    patterns-base-documentation patterns-base-sw_management patterns-yast-yast2_basis
             kernel-firmware kernel-firmware-all kernel-default-optional
             gnome-online-accounts gstreamer-plugins-bad gstreamer-plugins-ugly
-            wallpaper-branding-openSUSE"
+            wallpaper-branding-openSUSE ucode-intel ucode-amd cups"
 zypper remove -y $SUSEREM
+zypper remove -y "kernel-firmware*" "ghostscript*" "wicked*"
 zypper addlock $SUSEREM
 
 
 
 # fedora cleanup
-dnf remove -y linux-firmware
+
+FEDORA_EXCLUDE="vim-common emacs joe pipewire lightdm-gtk pipewire tracker  amd-ucode-firmware intel-ucode-firmware  linux-firmware amd-gpu-firmware nvidia-gpu-firmware libertas-firmware atheros-firmware intel-gpu-firmware realtek-firmware"
+dnf remove -y *firmware* *emacs* $FEDORA_EXCLUDE
 echo "
-exclude=vim emacs joe pipewire lightdm-gtk pipewire tracker    linux-firmware
+exclude=$FEDORA_EXCLUDE
 " >> /etc/dnf/dnf.conf
+
+/usr/local/sbin/setup-upgrade
 
 
 PKG="lightdm   xfce4-session   xfce4-panel xfwm4
        thunar  xfce4-appfinder  mousepad       baobab rofi  gitg tig meld
          xfce4-fsguard-plugin xfce4-systemload-plugin  xfce4-taskmanager
           terminator rofi
-       mc htop git-core  fish iftop iotop w3m sshpass ncdu
+       mc htop git-core  fish iftop iotop w3m sshpass ncdu nano
           "
 
-
-apt-get install  -y "$PKG"  \
+apt-get update
+apt-get install  -y $PKG  \
   xserver-xorg-video-vmware xserver-xorg virtualbox-guest-x11 \
   virtualbox-guest-utils x11-utils xfdesktop4 fonts-firacode xarchiver \
-  lightdm-autologin-greeter
+  lightdm-autologin-greeter dconf-cli
+dnf remove -y *firmware* vim-common
 dnf install -y @base-x $PKG xfdesktop  fira-code-fonts \
    virtualbox-guest-additions xorg-x11-drv-vmware default-fonts-core-emoji \
    xfce4-settings xarchiver \
    lightdm-autologin-greeter
 
+zypper remove python3-pip
 zypper install -y $PKG xorg-x11-server fira-code-fonts  \
     virtualbox-guest-tools libgthread-2_0-0 xkill thunar-plugin-archive \
     sysvinit-tools
@@ -109,5 +123,5 @@ find /home/jan/.icons -name 'brave*' -type f -delete
 find /home/jan/.icons -name 'chromium*' -type f -delete
 
 usermod -a -G users jan
-
+usermod -a -G vboxsf jan
 chown jan:users /home/jan -R
