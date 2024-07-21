@@ -1,0 +1,12 @@
+#!/bin/sh
+# change font size
+# also use to double size:
+#     setfont -d
+
+zypper install -y terminus-bitmap-fonts
+
+
+tee /etc/vconsole.conf > /dev/null << EOF
+KEYMAP=us
+FONT=ter-c32n
+EOF
