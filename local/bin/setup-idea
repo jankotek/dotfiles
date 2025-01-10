@@ -1,0 +1,24 @@
+#!/bin/bash
+
+
+set -e
+trap 'echo "Error occurred in: $BASH_COMMAND"; exit 1' ERR
+
+
+IDEA="ideaIC-2024.3.1.1.tar.gz"
+
+IDEA_URL="https://download.jetbrains.com/idea/$IDEA"
+TMP_DIR=$(mktemp -d)
+
+INSTALL_DIR="$HOME/.local/idea"
+
+
+rm -rf "$INSTALL_DIR"
+mkdir "$INSTALL_DIR"
+wget -O- "$IDEA_URL" | tar -xz --C "$INSTALL_DIR" --strip-components=1
+
+rm -rf "$TMP_DIR"
+
+setup-idea-link
+
+echo "IntelliJ IDEA installation completed."

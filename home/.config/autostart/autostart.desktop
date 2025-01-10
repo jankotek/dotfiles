@@ -1,0 +1,20 @@
+[Desktop Entry]
+Comment[en_US]=
+Comment=
+Encoding=UTF-8
+Exec=/home/jan/.local/bin/autostart.sh
+GenericName[en_US]=
+GenericName=
+Hidden=false
+MimeType=
+Name[en_US]=autostart
+Name=autostart
+Path=
+RunHook=0
+StartupNotify=false
+Terminal=false
+TerminalOptions=
+Type=Application
+Version=0.9.4
+X-KDE-SubstituteUID=false
+X-KDE-Username=

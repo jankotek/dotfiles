@@ -1,0 +1,67 @@
+#!/bin/bash
+
+if [ "$1" != "dotfiles" ]; then
+  echo "Removes and masks packages I do not like"
+  echo "Warning, it overwrites and deletes!!"
+  echo "The first parameter must be 'dotfiles'."
+
+  exit 1
+fi
+
+
+# to see largest packages:
+#  dpkg-query -W --showformat='${Installed-Size}\t${Package}\n' | sort -n -r | head -n 20
+#
+
+
+if grep -iq "virtualbox" /sys/class/dmi/id/product_name || grep -iq "virtualbox" /sys/class/dmi/id/bios_vendor; then
+  echo "Running on VirtualBox"
+
+# stuff for virtualbox
+
+apt install -y  \
+  virtualbox-guest-x11 xserver-xorg-video-vmware \
+  terminator rofi mousepad dconf-cli \
+  xfce4-fsguard-plugin  xfce4-taskmanager \
+  w3m mc htop git-core curl powertop fish iftop iotop sshpass ncdu nano mosh \
+  fonts-jetbrains-mono
+
+
+apt purge -y \
+    snapd  xterm\
+    xfce4-screensaver tumbler xscreensaver xfce4-terminal \
+    libwebkit2gtk-*                               \
+    pulseaudio* gstreamer* bluez* pipewire* pavucontrol          \
+    cups*  printer-driver*   \
+    wpasupplicant modemmanager fwupd                \
+    network-manager-gnome                                 \
+    xserver-xorg-video-all                                \
+    memtest86+ mesa-vulkan-drivers  fonts-noto-cjk bind9*
+
+  # firmware not needed on virtualbox
+  rm -rf /usr/lib/firmware
+  jan-systemd-tty11-root
+  jan-systemd-vm-cleanup
+  vm-cleanup
+fi
+
+jan-systemd-tty12-menu
+
+
+apt autoremove -y
+apt clean
+jan-install-starship
+
+#
+# lower case user folders
+#
+cat << EOF >  /etc/xdg/user-dirs.defaults
+DESKTOP_DIR=desk
+DOWNLOAD_DIR=down
+DOCUMENTS_DIR=doc
+TEMPLATES_DIR=doc/templates
+PUBLICSHARE_DIR=media/share
+MUSIC_DIR=media/music
+PICTURES_DIR=media/pic
+VIDEOS_DIR=media/video
+EOF

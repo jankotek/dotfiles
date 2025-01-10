@@ -1,0 +1,15 @@
+#!/usr/bin/python3
+
+import sys
+from pathlib import Path
+
+
+filename = sys.argv[1]
+first = sys.argv[2]
+second = sys.argv[3]
+
+p = Path(filename)
+filecontent = p.read_text()
+filecontent = filecontent.replace(first, second)
+
+p.write_text(filecontent)

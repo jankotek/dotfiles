@@ -1,0 +1,24 @@
+#!/bin/sh
+# change font size
+# also use to double size:
+#     setfont -d
+
+zypper install -y terminus-bitmap-fonts
+apt install -y fonts-terminus
+
+tee /etc/vconsole.conf > /dev/null << EOF
+KEYMAP=us
+FONT=ter-c32n
+EOF
+
+
+
+tee /etc/default/console-setup > /dev/null << EOF
+ACTIVE_CONSOLES="/dev/tty[1-6]"
+CHARMAP="UTF-8"
+CODESET="guess"
+FONTFACE="Terminus"
+FONTSIZE="16x32"
+EOF
+
+setupcon

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Htop
+Comment=htop
+Exec=htop
+Icon=org.xfce.taskmanager
+Path=
+Terminal=true
+StartupNotify=false

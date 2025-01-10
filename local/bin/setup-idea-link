@@ -1,0 +1,36 @@
+#!/bin/bash
+
+BIN_DIR="/usr/local/bin"
+D="/usr/share/applications/idea.desktop"
+
+if [ "$EUID" -ne 0 ]; then
+    BIN_DIR="$HOME/.local/bin"
+    D="$HOME/.local/share/applications/idea.desktop"
+fi
+
+if [ -e "/opt/idea/bin/idea" ]; then
+    INSTALL_DIR=/opt/idea
+elif [ -e "$HOME/.local/idea/bin/idea" ]; then
+    INSTALL_DIR="$HOME/.local/idea"
+else
+    echo "Idea not found!!"
+    exit -1
+fi
+
+
+mkdir $BIN_DIR
+ln -s "$INSTALL_DIR/bin/idea" "$BIN_DIR/idea"
+
+
+echo '[Desktop Entry]' > $D
+echo 'Version=1.0' >> $D
+echo 'Type=Application' >> $D
+echo 'Name=Idea' >> $D
+echo 'Categories=Development;IDE;' >> $D
+echo 'Terminal=false' >> $D
+echo 'StartupNotify=true' >> $D
+echo 'StartupWMClass=jetbrains-idea-ce' >> $D
+echo "Icon=$INSTALL_DIR/bin/idea.png" >> $D
+echo "Exec=\"$INSTALL_DIR/bin/idea\" \%f" >> $D
+
+update-desktop-database

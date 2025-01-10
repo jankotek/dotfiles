@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Network Manager
+Comment=configure network manager
+Exec=nmtui
+Icon=network-server
+Path=
+Terminal=true
+StartupNotify=false
