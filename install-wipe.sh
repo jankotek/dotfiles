@@ -17,13 +17,10 @@ trap 'echo "Error occurred in: $BASH_COMMAND"; exit 1' ERR
 # basedir
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-
 $DIR/install-dotfiles.sh dotfiles
 
-
-cp /home/jan /home/jan-backup -R
-
-cp /root /root-backup -R
+cp /home/jan /home/jan-backup-$(date +%Y-%m-%d-%H%M) -R
+cp /root /root-backup-$(date +%Y-%m-%d-%H%M) -R
 
 rsync -r --delete "$DIR/home/" /home/jan
 rsync -r --delete "$DIR/home-root/" /root
