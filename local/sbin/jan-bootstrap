@@ -9,10 +9,11 @@ if [ "$1" != "dotfiles" ]; then
 fi
 
 
+setup-upgrade
+
 # to see largest packages:
 #  dpkg-query -W --showformat='${Installed-Size}\t${Package}\n' | sort -n -r | head -n 20
 #
-
 
 if grep -iq "virtualbox" /sys/class/dmi/id/product_name || grep -iq "virtualbox" /sys/class/dmi/id/bios_vendor; then
   echo "Running on VirtualBox"
