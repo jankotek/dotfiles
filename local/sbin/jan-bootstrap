@@ -47,6 +47,7 @@ fi
 
 jan-systemd-tty12-menu
 
+jan-install-candy-icons
 
 apt autoremove -y
 apt clean
