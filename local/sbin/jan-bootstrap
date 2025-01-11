@@ -67,3 +67,15 @@ MUSIC_DIR=media/music
 PICTURES_DIR=media/pic
 VIDEOS_DIR=media/video
 EOF
+
+
+#
+# disable boot animations, show text at boot
+#
+simple-file-replace /etc/default/grub "quiet splash" ""
+update-grub
+systemctl mask plymouth-start.service
+systemctl mask plymouth-quit.service
+systemctl mask plymouth-quit-wait.service
+systemctl mask plymouth-read-write.service
+systemctl disable plymouth
