@@ -74,8 +74,9 @@ EOF
 #
 simple-file-replace /etc/default/grub "quiet splash" ""
 update-grub
+systemctl disable plymouth
 systemctl mask plymouth-start.service
 systemctl mask plymouth-quit.service
 systemctl mask plymouth-quit-wait.service
 systemctl mask plymouth-read-write.service
-systemctl disable plymouth
+
