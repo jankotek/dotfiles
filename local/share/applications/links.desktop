@@ -1,7 +1,7 @@
 [Desktop Entry]
 Categories=Network;WebBrowser;
 Comment=Links terminal browser
-Exec=links %u
+Exec=links-helper %u
 GenericName=Links
 Icon=webbrowser-app
 MimeType=
