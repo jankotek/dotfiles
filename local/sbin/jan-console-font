@@ -6,19 +6,13 @@
 zypper install -y terminus-bitmap-fonts
 apt install -y fonts-terminus
 
-tee /etc/vconsole.conf > /dev/null << EOF
-KEYMAP=us
-FONT=ter-c32n
-EOF
-
-
 
 tee /etc/default/console-setup > /dev/null << EOF
-ACTIVE_CONSOLES="/dev/tty[1-6]"
 CHARMAP="UTF-8"
 CODESET="guess"
 FONTFACE="Terminus"
-FONTSIZE="16x32"
+# 6x12, 8x14, 8x16, 10x18, 10x20, 11x22, 12x24, 14x28 and 16x32
+FONTSIZE="10x18"
 EOF
 
 setupcon

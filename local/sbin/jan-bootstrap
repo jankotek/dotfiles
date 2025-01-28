@@ -72,6 +72,7 @@ EOF
 #
 # disable boot animations, show text at boot
 #
-simple-file-replace /etc/default/grub "quiet splash" ""
+simple-file-replace /etc/default/grub "quiet splash" "video=1920x1080"
 update-grub
 systemctl disable plymouth
+jan-console-font
