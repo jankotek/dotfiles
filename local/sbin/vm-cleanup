@@ -4,7 +4,7 @@ rm -rf /usr/share/wallpapers/* /usr/share/backgrounds/* /usr/share/xfce4/backdro
 rm  -f /usr/bin/xfce4-display-settings /usr/bin/tumblerd /usr/lib64/tumbler-1/tumblerd
 
 rm -f /cleanup-zeros /home/cleanup-zeroes /home/jan/cleanup-zeroes
-
+rm -f /swap.img
 rm -rf /lib/firmware/* /usr/lib/firmware/*
 
 rm -rf /usr/share/doc/*

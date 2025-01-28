@@ -1,11 +1,11 @@
 [Desktop Entry]
 Categories=Network;WebBrowser;
-Comment=Opens URL in available browser
-Exec=w3m-helper %u
-GenericName=W3M Web Browser
+Comment=Links terminal browser
+Exec=links %u
+GenericName=Links
 Icon=webbrowser-app
 MimeType=
-Name=W3M Web Browser
+Name=Links
 MimeType=text/html;text/xml;application/xhtml+xml;application/vnd.mozilla.xul+xml;text/mml;application/x-xpinstall;x-scheme-handler/http;x-scheme-handler/https;
 StartupNotify=true
 Terminal=true

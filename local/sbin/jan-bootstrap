@@ -24,7 +24,7 @@ apt install -y  \
   virtualbox-guest-x11 xserver-xorg-video-vmware \
   terminator rofi mousepad dconf-cli \
   xfce4-fsguard-plugin  xfce4-taskmanager \
-  w3m mc htop git-core curl powertop fish iftop iotop sshpass ncdu nano mosh \
+  links mc htop git-core curl powertop fish iftop iotop sshpass ncdu nano mosh \
   fonts-jetbrains-mono
 
 
@@ -37,7 +37,11 @@ apt purge -y \
     wpasupplicant modemmanager fwupd                \
     network-manager-gnome                                 \
     xserver-xorg-video-all                                \
-    memtest86+ mesa-vulkan-drivers  fonts-noto-cjk bind9*
+    memtest86+ mesa-vulkan-drivers fonts-noto-cjk bind9*  \
+    *packagekit* apport* colord* avahi-daemon apparmor  poppler-* \
+    mesa-* libavcodec* libcodec*
+
+  apt-get autoremove -y
 
   # firmware not needed on virtualbox
   rm -rf /usr/lib/firmware
