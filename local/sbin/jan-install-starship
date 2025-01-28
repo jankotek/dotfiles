@@ -6,5 +6,5 @@ dnf install -y  starship
 
 
 if ! command -v starship &> /dev/null; then
-  curl -sS https://starship.rs/install.sh | sh
+  wget -O- https://github.com/starship/starship/releases/latest/download/starship-x86_64-unknown-linux-musl.tar.gz | tar -xz -C /usr/local/bin/
 fi
