@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #
-# Installs sheel with root priviliges on TTY11
+# Installs sheel with root privileges on TTY11
 # Used when sudo is removed, and root password scrambled.
 #
 

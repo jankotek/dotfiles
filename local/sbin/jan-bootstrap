@@ -55,6 +55,7 @@ apt purge -y \
   rm -rf /usr/lib/firmware
   jan-systemd-tty11-root
   jan-systemd-vm-cleanup
+  jan-systemd-disable-wallets
   vm-cleanup
 fi
 
