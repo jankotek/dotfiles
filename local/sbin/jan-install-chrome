@@ -1,12 +1,12 @@
 #!/bin/bash
 
 if command -v rpm &> /dev/null; then
-	CF="/home/jan/.local/chrome.rpm"
+	CF="/tmp/chrome.rpm"
 	wget -O "$CF" "https://dl.google.com/linux/direct/google-chrome-stable_current_x86_64.rpm"
 	rpm -ivh "$CF"
 	rm $CF -f
 elif command -v apt-get &> /dev/null; then
-	CF="/home/jan/.local/chrome.deb"
+	CF="/tmp/chrome.deb"
 	wget -O "$CF" https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
 	apt install -y "$CF"
 	rm $CF -f
