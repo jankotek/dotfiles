@@ -2,7 +2,7 @@
 
 set fish_greeting
 set TERM "xterm-256color"
-set EDITOR "nano"
+set EDITOR "mcedit"
 set VISUAL "mousepad"
 
 ### AUTOCOMPLETE AND HIGHLIGHT COLORS ###

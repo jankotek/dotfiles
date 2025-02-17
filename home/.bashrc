@@ -1,7 +1,7 @@
 # based on Derek Taylor (DistroTube)
 
 export TERM="xterm-256color"
-export EDITOR="nano"
+export EDITOR="mcedit"
 export VISUAL="mousepad"
 
 ### PROMPT
