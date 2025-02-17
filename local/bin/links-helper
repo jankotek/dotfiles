@@ -6,4 +6,4 @@ else
 	url="$1"
 fi 
 
-w3m "$url"
+links "$url"

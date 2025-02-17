@@ -4,7 +4,7 @@
 #     setfont -d
 
 zypper install -y terminus-bitmap-fonts
-apt install -y fonts-terminus
+apt install -y fonts-terminus fonts-terminus-otb
 
 
 tee /etc/default/console-setup > /dev/null << EOF
@@ -15,4 +15,6 @@ FONTFACE="Terminus"
 FONTSIZE="10x18"
 EOF
 
+
+systemctl enable console-setup
 setupcon

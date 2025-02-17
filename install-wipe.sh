@@ -20,14 +20,10 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 $DIR/install-dotfiles.sh dotfiles
 
 cp /home/jan /home/jan-backup-$(date +%Y-%m-%d-%H%M) -R
-cp /root /root-backup-$(date +%Y-%m-%d-%H%M) -R
 
 rsync -r --delete "$DIR/home/" /home/jan
-rsync -r --delete "$DIR/home-root/" /root
+rsync -r "$DIR/home-root/" /root
 
-
-chown jan:users /home/jan/ -R
-chown root:root /root/  -R
 chmod 0700 /root/ /home/jan
 chown jan:users -R /home/jan
 chown root:root -R /root

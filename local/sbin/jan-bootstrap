@@ -9,7 +9,26 @@ if [ "$1" != "dotfiles" ]; then
 fi
 
 
-setup-upgrade
+# setup-upgrade
+
+apt install -y \
+  terminator rofi mousepad dconf-cli \
+  xfce4-fsguard-plugin  xfce4-taskmanager \
+  links mc htop git curl powertop fish iftop iotop sshpass ncdu nano mosh \
+  fonts-jetbrains-mono
+
+apt purge -y \
+  snapd tumbler tumbler* \
+  xfce4-terminal libwebkit2gtk-*  \
+  cups*  printer-driver*   \
+  *packagekit* apport* yelp*
+
+apt-mark hold snapd
+apt-mark hold tumbler
+apt-mark hold yelp
+apt-mark hold cups-browsed
+apt-mark hold cups
+
 
 # to see largest packages:
 #  dpkg-query -W --showformat='${Installed-Size}\t${Package}\n' | sort -n -r | head -n 20
@@ -20,28 +39,17 @@ if grep -iq "virtualbox" /sys/class/dmi/id/product_name || grep -iq "virtualbox"
 
 # stuff for virtualbox
 
-apt install -y  \
-  virtualbox-guest-x11 xserver-xorg-video-vmware \
-  terminator rofi mousepad dconf-cli \
-  xfce4-fsguard-plugin  xfce4-taskmanager \
-  links mc htop git-core curl powertop fish iftop iotop sshpass ncdu nano mosh \
-  fonts-jetbrains-mono
-
+apt install -y  virtualbox-guest-x11 xserver-xorg-video-vmware \
 
 apt purge -y \
-    snapd  xterm\
-    xfce4-screensaver tumbler xscreensaver xfce4-terminal \
-    libwebkit2gtk-*                               \
+    xterm\
+    xfce4-screensaver xscreensaver \                             \
     pulseaudio* gstreamer* bluez* pipewire* pavucontrol          \
-    cups*  printer-driver*   \
-    wpasupplicant modemmanager fwupd                \
     network-manager-gnome                                 \
     xserver-xorg-video-all                                \
     memtest86+ mesa-vulkan-drivers fonts-noto-cjk bind9*  \
-    *packagekit* apport* colord* avahi-daemon apparmor  poppler-* \
+    colord* avahi-daemon apparmor  poppler-* \
     mesa-* libavcodec* libcodec*
-
-  apt-get autoremove -y
 
   # firmware not needed on virtualbox
   rm -rf /usr/lib/firmware
@@ -53,10 +61,8 @@ fi
 jan-systemd-tty12-menu
 
 jan-install-candy-icons
-
-apt autoremove -y
-apt clean
 jan-install-starship
+
 
 #
 # lower case user folders
@@ -77,6 +83,10 @@ EOF
 # disable boot animations, show text at boot
 #
 simple-file-replace /etc/default/grub "quiet splash" "video=1920x1080"
+print "# 1024x768  1280x720    1600x900   2560×1600   2560x1440   3840x2160" >> /etc/default/grub
 update-grub
 systemctl disable plymouth
 jan-console-font
+
+apt autoremove -y
+apt clean
