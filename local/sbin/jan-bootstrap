@@ -56,6 +56,7 @@ apt purge -y \
   jan-systemd-tty11-root
   jan-systemd-vm-cleanup
   jan-systemd-disable-wallets
+  usermod -aG vboxsf jan
   vm-cleanup
 fi
 
