@@ -1,0 +1,108 @@
+#!/usr/bin/python3
+
+#
+# finds Brave bookmarks in all profiles, and opens Rofi to select one.
+# then it opens Brave with correct profile
+#
+# author Jan Kotek, https://github.com/jankotek/dotfiles/
+# based on https://github.com/elle-the-dev/rofi-browser-bookmarks/tree/master/rofi_browser_bookmarks
+
+from os import path
+from pathlib import Path
+import json
+from subprocess import check_output, run, STDOUT
+from subprocess import CalledProcessError
+from sys import argv
+import os
+import csv
+from re import sub
+
+def parse(file_path,profile) -> str:
+    if file_path is None:
+        bookmarks_path = path.expanduser("~") + "/.config/google-chrome/Default/Bookmarks"
+    else:
+        bookmarks_path = path.expanduser(file_path)
+
+
+    if not path.isfile(bookmarks_path):
+        print("No bookmarks file found!")
+        exit()
+
+    print("Found file: "+bookmarks_path)
+
+    bookmarks_json = Path(bookmarks_path).read_text()
+    bookmarks = json.loads(bookmarks_json)
+
+    options = ""
+    for key,item in bookmarks['roots'].items():
+         options = options+process(item, profile)
+
+    return options
+
+def process(node,profile) -> str:
+    options=""
+    if('url' in node):
+        options = options + node['name'] + "\t" + node['url'] + "\t" + profile+ "\n"
+
+
+    if('children' in node):
+       for item in node['children']:
+          options = options + process(item, profile)
+    return options
+
+class FormatColumns:
+    _colors: dict = {}
+
+    def format(self, data: str, colors: list=[]) -> str:
+        data = self.__remove_blank_lines(data)
+        table = [list(map(str.strip, row.split('\t'))) for row in data.strip().split("\n")]
+        max_column_lengths = [max(len(str(cell)) for cell in line) for line in zip(*table)]
+
+        out: str = ""
+        for row in table:
+            line = ""
+            for i in range(len(max_column_lengths)):
+                col = "{: <"+str(max_column_lengths[i])+"}"
+                line += col + "\t"
+            out += line.format(*row).strip()+"\n"
+
+        return out
+
+    def __remove_blank_lines(self, string: str) -> str:
+        return sub(r'(?m)^\n?', '', ''.join(string))
+
+
+
+
+parsed = ""
+
+user_home = os.path.expanduser("~")
+brave_dir = user_home+"/.config/BraveSoftware/Brave-Browser/"
+
+subdirectories = [d for d in os.listdir(brave_dir) if os.path.isdir(os.path.join(brave_dir, d))]
+
+# Iterate over each profile
+for subdirectory in subdirectories:
+    # Check if the 'Bookmarks' file exists in the subdirectory
+    bookmarks_file_path = os.path.join(brave_dir, subdirectory, 'Bookmarks')
+
+    if not os.path.isfile(bookmarks_file_path):
+        # Skip the current subdirectory, it is not a profile!
+        continue
+
+
+    profile = os.path.basename(subdirectory)
+    absolute_bookmarks_path = os.path.abspath(bookmarks_file_path)
+    found = parse(profile=profile, file_path=absolute_bookmarks_path)
+    count=found.count("\n")
+    print(f"Found {count} bookmarks in {absolute_bookmarks_path}")
+
+    parsed = parsed + found
+
+options = FormatColumns().format(parsed)
+
+selection = check_output(['rofi', '-i', '-dmenu'], input=options.encode()).decode().strip()
+url = selection.split('\t')[1]
+profile = selection.split('\t')[2]
+run(["brave-browser", "--profile-directory="+profile,url])
+
