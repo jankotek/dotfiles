@@ -9,7 +9,7 @@ useradd \
 
 mkdir /home/ollamaui
 mkdir /home/ollamaui/bin
-chown ollama -R /home/ollamaui
+chown ollamaui -R /home/ollamaui
 chmod 0700  /home/ollamaui
 
 
