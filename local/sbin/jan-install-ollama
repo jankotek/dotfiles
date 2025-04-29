@@ -12,9 +12,11 @@ chown ollama /home/ollama
 chmod 0700  /home/ollama
 
 
-wget -O-  https://github.com/ollama/ollama/releases/download/v0.6.7-rc0/ollama-linux-amd64.tgz | tar -xz -C /usr/local
+mkdir /opt/ollama
+wget -O-  https://ollama.com/download/ollama-linux-amd64.tgz | tar -xz -C /opt/ollama
 
-
+rm  /usr/local/bin/ollama
+ln -s /opt/ollama/bin/ollama /usr/local/bin/ollama
 
 SERVICE_FILE_CONTENT="
 [Unit]
@@ -22,7 +24,7 @@ Description=Ollama Service
 After=network-online.target
 
 [Service]
-ExecStart=/usr/local/bin/ollama serve
+ExecStart=/opt/ollama/bin/ollama serve
 User=ollama
 Group=ollama
 Restart=always
