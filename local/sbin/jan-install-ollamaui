@@ -45,3 +45,8 @@ systemctl enable ollamaui.service
 systemctl start ollamaui.service
 
 systemctl status ollamaui.service
+
+echo ""
+echo ""
+echo "Ollama UI: http://127.0.0.1:45033/"
+
