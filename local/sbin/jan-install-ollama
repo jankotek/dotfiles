@@ -5,7 +5,7 @@ useradd \
     --home-dir /home/ollama \
     --shell /usr/sbin/nologin \
     --comment "Ollama Service Account" \
-    olama
+    ollama
 
 mkdir /home/ollama
 chown ollama /home/ollama

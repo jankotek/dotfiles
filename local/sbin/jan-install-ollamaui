@@ -5,7 +5,7 @@ useradd \
     --home-dir /home/ollamaui \
     --shell /usr/sbin/nologin \
     --comment "Ollama UI" \
-    olama
+    ollamauiama
 
 mkdir /home/ollamaui
 mkdir /home/ollamaui/bin
