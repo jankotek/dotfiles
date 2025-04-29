@@ -1,0 +1,46 @@
+#!/bin/sh
+
+useradd \
+    --system \
+    --home-dir /home/ollama \
+    --shell /usr/sbin/nologin \
+    --comment "Ollama Service Account" \
+    olama
+
+mkdir /home/ollama
+chown ollama /home/ollama
+chmod 0700  /home/ollama
+
+
+wget -O-  https://github.com/ollama/ollama/releases/download/v0.6.7-rc0/ollama-linux-amd64.tgz | tar -xz -C /usr/local
+
+
+
+SERVICE_FILE_CONTENT="
+[Unit]
+Description=Ollama Service
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/ollama serve
+User=ollama
+Group=ollama
+Restart=always
+RestartSec=3
+Environment="PATH=/sbin:/usr/sbin:/usr/local/sbin:/root/bin:/usr/local/bin:/usr/bin:/bin"
+
+[Install]
+WantedBy=default.target
+"
+
+# Set the service file path
+SERVICE_FILE_PATH="/etc/systemd/system/ollama.service"
+
+# Echo the service file content to the file
+echo "$SERVICE_FILE_CONTENT" | tee "$SERVICE_FILE_PATH" > /dev/null
+
+# Enable and start the service
+systemctl enable ollama.service
+systemctl start ollama.service
+
+systemctl status ollama.service
