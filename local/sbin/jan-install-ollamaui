@@ -1,0 +1,47 @@
+#!/bin/sh
+
+useradd \
+    --system \
+    --home-dir /home/ollamaui \
+    --shell /usr/sbin/nologin \
+    --comment "Ollama UI" \
+    olama
+
+mkdir /home/ollamaui
+mkdir /home/ollamaui/bin
+chown ollama -R /home/ollamaui
+chmod 0700  /home/ollamaui
+
+
+pip install --prefix /home/ollamaui/bin open-webui
+
+
+
+SERVICE_FILE_CONTENT="
+[Unit]
+Description=Ollama WebUI Service
+After=network-online.target
+
+[Service]
+ExecStart==/home/ollamaui/bin/open-webui serve --port 45033
+User=ollamaui
+Group=ollamaui
+Restart=always
+RestartSec=3
+Environment="PATH=/sbin:/usr/sbin:/usr/local/sbin:/root/bin:/usr/local/bin:/usr/bin:/bin"
+
+[Install]
+WantedBy=default.target
+"
+
+# Set the service file path
+SERVICE_FILE_PATH="/etc/systemd/system/ollamaui.service"
+
+# Echo the service file content to the file
+echo "$SERVICE_FILE_CONTENT" | tee "$SERVICE_FILE_PATH" > /dev/null
+
+# Enable and start the service
+systemctl enable ollamaui.service
+systemctl start ollamaui.service
+
+systemctl status ollamaui.service
