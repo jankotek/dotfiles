@@ -13,9 +13,9 @@ chown ollamaui -R /home/ollamaui
 chmod 0700  /home/ollamaui
 
 
-sudo -u ollamaui pip install --prefix /home/ollamaui/bin open-webui
+sudo -u ollamaui pip install --break-system-packages open-webui
 
-
+PORT=45033
 
 SERVICE_FILE_CONTENT="
 [Unit]
@@ -23,7 +23,7 @@ Description=Ollama WebUI Service
 After=network-online.target
 
 [Service]
-ExecStart==/home/ollamaui/bin/open-webui serve --port 45033
+ExecStart=/home/ollamaui/.local/bin/open-webui serve --port $PORT
 User=ollamaui
 Group=ollamaui
 Restart=always
@@ -48,5 +48,5 @@ systemctl status ollamaui.service
 
 echo ""
 echo ""
-echo "Ollama UI: http://127.0.0.1:45033/"
+echo "Ollama UI: http://127.0.0.1:$PORT/"
 
