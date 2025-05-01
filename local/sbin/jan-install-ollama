@@ -45,4 +45,4 @@ echo "$SERVICE_FILE_CONTENT" | tee "$SERVICE_FILE_PATH" > /dev/null
 systemctl enable ollama.service
 systemctl start ollama.service
 
-systemctl status ollama.service
+systemctl status ollama.service  | grep "Active:"

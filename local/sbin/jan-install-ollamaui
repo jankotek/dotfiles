@@ -44,7 +44,7 @@ echo "$SERVICE_FILE_CONTENT" | tee "$SERVICE_FILE_PATH" > /dev/null
 systemctl enable ollamaui.service
 systemctl start ollamaui.service
 
-systemctl status ollamaui.service
+systemctl status ollamaui.service | grep "Active:"
 
 echo ""
 echo ""
