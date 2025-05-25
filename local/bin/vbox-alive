@@ -1,0 +1,27 @@
+#!/bin/bash
+VM_NAME="$1"
+WAIT_SECONDS=10  # Time to wait after starting
+
+set -euo pipefail; trap 'echo >&2 "${BASH_SOURCE[0]}:${BASH_LINENO[0]}: Command \`$BASH_COMMAND\` failed with exit code $?"; exit $?' ERR
+
+# Check if VM is already running
+if VBoxManage list runningvms | grep -q "\"$VM_NAME\""; then
+    echo "VM $VM_NAME is already running"
+    exit 0
+fi
+
+# Start the VM if not running
+echo "Starting $VM_NAME..."
+VBoxManage startvm "$VM_NAME"
+
+# Wait before checking again
+sleep $WAIT_SECONDS
+
+# Final status check
+if VBoxManage list runningvms | grep -q "\"$VM_NAME\""; then
+    echo "VM $VM_NAME started successfully"
+    exit 0
+else
+    echo "Failed to start $VM_NAME" >&2
+    exit 1
+fi

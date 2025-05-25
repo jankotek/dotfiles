@@ -4,7 +4,6 @@ if [ "$1" != "dotfiles" ]; then
   echo "Updates dotfiles in /usr/local and /home/jan "
   echo "Warning, it overwrites and deletes!!"
   echo "The first parameter must be 'dotfiles'."
-
   exit 1
 fi
 
