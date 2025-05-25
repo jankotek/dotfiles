@@ -6,6 +6,7 @@ USER=$1
 VM=$2
 VMDIR=$(dirname "$(VBoxManage showvminfo "$VM" --machinereadable | grep 'CfgFile=' | cut -d'"' -f2)")
 PORTFILE=$VMDIR/sshport.txt
+PWFILE=$VMDIR/pw-$USER.txt
 
 
 if [ ! -f "$PORTFILE" ]; then
@@ -13,9 +14,11 @@ if [ ! -f "$PORTFILE" ]; then
   exit 1
 fi
 
-PORT=$(cat "$PORTFILE")
+if [ ! -f "$PWFILE" ]; then
+  echo "Error: Password file '$PWFILE' does not exist!" >&2
+  exit 1
+fi
 
-vbox-alive "$VM"
-
+PORT=$(cat $PORTFILE)
 echo "ssh -t -p $PORT $USER@localhost ${@:3}"
-ssh -t -p $PORT $USER@localhost ${@:3}
+sshpass -f "$PWFILE" ssh -p $PORT "$USER@localhost" ${@:3}
