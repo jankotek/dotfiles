@@ -13,7 +13,7 @@ chown ollamaui -R /home/ollamaui
 chmod 0700  /home/ollamaui
 
 
-sudo -u ollamaui pip install --break-system-packages open-webui
+sudo -u ollamaui pip install --break-system-packages open-webui hf_xet
 
 PORT=45033
 
@@ -23,12 +23,14 @@ Description=Ollama WebUI Service
 After=network-online.target
 
 [Service]
+WorkingDirectory=/home/ollamaui
 ExecStart=/home/ollamaui/.local/bin/open-webui serve --port $PORT
 User=ollamaui
 Group=ollamaui
 Restart=always
 RestartSec=3
-Environment="PATH=/sbin:/usr/sbin:/usr/local/sbin:/root/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PATH=/usr/local/bin:/usr/bin:/bin:/home/ollamaui/.local/bin"
+Environment="HOME=/home/ollamaui"
 
 [Install]
 WantedBy=default.target

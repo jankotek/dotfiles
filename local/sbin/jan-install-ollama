@@ -24,13 +24,14 @@ Description=Ollama Service
 After=network-online.target
 
 [Service]
+WorkingDirectory=/home/ollama
 ExecStart=/opt/ollama/bin/ollama serve
 User=ollama
 Group=ollama
 Restart=always
 RestartSec=3
-Environment="PATH=/sbin:/usr/sbin:/usr/local/sbin:/root/bin:/usr/local/bin:/usr/bin:/bin"
-
+Environment="PATH=/usr/local/bin:/usr/bin:/bin:/opt/ollama/bin"
+Environment="HOME=/home/ollama"
 [Install]
 WantedBy=default.target
 "

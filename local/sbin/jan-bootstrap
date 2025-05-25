@@ -92,3 +92,9 @@ jan-console-font
 
 apt autoremove -y
 apt clean
+
+#
+# Lightdm needs this group for autologin?
+#
+groupadd -r autologin
+useradd -m -G autologin  jan

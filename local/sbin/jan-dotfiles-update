@@ -8,11 +8,9 @@ if [ "$1" != "dotfiles" ]; then
   exit 1
 fi
 
-set -e
-trap 'echo "Error occurred in: $BASH_COMMAND"; exit 1' ERR
+set -euo pipefail; trap 'echo >&2 "${BASH_SOURCE[0]}:${BASH_LINENO[0]}: Command \`$BASH_COMMAND\` failed with exit code $?"; exit $?' ERR
 
 rm -rf /tmp/dotfiles-main
-wget -O- https://github.com/jankotek/dotfiles/archive/refs/heads/main.tar.gz | tar -xz -C /tmp
-
+wget  --no-verbose  -O- https://github.com/jankotek/dotfiles/archive/refs/heads/main.tar.gz | tar -xz -C /tmp
 bash /tmp/dotfiles-main/install-dotfiles.sh dotfiles
 
