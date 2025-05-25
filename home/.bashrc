@@ -36,8 +36,6 @@ shopt -s histappend # do not overwrite history
 shopt -s expand_aliases # expand aliases
 shopt -s checkwinsize # checks term size when bash regains control
 
-#ignore upper and lowercase when TAB completion
-bind "set completion-ignore-case on"
 
 ### COUNTDOWN   
 
