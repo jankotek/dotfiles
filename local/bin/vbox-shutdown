@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VM=$1
+VM="$1"
 
 # Send ACPI shutdown signal
 VBoxManage controlvm "$VM" acpipowerbutton
