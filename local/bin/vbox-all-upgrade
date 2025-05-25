@@ -15,8 +15,6 @@ VBoxManage list vms | while IFS= read -r line; do
     echo "== Upgrade $VM"
     vbox-live "$VM"
     vbox-ssh root "$VM" setup-upgrade
-    VBoxManage controlvm "$VM" acpipowerbutton
-
     vbox-shutdown "$VM"
 
 done
