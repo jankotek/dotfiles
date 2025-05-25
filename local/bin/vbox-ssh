@@ -20,5 +20,6 @@ if [ ! -f "$PWFILE" ]; then
 fi
 
 PORT=$(cat $PORTFILE)
+echo -e "\e]0;vbox-ssh '$VM' ${@:3}\a" # set terminal title
 echo "ssh -t -p $PORT $USER@localhost ${@:3}"
 sshpass -f "$PWFILE" ssh -p $PORT "$USER@localhost" ${@:3}
