@@ -49,7 +49,7 @@ fi
 
 
 echo "== CLONE"
-VBoxManage clonevm $SOURCE_VM --snapshot=base  --options=Link    --name="$TARGET_VM"  --register
+VBoxManage clonevm $SOURCE_VM --snapshot=base    --name="$TARGET_VM"  --register
 TARGET_CFG_FILE=$(VBoxManage showvminfo "$TARGET_VM" --machinereadable | grep "CfgFile=" | cut -d '"' -f2)
 TARGET_DIR=$(dirname "$TARGET_CFG_FILE")
 
