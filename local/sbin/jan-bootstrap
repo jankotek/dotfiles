@@ -8,7 +8,7 @@ if [ "$1" != "dotfiles" ]; then
   exit 1
 fi
 
-
+apt-get  update
 # setup-upgrade
 
 apt install -y \
