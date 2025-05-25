@@ -50,6 +50,7 @@ apt purge -y \
     memtest86+ mesa-vulkan-drivers fonts-noto-cjk bind9*  \
     colord* avahi-daemon apparmor  poppler-* \
     mesa-* libavcodec* libcodec*
+  apt-mark hold xfce4-screensaver
 
   # firmware not needed on virtualbox
   rm -rf /usr/lib/firmware
