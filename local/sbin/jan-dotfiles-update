@@ -14,3 +14,4 @@ rm -rf /tmp/dotfiles-main
 wget  --no-verbose  -O- https://github.com/jankotek/dotfiles/archive/refs/heads/main.tar.gz | tar -xz -C /tmp
 bash /tmp/dotfiles-main/install-dotfiles.sh dotfiles
 
+echo "== dotfiles updated"
