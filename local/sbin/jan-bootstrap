@@ -8,6 +8,14 @@ if [ "$1" != "dotfiles" ]; then
   exit 1
 fi
 
+block-pkg() {
+   for PKG in "$@"; do
+     FILE="/etc/apt/preferences.d/block-$PKG.pref"
+     echo -e "Package: $PKG\nPin: release *\nPin-Priority: -1\n" >> "$FILE"
+     echo "== blocked $PKG"
+   done
+}
+
 apt-get  update
 # setup-upgrade
 
@@ -17,18 +25,18 @@ apt install -y \
   links mc htop git curl powertop fish iftop iotop sshpass ncdu nano mosh \
   fonts-jetbrains-mono
 
-apt purge -y \
-  snapd tumbler tumbler* \
-  xfce4-terminal libwebkit2gtk-*  \
-  cups*  printer-driver*   \
-  *packagekit* apport* yelp*
+apt purge -y  snapd
+apt purge -y  tumbler
+apt purge -y  tumbler*
+apt purge -y  xfce4-terminal
+apt purge -y  libwebkit2gtk-*
+apt purge -y  cups*
+apt purge -y  printer-driver*
+apt purge -y   *packagekit*
+apt purge -y  apport*
+apt purge -y  yelp*
 
-apt-mark hold snapd
-apt-mark hold tumbler
-apt-mark hold yelp
-apt-mark hold cups-browsed
-apt-mark hold cups
-
+block-pkg snapd tumbler yelp cups-browsed cups
 
 # to see largest packages:
 #  dpkg-query -W --showformat='${Installed-Size}\t${Package}\n' | sort -n -r | head -n 20
@@ -39,18 +47,31 @@ if grep -iq "virtualbox" /sys/class/dmi/id/product_name || grep -iq "virtualbox"
 
 # stuff for virtualbox
 
-apt install -y  virtualbox-guest-x11 xserver-xorg-video-vmware \
+apt install -y  virtualbox-guest-x11 xserver-xorg-video-vmware
 
-apt purge -y \
-    xterm\
-    xfce4-screensaver xscreensaver \                             \
-    pulseaudio* gstreamer* bluez* pipewire* pavucontrol          \
-    network-manager-gnome                                 \
-    xserver-xorg-video-all                                \
-    memtest86+ mesa-vulkan-drivers fonts-noto-cjk bind9*  \
-    colord* avahi-daemon apparmor  poppler-* \
-    mesa-* libavcodec* libcodec*
-  apt-mark hold xfce4-screensaver
+apt purge -y xterm
+apt purge -y xfce4-screensaver
+apt purge -y xscreensaver
+apt purge -y pulseaudio*
+apt purge -y pulseaudio*
+apt purge -y gstreamer*
+apt purge -y bluez*
+apt purge -y pipewire*
+apt purge -y pavucontrol
+apt purge -y network-manager-gnome
+apt purge -y xserver-xorg-video-all
+apt purge -y memtest86+
+apt purge -y mesa-vulkan-drivers
+apt purge -y fonts-noto-cjk
+apt purge -y bind9*
+apt purge -y colord*
+apt purge -y avahi-daemon
+apt purge -y apparmor
+apt purge -y poppler-*
+apt purge -y libavcodec*
+apt purge -y libcodec*
+
+  block-pkg xfce4-screensaver
 
   # firmware not needed on virtualbox
   rm -rf /usr/lib/firmware
