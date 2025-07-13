@@ -1,0 +1,67 @@
+#!/bin/bash
+
+# Exit immediately on any error
+set -e
+
+# Get current running kernel
+CURRENT_KERNEL=$(uname -r)
+
+# Get installed kernels (linux-image-* packages)
+INSTALLED_KERNELS=$(dpkg -l | awk '/^ii[[:blank:]]+linux-image-[0-9]/{print $2}' | sed 's/linux-image-//')
+
+# Count installed kernels
+KERNEL_COUNT=$(echo "$INSTALLED_KERNELS" | wc -w)
+
+# Exit if not exactly two kernels
+if [ "$KERNEL_COUNT" -ne 2 ]; then
+    echo "Found $KERNEL_COUNT installed kernels. This script requires exactly two."
+    exit 0
+fi
+
+# Identify the non-current kernel
+OTHER_KERNEL=$(echo "$INSTALLED_KERNELS" | grep -v "$CURRENT_KERNEL")
+
+# Verify we have exactly one other kernel
+OTHER_COUNT=$(echo "$OTHER_KERNEL" | wc -w)
+if [ "$OTHER_COUNT" -ne 1 ]; then
+    echo "Error: Expected one other kernel, found $OTHER_COUNT."
+    exit 1
+fi
+
+# Compare versions (using sort -V for version sorting)
+SORTED=$(printf "%s\n%s" "$CURRENT_KERNEL" "$OTHER_KERNEL" | sort -V)
+OLDEST=$(echo "$SORTED" | head -n1)
+
+# Exit if the other kernel is not older
+if [ "$OLDEST" != "$OTHER_KERNEL" ]; then
+    echo "The other kernel ($OTHER_KERNEL) is newer. Not removed."
+    exit 0
+fi
+
+# Build package list for removal
+REMOVE_PKGS=""
+for pkg_base in linux-image linux-headers; do
+    pkg_full="${pkg_base}-${OTHER_KERNEL}"
+    if dpkg -l "$pkg_full" &>/dev/null; then
+        REMOVE_PKGS+=" $pkg_full"
+    fi
+
+    # Check for extra package (only for image)
+    if [ "$pkg_base" = "linux-image" ]; then
+        pkg_extra="${pkg_base}-extra-${OTHER_KERNEL}"
+        if dpkg -l "$pkg_extra" &>/dev/null; then
+            REMOVE_PKGS+=" $pkg_extra"
+        fi
+    fi
+done
+
+# Exit if no packages found
+if [ -z "$REMOVE_PKGS" ]; then
+    echo "No packages found for kernel $OTHER_KERNEL."
+    exit 0
+fi
+
+# Perform removal
+echo "Removing older kernel packages:$REMOVE_PKGS"
+sudo apt-get purge -y $REMOVE_PKGS
+echo "Successfully removed kernel: $OTHER_KERNEL"

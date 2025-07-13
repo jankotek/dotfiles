@@ -1,0 +1,19 @@
+#!/bin/bash
+
+VM="$1"
+
+# Send ACPI shutdown signal
+VBoxManage controlvm "$VM" acpipowerbutton
+
+# Wait for the VM to shutdown
+echo "Waiting for $VM to power off..."
+while true; do
+
+    STATE=$(VBoxManage showvminfo "$VM" --machinereadable | grep 'VMState=' | cut -d'"' -f2)
+    if [ "$STATE" = "poweroff" ]; then
+        echo "VM $VM is powered off."
+        exit 0
+    fi
+    sleep 1
+    VBoxManage controlvm "$VM" acpipowerbutton
+done

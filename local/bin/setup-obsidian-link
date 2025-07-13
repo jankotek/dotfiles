@@ -1,0 +1,38 @@
+#!/bin/bash
+
+BIN_DIR="/usr/local/bin"
+D="/usr/share/applications/obsidian.desktop"
+
+if [ "$EUID" -ne 0 ]; then
+    BIN_DIR="$HOME/.local/bin"  
+    D="$HOME/.local/share/applications/obsidian.desktop"
+fi
+
+if [ -e "/opt/obsidian/obsidian" ]; then
+    INSTALL_DIR=/opt/idea
+elif [ -e "$HOME/.local/obsidian/obsidian" ]; then
+    INSTALL_DIR="$HOME/.local/obsidian"
+else
+    echo "Obisidian not found!!"
+    exit -1
+fi
+
+
+mkdir $BIN_DIR
+ln -s "$INSTALL_DIR/obsidian" "$BIN_DIR/obsidian"
+
+
+echo '[Desktop Entry]' > $D
+echo 'Version=1.0' >> $D
+echo 'Type=Application' >> $D
+echo 'Name=Obsidian' >> $D
+echo 'Categories=Office' >> $D
+echo 'Terminal=false' >> $D    
+echo 'StartupNotify=true' >> $D   
+echo 'StartupWMClass=obsidian' >> $D
+echo "Icon=obsidian" >> $D
+echo "Exec=$INSTALL_DIR/obsidian %u" >> $D
+
+update-desktop-database
+
+

@@ -1,0 +1,52 @@
+#!/bin/bash
+
+# fail on any errors
+set -euo pipefail
+trap 'echo "Error occurred in: $BASH_COMMAND"; exit 1' ERR
+
+# Check if VM name is provided
+if [ $# -lt 1 ]; then
+    echo "Usage: $0 <vm-name> [username]"
+    exit 1
+fi
+
+VM_NAME="$1"
+USERNAME="${2:-$USER}"  # Use second parameter or current user
+
+
+# Get VM config path
+CFG_FILE=$(VBoxManage showvminfo "$VM_NAME" --machinereadable | awk -F'"' '/^CfgFile=/ {print $2}')
+if [ -z "$CFG_FILE" ]; then
+    echo "ERROR: Virtual machine '$VM_NAME' not found"
+    exit 1
+fi
+
+VM_DIR=$(dirname "$CFG_FILE")
+
+# Check VM state
+VM_STATE=$(VBoxManage showvminfo "$VM_NAME" --machinereadable | awk -F'"' '/^VMState=/ {print $2}')
+if [ "$VM_STATE" != "running" ]; then
+    echo "ERROR: VM '$VM_NAME' is not running (current state: $VM_STATE)"
+    exit 1
+fi
+
+# Check required files
+PORT_FILE="$VM_DIR/sshport.txt"
+PW_FILE="$VM_DIR/pw-$USERNAME.txt"
+
+for file in "$PORT_FILE" "$PW_FILE"; do
+    if [ ! -f "$file" ]; then
+        echo "ERROR: Required file missing: $file"
+        exit 1
+    fi
+done
+
+# Read SSH port
+PORT=$(<"$PORT_FILE")
+if ! [[ "$PORT" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: Invalid port number in $PORT_FILE"
+    exit 1
+fi
+
+# Connect via SSH
+sshpass -f "$PW_FILE" ssh -p "$PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$USERNAME@localhost"

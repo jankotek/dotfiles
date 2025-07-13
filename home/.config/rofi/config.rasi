@@ -1,0 +1,9 @@
+
+@theme "/usr/share/rofi/themes/DarkBlue.rasi"
+
+configuration {
+modi: "window,drun,run,ssh,combi";
+combi-modi: "window,drun";
+show-icons: true;
+
+}

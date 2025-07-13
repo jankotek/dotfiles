@@ -1,0 +1,18 @@
+#!/bin/bash
+
+if command -v rpm &> /dev/null; then
+	CF="/tmp/vivaldi.rpm"
+	wget -O "$CF" https://downloads.vivaldi.com/stable/vivaldi-stable.x86_64.rpm
+	rpm -ivh "$CF"
+	rm $CF -f
+elif command -v apt-get &> /dev/null; then
+	CF="/tmp/vivaldi.deb"
+	wget -O "$CF" https://downloads.vivaldi.com/stable/vivaldi-stable_amd64.deb
+	apt install -y "$CF"
+	rm $CF -f
+else
+  echo "Unsupported distribution"
+  exit 1
+fi
+
+echo "Vivaldi installed successfully"

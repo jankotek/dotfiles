@@ -1,0 +1,36 @@
+#!/bin/bash
+
+# do not install error trap, starship is not on ubuntu
+
+if command -v starship >/dev/null 2>&1; then
+    echo "starship is already installed"
+    exit 0
+fi
+
+
+if command -v apt-get >/dev/null 2>&1; then
+  apt-get install -y starship
+fi
+
+if command -v apt >/dev/null 2>&1; then
+  apt install -y starship
+fi
+
+if command -v zypper >/dev/null 2>&1; then
+  zypper install -y  starship
+fi
+
+if command -v dnf >/dev/null 2>&1; then
+  dnf install -y  starship
+fi
+
+if ! command -v starship &> /dev/null; then
+  wget  --no-verbose -O- https://github.com/starship/starship/releases/latest/download/starship-x86_64-unknown-linux-musl.tar.gz | tar -xz -C /usr/local/bin/
+fi
+
+
+# Final verification
+if ! command -v starship >/dev/null 2>&1; then
+    echo "Error: starship installation failed - no package manager found or installation unsuccessful" >&2
+    exit 1
+fi

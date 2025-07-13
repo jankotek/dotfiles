@@ -1,0 +1,26 @@
+#!/bin/bash
+
+# Check if exactly one argument is provided
+if [ $# -ne 1 ]; then
+    echo "Usage: $0 <image_file>"
+    exit 1
+fi
+
+input_file="$1"
+
+# Check if file exists
+if [ ! -f "$input_file" ]; then
+    echo "Error: File '$input_file' does not exist."
+    exit 1
+fi
+
+# Check if mogrify is available
+if ! command -v mogrify &> /dev/null; then
+    echo "Error: ImageMagick (mogrify) is required but not installed."
+    exit 1
+fi
+
+# Process the image:
+# -resize '1000x1000>' = resize only if larger than 1000x1000, maintain aspect ratio
+# -strip = remove all metadata including EXIF
+mogrify -resize '1000x1000>' -strip "$input_file"

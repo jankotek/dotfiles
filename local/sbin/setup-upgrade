@@ -1,0 +1,37 @@
+#!/bin/bash
+
+if [ "$EUID" -ne 0 ]; then
+  echo "Please run as root"
+  exit 1
+fi
+
+# suse
+if command -v zypper &> /dev/null; then
+  zypper --non-interactive update
+
+# fedora
+elif command -v dnf &> /dev/null; then
+  dnf -y update
+
+# debian/ubuntu
+elif command -v apt-get &> /dev/null; then
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update
+  apt-get -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" dist-upgrade -y
+  apt-get autoremove -y
+  apt-get clean
+
+elif command -v apt &> /dev/null; then
+  # termux and some other distros
+  apt upgrade -y
+
+else
+  echo "Unsupported distribution"
+  exit 1
+fi
+
+if command -v jan-dotfiles-update &> /dev/null; then
+  jan-dotfiles-update dotfiles
+fi
+
+echo "== System updated successfully =="

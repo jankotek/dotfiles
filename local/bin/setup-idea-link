@@ -1,0 +1,37 @@
+#!/bin/bash
+
+# fail on any errors
+set -euo pipefail
+trap 'echo >&2 "${BASH_SOURCE[0]}:${BASH_LINENO[0]}: Command \`$BASH_COMMAND\` failed with exit code $?"; exit $?' ERR
+
+
+BIN_DIR="$HOME/.local/bin"
+D="$HOME/.local/share/applications/idea.desktop"
+INSTALL_DIR="$HOME/.local/idea"
+
+
+if [ ! -e "$INSTALL_DIR/bin/idea" ]; then
+  echo "Error: Idea not installed!" >&2
+  exit 1
+fi
+
+
+# cleanup
+mkdir -p $BIN_DIR 2>/dev/null
+mkdir -p $HOME/.local/share/applications/  2>/dev/null
+rm -f "$BIN_DIR/idea"2>/dev/null
+
+
+ln -s "$INSTALL_DIR/bin/idea" "$BIN_DIR/idea"
+
+echo '[Desktop Entry]' > $D
+echo 'Version=1.0' >> $D
+echo 'Type=Application' >> $D
+echo 'Name=Idea' >> $D
+echo 'Categories=Development;IDE;' >> $D
+echo 'Terminal=false' >> $D
+echo 'StartupNotify=true' >> $D
+echo 'StartupWMClass=jetbrains-idea-ce' >> $D
+echo "Icon=$INSTALL_DIR/bin/idea.png" >> $D
+echo "Exec=$INSTALL_DIR/bin/idea %f" >> $D
+

@@ -1,0 +1,33 @@
+#!/bin/bash
+
+# fail on any errors
+set -euo pipefail
+trap 'echo >&2 "${BASH_SOURCE[0]}:${BASH_LINENO[0]}: Command \`$BASH_COMMAND\` failed with exit code $?"; exit $?' ERR
+
+# grab latest version url
+URL=$(curl -s "https://data.services.jetbrains.com/products/releases?code=IIC&latest=true&type=release" | grep -oP '"linux":{"link":"\K[^"]+')
+if [ -z "$URL" ]; then
+    echo "Idea URL not found" >&2
+    exit 1
+fi
+
+mkdir -p $HOME/.local 2>/dev/null
+
+DOWN_DIR=$HOME/.local/idea-down
+IDEA_DIR=$HOME/.local/idea
+
+# download
+[ -d "$DOWN_DIR" ] && rm -rf "$DOWN_DIR"
+mkdir -p $DOWN_DIR 2>/dev/null
+wget -O- "$URL" | tar -xz -C "$DOWN_DIR" --strip-components=1
+if [ ! -e "$DOWN_DIR/bin/idea.sh" ]; then
+  echo "Error: corrupted download!" >&2
+  exit 1
+fi
+
+[ -d "$IDEA_DIR" ] && rm -rf "$IDEA_DIR"
+mv $DOWN_DIR $IDEA_DIR
+
+setup-idea-link
+
+echo "IntelliJ IDEA installation completed."

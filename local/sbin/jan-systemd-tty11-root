@@ -1,0 +1,41 @@
+#!/bin/bash
+
+#
+# Installs sheel with root privileges on TTY11
+# Used when sudo is removed, and root password scrambled.
+#
+
+
+SERVICE_FILE_CONTENT="[Unit]
+Description=Root terminal on TTY11
+
+[Service]
+ExecStart=-/bin/bash
+TTYPath=/dev/tty11
+Type=simple
+User=root
+StandardInput=tty-force
+StandardOutput=tty
+StandardError=tty
+Restart=always
+RestartSec=0
+KillMode=control-group
+IgnoreSIGPIPE=no
+TimeoutStopSec=1
+KillSignal=SIGKILL
+
+[Install]
+WantedBy=multi-user.target
+"
+
+# Set the service file path
+SERVICE_FILE_PATH="/etc/systemd/system/tty11-root.service"
+
+# Echo the service file content to the file
+echo "$SERVICE_FILE_CONTENT" | tee "$SERVICE_FILE_PATH" > /dev/null
+
+# Enable and start the service
+systemctl enable tty11-root.service
+systemctl start tty11-root.service
+
+echo "Service installed and started successfully."

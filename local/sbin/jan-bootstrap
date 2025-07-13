@@ -1,0 +1,122 @@
+#!/bin/bash
+
+if [ "$1" != "dotfiles" ]; then
+  echo "Removes and masks packages I do not like"
+  echo "Warning, it overwrites and deletes!!"
+  echo "The first parameter must be 'dotfiles'."
+
+  exit 1
+fi
+
+block-pkg() {
+   for PKG in "$@"; do
+     FILE="/etc/apt/preferences.d/block-$PKG.pref"
+     echo -e "Package: $PKG\nPin: release *\nPin-Priority: -1\n" >> "$FILE"
+     echo "== blocked $PKG"
+   done
+}
+
+apt-get  update
+# setup-upgrade
+
+apt install -y \
+  terminator rofi mousepad dconf-cli \
+  xfce4-fsguard-plugin  xfce4-taskmanager \
+  links mc htop git curl powertop fish iftop iotop sshpass ncdu nano mosh \
+  fonts-jetbrains-mono
+
+apt purge -y  snapd
+apt purge -y  tumbler
+apt purge -y  tumbler*
+apt purge -y  xfce4-terminal
+apt purge -y  libwebkit2gtk-*
+apt purge -y  cups*
+apt purge -y  printer-driver*
+apt purge -y   *packagekit*
+apt purge -y  apport*
+apt purge -y  yelp*
+
+block-pkg snapd tumbler yelp cups-browsed cups
+
+# to see largest packages:
+#  dpkg-query -W --showformat='${Installed-Size}\t${Package}\n' | sort -n -r | head -n 20
+#
+
+if grep -iq "virtualbox" /sys/class/dmi/id/product_name || grep -iq "virtualbox" /sys/class/dmi/id/bios_vendor; then
+  echo "Running on VirtualBox"
+
+# stuff for virtualbox
+
+apt install -y  virtualbox-guest-x11 xserver-xorg-video-vmware
+
+apt purge -y xterm
+apt purge -y xfce4-screensaver
+apt purge -y xscreensaver
+apt purge -y pulseaudio*
+apt purge -y pulseaudio*
+apt purge -y gstreamer*
+apt purge -y bluez*
+apt purge -y pipewire*
+apt purge -y pavucontrol
+apt purge -y network-manager-gnome
+apt purge -y xserver-xorg-video-all
+apt purge -y memtest86+
+apt purge -y mesa-vulkan-drivers
+apt purge -y fonts-noto-cjk
+apt purge -y bind9*
+apt purge -y colord*
+apt purge -y avahi-daemon
+apt purge -y apparmor
+apt purge -y poppler-*
+apt purge -y libavcodec*
+apt purge -y libcodec*
+
+  block-pkg xfce4-screensaver
+
+  # firmware not needed on virtualbox
+  rm -rf /usr/lib/firmware
+  jan-systemd-tty11-root
+  jan-systemd-vm-cleanup
+  jan-systemd-disable-wallets
+  usermod -aG vboxsf jan
+  vm-cleanup
+fi
+
+jan-systemd-tty12-menu
+
+jan-install-candy-icons
+jan-install-starship
+
+
+#
+# lower case user folders
+#
+cat << EOF >  /etc/xdg/user-dirs.defaults
+DESKTOP_DIR=desk
+DOWNLOAD_DIR=down
+DOCUMENTS_DIR=doc
+TEMPLATES_DIR=doc/templates
+PUBLICSHARE_DIR=media/share
+MUSIC_DIR=media/music
+PICTURES_DIR=media/pic
+VIDEOS_DIR=media/video
+EOF
+
+
+#
+# disable boot animations, show text at boot
+#
+simple-file-replace /etc/default/grub "quiet splash" "video=1920x1080"
+print "# 1024x768  1280x720    1600x900   2560×1600   2560x1440   3840x2160" >> /etc/default/grub
+update-grub
+systemctl disable plymouth
+jan-console-font
+
+apt autoremove -y
+apt clean
+
+#
+# Lightdm needs this group for autologin?
+#
+groupadd -r autologin
+useradd -m -G autologin  jan

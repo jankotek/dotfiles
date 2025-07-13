@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Image Strip
+Comment=Resize images below 1000x1000 and remove EXIF data
+Exec=image-strip %F
+Icon=camera
+Categories=Utility;
+MimeType=image/jpeg;image/png;image/gif;image/webp;image/tiff;image/bmp;
+Terminal=true
+StartupNotify=false
+NoDisplay=false

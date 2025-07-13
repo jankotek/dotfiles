@@ -1,0 +1,12 @@
+#!/bin/bash
+
+# Set the path to the session file
+session_file="$HOME/.local/session-vbox"
+
+# Get list of running VMs
+    VBoxManage  list runningvms |  cut -d ' ' -f 1 | tr -d '"{}' > "$session_file"
+
+# Suspend all running VMs
+while read -r vm; do
+    VBoxManage controlvm "$vm" savestate
+done < "$session_file"

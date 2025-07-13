@@ -1,0 +1,6 @@
+#!/bin/bash
+
+chmod -x /usr/bin/kwalletd* /usr/bin/gnome-keyring-daemon
+
+# needed for systemd, otherwise it will show as failed
+exit 0

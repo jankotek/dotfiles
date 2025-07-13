@@ -1,0 +1,30 @@
+#!/bin/bash
+
+#
+# Disables KDE and Gnome wallets on system.
+# It removes their file exec permissions on startup and shutdown.
+#
+
+SERVICE_FILE_CONTENT="[Unit]
+Description=Disable KDE and Gnome wallets
+Before=shutdown.target graphical.target
+
+[Service]
+ExecStart=/usr/local/sbin/disable-wallets
+Type=oneshot
+User=root
+
+[Install]
+WantedBy=default.target"
+
+# Set the service file path
+SERVICE_FILE_PATH="/etc/systemd/system/disable-wallets.service"
+
+# Echo the service file content to the file
+echo "$SERVICE_FILE_CONTENT" | tee "$SERVICE_FILE_PATH" > /dev/null
+
+# Enable and start the service
+systemctl enable disable-wallets.service
+systemctl start disable-wallets.service
+
+echo "Service installed and started successfully."

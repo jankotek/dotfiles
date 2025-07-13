@@ -1,0 +1,22 @@
+#!/bin/bash
+
+VBoxManage list vms | while IFS= read -r line; do
+    VM="${line#*\"}"
+    VM="${VM%\"*}"
+
+    VMDIR=$(dirname "$(VBoxManage showvminfo "$VM" --machinereadable | grep 'CfgFile=' | cut -d'"' -f2)")
+    PORTFILE=$VMDIR/sshport.txt
+
+    if [ ! -f "$PORTFILE" ]; then
+      echo "== VM "$VM" has no sshport.txt file, skip uprade!" >&2
+      continue
+    fi
+
+    echo "== Upgrade $VM"
+    vbox-live "$VM"
+    vbox-ssh root "$VM" setup-upgrade
+    vbox-ssh root "$VM" vm-cleanup
+
+    vbox-shutdown "$VM"
+
+done

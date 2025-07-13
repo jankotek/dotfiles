@@ -1,0 +1,9 @@
+#!/bin/bash
+
+if [ -z "$1" ]; then
+	url="www.duckduckgo.com"
+else
+	url="$1"
+fi 
+
+links "$url"

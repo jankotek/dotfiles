@@ -1,0 +1,3 @@
+#!/bin/bash
+
+echo "PermitRootLogin yes"> /etc/ssh/sshd_config.d/root-enable.conf

@@ -1,0 +1,17 @@
+#!/bin/bash
+
+if [ "$1" != "dotfiles" ]; then
+  echo "Updates dotfiles in /usr/local and /home/jan "
+  echo "Warning, it overwrites and deletes!!"
+  echo "The first parameter must be 'dotfiles'."
+  exit 1
+fi
+
+set -euo pipefail
+trap 'echo >&2 "${BASH_SOURCE[0]}:${BASH_LINENO[0]}: Command \`$BASH_COMMAND\` failed with exit code $?"; exit $?' ERR
+
+rm -rf /tmp/dotfiles-main
+wget  --no-verbose  -O- https://github.com/jankotek/dotfiles/archive/refs/heads/main.tar.gz | tar -xz -C /tmp
+bash /tmp/dotfiles-main/install-dotfiles.sh dotfiles
+
+echo "== dotfiles updated =="
