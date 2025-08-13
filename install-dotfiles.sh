@@ -56,3 +56,6 @@ tar -C /usr/share/icons/  -xJf "$JANXZ/DMZhaloG.tar.xz"
 rm -rf /usr/share/icons/RareAeroW7
 tar -C /usr/share/icons/  -xJf "$JANXZ/RareAeroW7.tar.xz"
 
+mkdir -p /usr/share/aurorae/themes/
+rm -rf /usr/share/aurorae/themes/Sweet-Dark
+tar -C /usr/share/aurorae/themes/  -xJf "$JANXZ/Sweet-Dark-kwin.tar.xz"
