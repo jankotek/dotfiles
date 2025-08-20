@@ -15,8 +15,8 @@ mv /usr/share/icons/candy-icons-master /usr/share/icons/candy-icons
 
 
 # workaround for webpage shurtcuts showing browser icon
-rm -f usr/share/icons/candy-icons/apps/scalable/brave*
-rm -f /usr/share/icons/candy-icons/apps/scalable/chrome*
-rm -f /usr/share/icons/candy-icons/apps/scalable/google-chrome*
-rm -f /usr/share/icons/candy-icons/apps/scalable/chromium*
-rm -f /usr/share/icons/candy-icons/apps/scalable/vivaldi*
+rm -f /usr/share/icons/candy-icons/apps/scalable/*brave*
+rm -f /usr/share/icons/candy-icons/apps/scalable/*chrome*
+rm -f /usr/share/icons/candy-icons/apps/scalable/*google-chrome*
+rm -f /usr/share/icons/candy-icons/apps/scalable/*chromium*
+rm -f /usr/share/icons/candy-icons/apps/scalable/*vivaldi*

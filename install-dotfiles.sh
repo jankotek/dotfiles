@@ -59,3 +59,17 @@ tar -C /usr/share/icons/  -xJf "$JANXZ/RareAeroW7.tar.xz"
 mkdir -p /usr/share/aurorae/themes/
 rm -rf /usr/share/aurorae/themes/Sweet-Dark
 tar -C /usr/share/aurorae/themes/  -xJf "$JANXZ/Sweet-Dark-kwin.tar.xz"
+
+
+# candy icons
+for i in 16 24 32 48 64 128 256; do
+  f=/opt/brave.com/brave/product_logo_${i}.png
+  if [ -e "$f" ]; then
+    magick -background none -density 300 $JANXZ/brave.svg -resize ${i}x${i} $f
+  fi
+
+  f=/opt/google/chrome/product_logo_${i}.png
+  if [ -e "$f" ]; then
+    magick -background none -density 300 $JANXZ/google-chrome.svg -resize ${i}x${i} $f
+  fi
+done
