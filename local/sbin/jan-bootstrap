@@ -92,14 +92,14 @@ jan-install-starship
 # lower case user folders
 #
 cat << EOF >  /etc/xdg/user-dirs.defaults
-DESKTOP_DIR=desk
-DOWNLOAD_DIR=down
-DOCUMENTS_DIR=doc
-TEMPLATES_DIR=doc/templates
-PUBLICSHARE_DIR=media/share
-MUSIC_DIR=media/music
-PICTURES_DIR=media/pic
-VIDEOS_DIR=media/video
+DESKTOP=desk
+DOWNLOAD=down
+DOCUMENTS=doc
+TEMPLATES=doc/templates
+PUBLICSHARE=media/share
+MUSIC=media/music
+PICTURES=media/pic
+VIDEOS=media/video
 EOF
 
 
