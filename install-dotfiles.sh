@@ -73,3 +73,7 @@ for i in 16 24 32 48 64 128 256; do
     magick -background none -density 300 $JANXZ/google-chrome.svg -resize ${i}x${i} $f
   fi
 done
+
+# replace wallpapers
+cp $JANXZ/background.jpg /usr/share/background.jpg
+find /usr/share/wallpapers/ -name "*.jpg" -o -name "*.png" -exec bash -c 'rm -f "$0" && ln -sf /usr/share/background.jpg "$0"' {} \;
