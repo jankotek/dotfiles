@@ -1,0 +1,144 @@
+#!/bin/bash
+# Usage:
+#   vm-exec <vm_name> <command...>                # shell mode (joined into sh -c)
+#   vm-exec <vm_name> --argv [--user U] <argv...> # argv mode (literal exec, no shell)
+#
+# Shell mode (default, back-compat): all args after <vm_name> are joined and run
+# as `sh -c "<joined>"` on the guest. Convenient for env=val and pipelines.
+#
+# Argv mode (--argv): args after the flags form an argv array that is exec'd
+# literally on the guest with no shell expansion. Optional --user U wraps the
+# call in `sudo -n -u U --` for execution as that user.
+#
+# Argv mode encodes each arg as base64 on the host and decodes on the guest,
+# so quotes / $ / backticks / newlines / UTF-8 round-trip cleanly through the
+# JSON+sh-c boundary.
+
+set -euo pipefail
+
+VM_NAME=""
+ARGV_MODE=0
+USER_NAME=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --argv) ARGV_MODE=1; shift ;;
+        --user) USER_NAME="${2:?--user requires a username}"; shift 2 ;;
+        --) shift; break ;;
+        -h|--help)
+            sed -n '1,/^$/p' "$0" | sed 's/^# \?//'
+            exit 0 ;;
+        *)
+            if [ -z "$VM_NAME" ]; then
+                VM_NAME="$1"; shift
+            else
+                break
+            fi
+            ;;
+    esac
+done
+
+if [ -z "$VM_NAME" ] || [ $# -lt 1 ]; then
+    echo "Usage: $0 <vm_name> [--argv] [--user U] <command> [args...]" >&2
+    exit 2
+fi
+
+if [ "$ARGV_MODE" -eq 1 ]; then
+    # Encode each arg as base64. Decoder reads positional params (b64 strings),
+    # decodes them into a bash array, then execs that array.
+    DECODER='set -e; a=(); for b in "$@"; do a+=("$(printf %s "$b" | base64 -d)"); done; exec "${a[@]}"'
+
+    B64ARGS=()
+    if [ -n "$USER_NAME" ]; then
+        # Front-load sudo onto the argv so it runs as USER_NAME with no shell.
+        B64ARGS+=("$(printf '%s' /usr/bin/sudo | base64 -w0)")
+        for a in -n -u "$USER_NAME" --; do
+            B64ARGS+=("$(printf '%s' "$a" | base64 -w0)")
+        done
+    fi
+    for a in "$@"; do
+        B64ARGS+=("$(printf '%s' "$a" | base64 -w0)")
+    done
+
+    PAYLOAD=$(jq -nc --arg decoder "$DECODER" --args '
+        {execute:"guest-exec",
+         arguments:{
+            path:"/bin/bash",
+            arg:(["-c", $decoder, "vm-exec-decoder"] + $ARGS.positional),
+            "capture-output":true
+         }
+        }' -- "${B64ARGS[@]}")
+else
+    CMD="$*"
+    PAYLOAD=$(jq -nc --arg cmd "$CMD" '{execute:"guest-exec", arguments:{path:"/bin/sh", arg:["-c",$cmd], "capture-output":true}}')
+fi
+
+RESPONSE=$(virsh -c qemu:///session qemu-agent-command "$VM_NAME" "$PAYLOAD")
+
+if echo "$RESPONSE" | grep -q "error"; then
+    echo "[vm-exec] ERROR: Failed to start command: $RESPONSE" >&2
+    exit 1
+fi
+
+PID=$(echo "$RESPONSE" | grep -oP '(?<="pid":)\d+' || true)
+if [ -z "$PID" ] || ! [[ "$PID" =~ ^[0-9]+$ ]]; then
+    echo "[vm-exec] ERROR: Could not extract valid PID from response: $RESPONSE" >&2
+    exit 1
+fi
+
+WAIT_COUNT=0
+ERROR_COUNT=0
+while true; do
+    STATUS_PAYLOAD=$(jq -nc --argjson pid "$PID" '{execute:"guest-exec-status", arguments:{pid:$pid}}')
+    set +e
+    RESULT=$(virsh -c qemu:///session qemu-agent-command "$VM_NAME" "$STATUS_PAYLOAD")
+    VIRSH_EXIT=$?
+    set -e
+
+    if [ $VIRSH_EXIT -ne 0 ]; then
+        ERROR_COUNT=$((ERROR_COUNT + 1))
+        if [ $ERROR_COUNT -lt 5 ]; then
+            sleep 2
+            continue
+        fi
+        echo "[vm-exec] ERROR: Guest agent not responding after $ERROR_COUNT attempts" >&2
+        exit 1
+    fi
+
+    if echo "$RESULT" | grep -q "error"; then
+        ERROR_COUNT=$((ERROR_COUNT + 1))
+        if [ $ERROR_COUNT -lt 5 ]; then
+            sleep 2
+            continue
+        fi
+        echo "[vm-exec] ERROR: Guest agent returned error" >&2
+        exit 1
+    fi
+    ERROR_COUNT=0
+
+    EXITCODE=$(echo "$RESULT" | jq -r '.return.exitcode')
+    if [ "$EXITCODE" != "null" ]; then
+        break
+    fi
+    WAIT_COUNT=$((WAIT_COUNT + 1))
+    if [ $WAIT_COUNT -gt 0 ] && [ $((WAIT_COUNT % 30)) -eq 0 ]; then
+        echo "[vm-exec] Waiting... (${WAIT_COUNT}s)" >&2
+    fi
+    sleep 1
+done
+
+OUT_DATA=$(echo "$RESULT" | jq -r '.return."out-data"')
+if [ "$OUT_DATA" != "null" ] && [ -n "$OUT_DATA" ]; then
+    echo "$OUT_DATA" | base64 -d || true
+fi
+
+ERR_DATA=$(echo "$RESULT" | jq -r '.return."err-data"')
+if [ "$ERR_DATA" != "null" ] && [ -n "$ERR_DATA" ]; then
+    echo "[vm-exec] --- stderr ---" >&2
+    echo "$ERR_DATA" | base64 -d >&2 || true
+    echo "[vm-exec] --- end stderr ---" >&2
+fi
+
+if [ "$EXITCODE" -ne 0 ]; then
+    exit "$EXITCODE"
+fi

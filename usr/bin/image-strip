@@ -1,0 +1,38 @@
+#!/bin/bash
+#
+# Resize image to fit within 1000x1000 (only if larger), strip metadata.
+# Atomic: writes a temp file and renames over the original on success.
+
+set -euo pipefail
+
+if [ $# -ne 1 ]; then
+    echo "Usage: $0 <image_file>" >&2
+    exit 2
+fi
+
+input_file="$1"
+
+if [ ! -f "$input_file" ]; then
+    echo "Error: File '$input_file' does not exist." >&2
+    exit 1
+fi
+
+if ! command -v convert &>/dev/null; then
+    echo "Error: ImageMagick (convert) is required but not installed." >&2
+    exit 1
+fi
+
+tmp_file=$(mktemp --tmpdir="$(dirname -- "$input_file")" ".image-strip.XXXXXX") || {
+    echo "Error: failed to create temp file" >&2
+    exit 1
+}
+trap 'rm -f -- "$tmp_file"' EXIT
+
+# -resize '1000x1000>' = resize only if larger, maintain aspect ratio
+# -strip = remove all metadata including EXIF
+convert -- "$input_file" -resize '1000x1000>' -strip "$tmp_file"
+
+# Preserve permissions/ownership of the original.
+chmod --reference="$input_file" -- "$tmp_file"
+mv -f -- "$tmp_file" "$input_file"
+trap - EXIT

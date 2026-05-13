@@ -1,0 +1,20 @@
+#!/bin/bash
+#
+# Auto-resize the VM display when the host's spice/virt-viewer window is
+# resized. Listens for XRandR output changes via xev and triggers
+# `xrandr --auto` to pick up the new size.
+
+# Kill any spawned xev when we get a signal — without this, a SIGTERM to
+# the script leaves xev running as an orphan.
+trap 'pkill -P $$ xev 2>/dev/null; exit 0' INT TERM EXIT
+
+while true; do
+    xev -root -event randr \
+        | grep --line-buffered 'subtype XRROutputChangeNotifyEvent' \
+        | while read -r _; do
+            xrandr --output Virtual-1 --auto
+        done
+    # If xev or X dies the pipeline returns immediately. Wait before
+    # respawning to avoid a tight fork-loop when X is unavailable.
+    sleep 5
+done

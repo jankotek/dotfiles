@@ -1,0 +1,49 @@
+#!/bin/bash
+set -euo pipefail
+
+#
+# Installs Brave Origin (beta channel) — minimalist Brave without ads,
+# rewards, AI, or VPN. Free on Linux. Stable channel does not exist yet.
+#
+
+if [ "$EUID" -ne 0 ]; then
+    echo "must run as root" >&2
+    exit 1
+fi
+
+. /etc/os-release
+
+case $ID in
+    opensuse-leap|opensuse-tumbleweed)
+        # Use the ASCII-armored .asc; the binary .gpg keyring on the
+        # apt-beta bucket isn't valid input for `rpm --import`.
+        rpm --import https://brave-browser-rpm-beta.s3.brave.com/brave-core-beta.asc
+        zypper addrepo https://brave-browser-rpm-beta.s3.brave.com/brave-browser-beta.repo
+        zypper --non-interactive --gpg-auto-import-keys ref
+        zypper --non-interactive install brave-origin-beta
+        ;;
+    fedora)
+        # Use the ASCII-armored .asc; the binary .gpg keyring on the
+        # apt-beta bucket isn't valid input for `rpm --import`.
+        rpm --import https://brave-browser-rpm-beta.s3.brave.com/brave-core-beta.asc
+        dnf config-manager addrepo --from-repofile=https://brave-browser-rpm-beta.s3.brave.com/brave-browser-beta.repo
+        dnf install -y brave-origin-beta
+        ;;
+    ubuntu|debian|mint)
+        apt update
+        apt install -y curl
+        curl -fsSLo /usr/share/keyrings/brave-browser-beta-archive-keyring.gpg \
+            https://brave-browser-apt-beta.s3.brave.com/brave-browser-beta-archive-keyring.gpg
+        curl -fsSLo /etc/apt/sources.list.d/brave-browser-beta.sources \
+            https://brave-browser-apt-beta.s3.brave.com/brave-browser.sources
+        apt update
+        apt install -y brave-origin-beta
+        ;;
+    *)
+        echo "Unsupported distribution: $ID" >&2
+        exit 1
+        ;;
+esac
+
+ln -sfn /usr/bin/brave-origin-beta /usr/local/bin/brave-origin
+echo "Brave Origin (beta) installed successfully"

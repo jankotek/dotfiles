@@ -1,0 +1,82 @@
+#!/bin/bash
+#
+# Hardens package managers against supply chain attacks:
+#
+# npm/pnpm:  ignore-scripts=true in /etc/npmrc
+# pip:       only-binary=:all: in /etc/pip.conf (no setup.py)
+# uv:        only-binary=true in /etc/uv/uv.toml
+# gem:       no-document in /etc/gemrc (reduces attack surface)
+#
+# Safe by default (no config needed): go, deno, bun
+#
+
+if [ "$EUID" -ne 0 ]; then
+    echo "Please run as root"
+    exit 1
+fi
+
+set -euo pipefail
+
+# --- npm / pnpm: disable install scripts ---
+NPMRC="/etc/npmrc"
+if ! grep -q 'ignore-scripts=true' "$NPMRC" 2>/dev/null; then
+    echo '# Supply chain safety: do not run install scripts' >> "$NPMRC"
+    echo 'ignore-scripts=true' >> "$NPMRC"
+    echo "Configured: $NPMRC (ignore-scripts=true)"
+else
+    echo "Already configured: $NPMRC"
+fi
+
+# --- pip: only allow pre-built wheels ---
+PIP_CONF="/etc/pip.conf"
+if ! grep -q 'only-binary' "$PIP_CONF" 2>/dev/null; then
+    mkdir -p "$(dirname "$PIP_CONF")"
+    cat >> "$PIP_CONF" <<'EOF'
+[global]
+# Supply chain safety: refuse source distributions (no setup.py execution)
+only-binary = :all:
+EOF
+    echo "Configured: $PIP_CONF (only-binary = :all:)"
+else
+    echo "Already configured: $PIP_CONF"
+fi
+
+# --- uv: only allow pre-built wheels ---
+UV_CONF="/etc/uv/uv.toml"
+if command -v uv &>/dev/null; then
+    if ! grep -q 'only-binary' "$UV_CONF" 2>/dev/null; then
+        mkdir -p "$(dirname "$UV_CONF")"
+        cat >> "$UV_CONF" <<'EOF'
+# Supply chain safety: refuse source distributions
+only-binary = true
+EOF
+        echo "Configured: $UV_CONF (only-binary = true)"
+    else
+        echo "Already configured: $UV_CONF"
+    fi
+fi
+
+# --- gem: reduce attack surface ---
+GEMRC="/etc/gemrc"
+if command -v gem &>/dev/null; then
+    if ! grep -q 'no-document' "$GEMRC" 2>/dev/null; then
+        echo 'gem: --no-document' >> "$GEMRC"
+        echo "Configured: $GEMRC (--no-document)"
+    else
+        echo "Already configured: $GEMRC"
+    fi
+fi
+
+echo ""
+echo "Package manager safety configured:"
+echo "  npm/pnpm:  install scripts disabled (/etc/npmrc)"
+echo "  pip/pipx:  binary-only, no setup.py (/etc/pip.conf)"
+command -v uv &>/dev/null && echo "  uv:        binary-only (/etc/uv/uv.toml)"
+command -v gem &>/dev/null && echo "  gem:       no-document (/etc/gemrc)"
+echo ""
+echo "Safe by default (no config needed):"
+command -v go &>/dev/null && echo "  go:        no post-install hooks by design"
+command -v deno &>/dev/null && echo "  deno:      npm scripts blocked by default"
+command -v bun &>/dev/null && echo "  bun:       scripts blocked unless trustedDependencies"
+echo ""
+echo "Tip: use 'npm install --before=\"7 days ago\" <pkg>' to avoid recently published versions"

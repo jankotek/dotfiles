@@ -1,0 +1,40 @@
+#!/bin/bash
+#
+# Patches virt-manager and remote-viewer desktop files to run under XWayland.
+# Fixes broken display scaling on Plasma/Wayland with fractional scaling.
+#
+
+if [ "$EUID" -ne 0 ]; then
+    echo "Please run as root"
+    exit 1
+fi
+
+patch_desktop_file() {
+    local file="$1"
+    local binary="$2"
+
+    if [ ! -f "$file" ]; then
+        echo "Not found: $file"
+        return
+    fi
+
+    if grep -q 'GDK_BACKEND=x11' "$file"; then
+        echo "Already patched: $file"
+        return
+    fi
+
+    # Remove old GDK_SCALE=1 patch if present
+    sed -i "s|^Exec=env GDK_SCALE=1 $binary\b|Exec=$binary|" "$file"
+
+    # Apply XWayland fix with dark icons
+    sed -i "s|^Exec=$binary\b|Exec=env GDK_BACKEND=x11 GTK_THEME=Breeze-Dark $binary|" "$file"
+
+    if grep -q 'GDK_BACKEND=x11' "$file"; then
+        echo "Patched: $file"
+    else
+        echo "Failed to patch: $file"
+    fi
+}
+
+patch_desktop_file /usr/share/applications/virt-manager.desktop /usr/bin/virt-manager
+patch_desktop_file /usr/share/applications/remote-viewer.desktop "remote-viewer"

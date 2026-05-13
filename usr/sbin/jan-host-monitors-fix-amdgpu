@@ -1,0 +1,52 @@
+#!/bin/bash
+#
+# Force amdgpu Display Core (dc=1) and Dynamic Power Management (dpm=1)
+# explicitly so mode restoration is deterministic across compositor
+# handoff. Both default to 1 on modern kernels but are auto-disabled on
+# certain hardware quirks; pinning them removes the variability.
+
+if [ "$EUID" -ne 0 ]; then
+    echo "Please run as root" >&2
+    exit 1
+fi
+
+set -euo pipefail
+
+CONF=/etc/modprobe.d/amdgpu.conf
+DESIRED='options amdgpu dc=1 dpm=1'
+
+if [[ -f "$CONF" ]] && grep -qF "$DESIRED" "$CONF"; then
+    echo "$CONF already pins dc=1 dpm=1."
+    exit 0
+fi
+
+# Don't blast a user-edited file silently.
+if [[ -f "$CONF" ]] && ! grep -qE '^[[:space:]]*options[[:space:]]+amdgpu' "$CONF"; then
+    cp -p "$CONF" "${CONF}.bak"
+    echo "Backup of existing $CONF saved at ${CONF}.bak"
+fi
+
+# Replace any existing `options amdgpu …` line, otherwise append.
+if [[ -f "$CONF" ]] && grep -qE '^[[:space:]]*options[[:space:]]+amdgpu' "$CONF"; then
+    sed -i -E "s|^[[:space:]]*options[[:space:]]+amdgpu.*$|${DESIRED}|" "$CONF"
+else
+    printf '%s\n' "$DESIRED" >> "$CONF"
+fi
+
+echo "Wrote $CONF:"
+cat "$CONF"
+echo ""
+
+# Regenerate the initrd so the option lands in early-boot.
+if command -v dracut &>/dev/null; then
+    dracut --force
+elif command -v mkinitcpio &>/dev/null; then
+    mkinitcpio -P
+elif command -v update-initramfs &>/dev/null; then
+    update-initramfs -u
+else
+    echo "WARNING: no initrd generator found; module options take effect on next manual rebuild." >&2
+fi
+
+echo ""
+echo "Reboot to apply. Verify with: cat /sys/module/amdgpu/parameters/dc"

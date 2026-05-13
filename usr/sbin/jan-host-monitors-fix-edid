@@ -1,0 +1,182 @@
+#!/bin/bash
+#
+# Cache the EDID of every currently-connected display under
+# /lib/firmware/edid/, and add `drm.edid_firmware=...` to the kernel
+# command line. This stops the kernel from re-probing each monitor on
+# every TTY switch (the main source of multi-second flicker on
+# multi-user / multi-compositor setups).
+#
+# Supports both /etc/kernel/cmdline (sdboot, openSUSE Tumbleweed) and
+# /etc/default/grub.
+#
+# Re-running this script picks up newly-connected outputs but does not
+# remove stale entries — clean /lib/firmware/edid/ by hand if needed.
+
+if [ "$EUID" -ne 0 ]; then
+    echo "Please run as root" >&2
+    exit 1
+fi
+
+set -euo pipefail
+
+# `--refresh-only`: refresh only the cached .bin files; do NOT touch the
+# kernel cmdline / bootloader. Used by the debounced udev-triggered
+# systemd unit so a hot-plug burst can't half-update the bootloader.
+# When invoked from udev, log to syslog instead of stdout.
+REFRESH_ONLY=0
+if [[ "${1:-}" == "--refresh-only" ]]; then
+    REFRESH_ONLY=1
+    # Pipe stdout/stderr through logger so messages land in journald.
+    exec > >(logger -t jan-edid-cache) 2>&1
+fi
+
+EDID_DIR="/lib/firmware/edid"
+install -d -m 0755 "$EDID_DIR"
+
+# Step 1: refresh cached EDID for every currently-connected DRM output.
+# Existing files for outputs that are temporarily disconnected are NOT
+# removed — when the monitor is plugged back in, its old cached EDID is
+# still valid (modulo a model swap on the same connector).
+for sysdir in /sys/class/drm/card*-*; do
+    [[ -d "$sysdir" ]] || continue
+    name=$(basename "$sysdir")
+    # Glob `card[0-9]*-` is greedy and can eat trailing -digit segments,
+    # so anchor on the digit run with a bash regex.
+    [[ "$name" =~ ^card[0-9]+-(.+)$ ]] || continue
+    connector="${BASH_REMATCH[1]}"
+
+    [[ -r "$sysdir/status" ]] || continue
+    [[ "$(cat "$sysdir/status")" == "connected" ]] || continue
+    [[ -s "$sysdir/edid" ]] || continue
+
+    out="${EDID_DIR}/edid-${connector}.bin"
+    if cmp -s "$sysdir/edid" "$out"; then
+        echo "==> ${connector}: cached EDID up to date (${out})"
+    else
+        cp -f "$sysdir/edid" "$out"
+        chmod 0644 "$out"
+        echo "==> ${connector}: wrote ${out} ($(stat -c %s "$out") bytes)"
+    fi
+done
+
+# Step 2: build the cmdline mapping from every .bin file in EDID_DIR
+# (not just the currently-connected ones). A monitor that's unplugged
+# right now stays in the mapping so its cached EDID is used the moment
+# it's plugged back in.
+declare -a MAPPING=()
+for bin in "$EDID_DIR"/edid-*.bin; do
+    [[ -f "$bin" ]] || continue
+    [[ -s "$bin" ]] || continue
+    fname=$(basename "$bin")        # edid-eDP-1.bin
+    connector="${fname#edid-}"      # eDP-1.bin
+    connector="${connector%.bin}"   # eDP-1
+    MAPPING+=("${connector}:edid/${fname}")
+done
+
+if [[ ${#MAPPING[@]} -eq 0 ]]; then
+    echo "No EDID files in ${EDID_DIR}/ — no connected outputs and nothing previously cached." >&2
+    exit 1
+fi
+
+PARAM="drm.edid_firmware=$(IFS=,; echo "${MAPPING[*]}")"
+echo ""
+echo "Kernel cmdline parameter to install:"
+echo "  $PARAM"
+echo ""
+
+# In --refresh-only mode (called from the shutdown hook): only touch the
+# bootloader if the desired mapping differs from what's currently in the
+# bootloader cmdline file. The common case (same monitors) is cheap.
+# A new connector triggers a one-time regen so its cached EDID actually
+# gets consulted on the next boot.
+if [[ "$REFRESH_ONLY" -eq 1 ]]; then
+    existing_param=""
+    if [[ -f /etc/kernel/cmdline ]]; then
+        existing_param=$(grep -oE 'drm\.edid_firmware=[^[:space:]]*' /etc/kernel/cmdline | tail -1 || true)
+    elif [[ -f /etc/default/grub ]]; then
+        existing_param=$(grep -oE 'drm\.edid_firmware=[^"[:space:]]*' /etc/default/grub | tail -1 || true)
+    fi
+    if [[ "$existing_param" == "$PARAM" ]]; then
+        echo "--refresh-only: bootloader cmdline up to date; skipping regen."
+        exit 0
+    fi
+    echo "--refresh-only: cmdline drift detected, regenerating bootloader."
+    echo "  current:  ${existing_param:-<none>}"
+    echo "  expected: $PARAM"
+fi
+
+# Install onto the kernel cmdline. Strip any existing drm.edid_firmware=
+# entry first (it likely points at outdated paths), then append ours.
+add_param_grub() {
+    local f=/etc/default/grub
+    cp -p "$f" "${f}.bak"
+    # Remove old drm.edid_firmware= from the active line.
+    sed -i -E 's| ?drm\.edid_firmware=[^"[:space:]]*||g' "$f"
+    # Append the new one to GRUB_CMDLINE_LINUX_DEFAULT.
+    sed -i "s|^\(GRUB_CMDLINE_LINUX_DEFAULT=\"[^\"]*\)\"|\1 ${PARAM}\"|" "$f"
+    echo "Updated $f (backup: ${f}.bak)"
+    grep CMDLINE "$f"
+    if command -v update-grub &>/dev/null; then
+        update-grub
+    elif command -v grub2-mkconfig &>/dev/null; then
+        grub2-mkconfig -o /boot/grub2/grub.cfg
+    fi
+}
+
+add_param_sdboot() {
+    local f=/etc/kernel/cmdline
+    cp -p "$f" "${f}.bak"
+    # cmdline file is a single line of params. Strip old, append new.
+    sed -i -E 's| ?drm\.edid_firmware=[^[:space:]]*||g' "$f"
+    sed -i "s|\$| ${PARAM}|" "$f"
+    echo "Updated $f (backup: ${f}.bak)"
+    cat "$f"
+    if command -v sdbootutil &>/dev/null; then
+        sdbootutil update-all-entries
+    else
+        echo "WARNING: sdbootutil not found; bootloader entries not refreshed." >&2
+    fi
+}
+
+if [ -f /etc/kernel/cmdline ]; then
+    add_param_sdboot
+elif [ -f /etc/default/grub ]; then
+    add_param_grub
+else
+    echo "No supported bootloader config found" >&2
+    exit 1
+fi
+
+install_shutdown_hook() {
+    local unit=/etc/systemd/system/jan-edid-cache-refresh.service
+    cat > "$unit" <<'UNIT'
+[Unit]
+Description=Refresh /lib/firmware/edid/ on shutdown
+# We don't want to run at boot, only at shutdown. Pattern: ExecStart is a
+# no-op, the unit stays "active" thanks to RemainAfterExit, and the real
+# work happens in ExecStop when systemd stops it on the way to shutdown.
+DefaultDependencies=no
+Before=shutdown.target reboot.target halt.target
+Conflicts=shutdown.target reboot.target halt.target
+After=local-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/true
+ExecStop=/usr/sbin/jan-host-monitors-fix-edid --refresh-only
+TimeoutStopSec=30s
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+    systemctl daemon-reload
+    systemctl enable --now jan-edid-cache-refresh.service >/dev/null
+    echo "Installed shutdown hook: $unit"
+}
+
+install_shutdown_hook
+
+echo ""
+echo "Reboot to apply. Verify with: grep drm.edid_firmware /proc/cmdline"
+echo "Subsequent shutdowns will auto-refresh /lib/firmware/edid/."

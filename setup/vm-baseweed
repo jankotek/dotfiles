@@ -1,0 +1,122 @@
+#!/bin/bash
+#
+# vm-baseweed — Tumbleweed counterpart to setup/vm-xub24.
+#
+# Symlinks /opt/jan/usr into /usr/local, installs core CLI tools via zypper,
+# runs the cross-distro jan-* setup helpers, and syncs the repo home dotfiles
+# without --delete (so user data survives re-runs).
+
+# Sanity check: verify running inside a VM
+if ! systemd-detect-virt -q -v; then
+    echo "ERROR: This script must run inside a virtual machine"
+    exit 1
+fi
+
+set -euo pipefail
+trap 'echo >&2 "${BASH_SOURCE[0]}:${BASH_LINENO[0]}: Command \`$BASH_COMMAND\` failed with exit code $?"; exit $?' ERR
+
+# ---------- /opt/jan/usr -> /usr/local symlinks ----------
+
+cp -f -s -r /opt/jan/usr/* /usr/local
+
+# ---------- Package install ----------
+
+# Prevent qemu-guest-agent restart while we're still talking to it.
+# (Tumbleweed is rolling: a `zypper refresh` followed by an upgrade may pull
+# a new qemu-ga; with the service masked, post-install scriptlets can't
+# restart it mid-run. The jan-unmask-guest-agents.service below re-enables
+# it at next boot.)
+systemctl mask qemu-guest-agent.service 2>/dev/null || true
+systemctl mask spice-vdagentd.service 2>/dev/null || true
+
+zypper -n --no-gpg-checks refresh
+
+# DO NOT add qemu-guest-agent or spice-vdagent here — they are already in
+# the baseweed image, and reinstalling/upgrading them mid-run kills our
+# control channel. Limit zypper install to packages that don't restart
+# system services.
+zypper -n install --no-recommends \
+    terminator rofi mousepad \
+    mc htop git curl powertop fish iftop iotop ncdu nano mosh \
+    pwgen telnet jdupes just bats zim \
+    jetbrains-mono-fonts terminus-bitmap-fonts
+
+# ---------- Cross-distro jan-* helpers ----------
+# Each helper detects distro internally; only kernel-tweaks has a real
+# Tumbleweed-specific branch (sdbootutil).
+
+jan-systemd-tty11-root || echo "WARNING: tty11-root setup failed (non-fatal)"
+jan-systemd-vm-cleanup || echo "WARNING: vm-cleanup setup failed (non-fatal)"
+jan-console-font || echo "WARNING: console font setup failed (non-fatal)"
+jan-setup-kernel-tweaks || echo "WARNING: kernel tweaks setup failed (non-fatal)"
+jan-setup-pkg-safety || echo "WARNING: pkg safety setup failed (non-fatal)"
+
+# ---------- xdg user-dirs (lowercase) ----------
+
+cat << EOF >  /etc/xdg/user-dirs.defaults
+DESKTOP=desk
+DOWNLOAD=down
+DOCUMENTS=doc
+TEMPLATES=doc/templates
+PUBLICSHARE=media/share
+MUSIC=media/music
+PICTURES=media/pic
+VIDEOS=media/video
+EOF
+
+# ---------- Sync repo home (NO --delete) ----------
+# Detect the primary unprivileged user — Tumbleweed VMs are seeded under
+# different names depending on how the image was bootstrapped. Common cases
+# are 'jan' (this repo's convention) or 'tumbleweed' (default openSUSE
+# installer). Bail out if neither exists.
+
+HOME_USER=""
+for u in jan tumbleweed opensuse playai; do
+    if id "$u" &>/dev/null; then
+        HOME_USER="$u"
+        break
+    fi
+done
+if [[ -z "$HOME_USER" ]]; then
+    echo "ERROR: no candidate user found (tried: jan tumbleweed opensuse playai)" >&2
+    exit 1
+fi
+HOME_GROUP=$(id -gn "$HOME_USER")
+HOME_DIR=$(getent passwd "$HOME_USER" | cut -d: -f6)
+echo "==> Syncing repo home to ${HOME_DIR} (user=${HOME_USER})"
+
+# Backup before sync (timestamped, kept until manually removed).
+cp -a "$HOME_DIR" "${HOME_DIR}-backup-$(date +%Y-%m-%d-%H%M)" 2>/dev/null || true
+chmod 0700 "${HOME_DIR}-backup-"* 2>/dev/null || true
+
+# Sync without --delete: dotfiles deploy, user data survives.
+rsync -r /opt/jan/home/ "${HOME_DIR}/"
+[[ -d /opt/jan/home-root ]] && rsync -r /opt/jan/home-root/ /root/
+
+su - "$HOME_USER" -c 'mkdir -p ~/desk ~/down ~/doc ~/doc/templates ~/media/share ~/media/music ~/media/pic ~/media/video'
+
+chmod 0755 /home
+chmod 0700 "$HOME_DIR" /root
+chown "$HOME_USER":"$HOME_GROUP" -R "$HOME_DIR"
+
+# ---------- Re-enable guest agents on next boot ----------
+
+systemctl unmask qemu-guest-agent.service 2>/dev/null || true
+systemctl enable qemu-guest-agent.service 2>/dev/null || true
+
+cat > /etc/systemd/system/jan-unmask-guest-agents.service <<UNIT
+[Unit]
+Description=Ensure VM guest agents are unmasked and running
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'systemctl unmask qemu-guest-agent.service spice-vdagentd.service 2>/dev/null; systemctl start qemu-guest-agent.service spice-vdagentd.service 2>/dev/null; true'
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable jan-unmask-guest-agents.service
+
+echo "=========== DONE ==========="

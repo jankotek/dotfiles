@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+#
+# jan-pod-destroy — Inverse of jan-pod-setup.
+#
+# Stops the pod, removes the user, and cleans up every host-side artifact
+# that jan-pod-setup creates: subuid/subgid, sudoers drop-in, cron/at deny
+# entries, sysctl drop-in, tmpfiles drop-in, AppArmor profile, SELinux
+# fcontext entries, cgroup-delegation drop-in, ACLs.
+#
+# Does NOT remove /etc/systemd/system/proc-hidepid.service — that is a
+# system-wide service installed once and may still be in use by other pods.
+# Does NOT touch the persistent data dir under /var/pod/<name>/data unless
+# --purge-data is given (default: home dir is removed except for data/).
+#
+# Usage:  sudo jan-pod-destroy <name> [--purge-data] [--yes]
+#
+set -euo pipefail
+
+if [[ $EUID -ne 0 ]]; then
+    echo "ERROR: must run as root." >&2
+    exit 1
+fi
+
+NAME="${1:-}"
+PURGE_DATA=0
+ASSUME_YES=0
+shift || true
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --purge-data) PURGE_DATA=1; shift ;;
+        --yes|-y)     ASSUME_YES=1; shift ;;
+        *) echo "Unknown flag: $1" >&2; exit 2 ;;
+    esac
+done
+
+if [[ -z "$NAME" ]]; then
+    echo "Usage: $0 <name> [--purge-data] [--yes]" >&2
+    exit 2
+fi
+
+if ! [[ "$NAME" =~ ^[a-z][a-z0-9_-]{0,31}$ ]]; then
+    echo "ERROR: name must match ^[a-z][a-z0-9_-]{0,31}$" >&2
+    exit 1
+fi
+
+HOME_DIR="/var/pod/${NAME}"
+USER_UID=""
+if id "$NAME" &>/dev/null; then
+    USER_UID=$(id -u "$NAME")
+fi
+
+if [[ ! -d "$HOME_DIR" ]] && [[ -z "$USER_UID" ]]; then
+    echo "Nothing to destroy: pod '$NAME' has no user and no $HOME_DIR." >&2
+    exit 0
+fi
+
+if [[ "$ASSUME_YES" -ne 1 ]]; then
+    echo "About to destroy pod '${NAME}':"
+    echo "  user:        ${NAME} (uid ${USER_UID:-<missing>})"
+    echo "  home:        ${HOME_DIR}"
+    if [[ "$PURGE_DATA" -eq 1 ]]; then
+        echo "  data:        ${HOME_DIR}/data — WILL BE DELETED (--purge-data)"
+    else
+        echo "  data:        ${HOME_DIR}/data — preserved (use --purge-data to remove)"
+    fi
+    read -r -p "Continue? [y/N] " ans
+    [[ "$ans" == "y" || "$ans" == "Y" ]] || { echo "Aborted."; exit 1; }
+fi
+
+# ---------- stop services ----------
+
+if [[ -n "$USER_UID" ]]; then
+    echo "==> Stopping user services for '${NAME}'"
+    # Lingering keeps user@.service up; disabling it lets us cleanly stop.
+    loginctl disable-linger "$NAME" 2>/dev/null || true
+    loginctl terminate-user "$NAME" 2>/dev/null || true
+    systemctl stop "user@${USER_UID}.service" 2>/dev/null || true
+fi
+
+# ---------- system-wide drop-ins ----------
+
+echo "==> Removing system config drop-ins"
+rm -f "/etc/sudoers.d/deny-${NAME}"
+rm -f "/etc/sysctl.d/90-podman-${NAME}.conf"
+rm -f "/etc/tmpfiles.d/podman-${NAME}.conf"
+rm -f "/etc/apparmor.d/podman-${NAME}"
+
+if [[ -n "$USER_UID" ]]; then
+    rm -f "/etc/systemd/system/user@${USER_UID}.service.d/delegate.conf"
+    rmdir "/etc/systemd/system/user@${USER_UID}.service.d" 2>/dev/null || true
+fi
+
+# ---------- cron/at deny lists ----------
+
+for denyfile in /etc/cron.deny /etc/at.deny; do
+    [ -f "$denyfile" ] && sed -i "/^${NAME}$/d" "$denyfile"
+done
+
+# ---------- AppArmor ----------
+
+if command -v apparmor_parser &>/dev/null; then
+    apparmor_parser -R "/etc/apparmor.d/podman-${NAME}" 2>/dev/null || true
+fi
+
+# ---------- SELinux fcontext ----------
+
+if command -v semanage &>/dev/null; then
+    semanage fcontext -d "${HOME_DIR}/.local/share/containers(/.*)?" 2>/dev/null || true
+    semanage fcontext -d "${HOME_DIR}/data(/.*)?" 2>/dev/null || true
+    semanage fcontext -d "${HOME_DIR}/.tmp(/.*)?" 2>/dev/null || true
+fi
+
+# ---------- ACLs ----------
+
+if command -v setfacl &>/dev/null; then
+    for dir in /home /root /tmp /var/tmp /var/log /var/spool /var/mail /etc/ssh; do
+        [ -d "$dir" ] && setfacl -x "u:${NAME}" "$dir" 2>/dev/null || true
+    done
+fi
+
+# ---------- user + subuid/subgid + home ----------
+
+if [[ -n "$USER_UID" ]]; then
+    echo "==> Removing user '${NAME}' (uid ${USER_UID})"
+    # userdel handles /etc/subuid and /etc/subgid cleanup automatically.
+    if [[ "$PURGE_DATA" -eq 1 ]]; then
+        userdel -r "$NAME" 2>/dev/null || userdel "$NAME" 2>/dev/null || true
+        rm -rf -- "$HOME_DIR"
+    else
+        # Move data aside, let userdel -r remove the rest, restore data.
+        if [[ -d "${HOME_DIR}/data" ]]; then
+            DATA_BACKUP=$(mktemp -d /var/pod/.${NAME}-data-XXXXXX)
+            mv "${HOME_DIR}/data" "${DATA_BACKUP}/data"
+            userdel -r "$NAME" 2>/dev/null || userdel "$NAME" 2>/dev/null || true
+            install -d -m 0700 "$HOME_DIR"
+            mv "${DATA_BACKUP}/data" "${HOME_DIR}/data"
+            rmdir "$DATA_BACKUP"
+        else
+            userdel -r "$NAME" 2>/dev/null || userdel "$NAME" 2>/dev/null || true
+        fi
+    fi
+fi
+
+systemctl daemon-reload 2>/dev/null || true
+
+cat <<EOF
+
+================================================================
+  Pod '${NAME}' destroyed.
+================================================================
+EOF
+if [[ "$PURGE_DATA" -ne 1 ]] && [[ -d "$HOME_DIR" ]]; then
+    echo "  Persistent data kept at: ${HOME_DIR}/data/"
+    echo "  To remove it later: rm -rf ${HOME_DIR}"
+fi
+echo "  /etc/systemd/system/proc-hidepid.service is system-wide — left in place."
+echo "================================================================"

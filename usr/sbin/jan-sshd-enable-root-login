@@ -1,0 +1,12 @@
+#!/bin/bash
+set -euo pipefail
+
+if [ "$EUID" -ne 0 ]; then
+    echo "must run as root" >&2
+    exit 1
+fi
+
+echo "PermitRootLogin yes" > /etc/ssh/sshd_config.d/root-enable.conf
+
+sshd -t
+systemctl reload sshd 2>/dev/null || systemctl reload ssh 2>/dev/null || true

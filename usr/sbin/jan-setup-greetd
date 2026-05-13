@@ -1,0 +1,67 @@
+#!/bin/bash
+#
+# Sets up greetd with tuigreet on TTY 3-9.
+# Creates per-tty config files and systemd services.
+#
+
+if [ "$EUID" -ne 0 ]; then
+    echo "Please run as root"
+    exit 1
+fi
+
+if ! command -v greetd &>/dev/null; then
+    echo "greetd is not installed"
+    exit 1
+fi
+
+if ! command -v tuigreet &>/dev/null; then
+    echo "tuigreet is not installed"
+    exit 1
+fi
+
+# Disable default greetd service if enabled
+systemctl disable greetd.service 2>/dev/null || true
+
+for TTY in 3 4 5 6 7 8 9; do
+
+    # Create config file
+    cat > "/etc/greetd/config-tty${TTY}.toml" <<EOF
+[terminal]
+vt = ${TTY}
+
+[default_session]
+command = "tuigreet "
+user = "greeter"
+EOF
+
+    # Create systemd service
+    cat > "/etc/systemd/system/greetd-tty${TTY}.service" <<EOF
+[Unit]
+Description=Greetd daemon on TTY${TTY}
+After=graphical-session.target
+Requires=nss-user-lookup.target
+
+[Service]
+Type=simple
+# greetd binary path differs across distros (/usr/bin vs /usr/sbin) — rely on PATH
+ExecStart=greetd -c /etc/greetd/config-tty${TTY}.toml
+Restart=always
+RestartSec=1
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Mask conflicting getty on this TTY
+    systemctl disable "getty@tty${TTY}.service" 2>/dev/null || true
+    systemctl mask "getty@tty${TTY}.service"
+
+    systemctl enable "greetd-tty${TTY}.service"
+    echo "Configured tty${TTY}"
+
+done
+
+systemctl daemon-reload
+echo "Done. Reboot to activate all greetd instances."

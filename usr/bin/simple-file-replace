@@ -1,0 +1,22 @@
+#!/usr/bin/python3
+
+import sys
+from pathlib import Path
+
+if len(sys.argv) != 4:
+    print(f"Usage: {sys.argv[0]} <file> <find> <replace>", file=sys.stderr)
+    sys.exit(2)
+
+filename, first, second = sys.argv[1], sys.argv[2], sys.argv[3]
+
+if not first:
+    print("error: <find> must not be empty", file=sys.stderr)
+    sys.exit(2)
+
+p = Path(filename)
+filecontent = p.read_text()
+filecontent = filecontent.replace(first, second)
+
+tmp = p.with_suffix(p.suffix + ".tmp")
+tmp.write_text(filecontent)
+tmp.replace(p)

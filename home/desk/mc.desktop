@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=MC
+Comment=Midnight Commander
+Exec=mc
+Icon=MidnightCommander
+Path=/home/jan
+Terminal=true
+StartupNotify=false

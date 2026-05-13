@@ -1,0 +1,26 @@
+#!/bin/bash
+set -euo pipefail
+
+if [ "$EUID" -ne 0 ]; then
+    echo "must run as root" >&2
+    exit 1
+fi
+
+if command -v rpm &> /dev/null; then
+	CF=$(mktemp --suffix=.rpm)
+	trap 'rm -f "$CF"' EXIT
+	wget -O "$CF" "https://dl.google.com/linux/direct/google-chrome-stable_current_x86_64.rpm"
+	rpm -Uvh "$CF"
+elif command -v apt-get &> /dev/null; then
+	CF=$(mktemp --suffix=.deb)
+	trap 'rm -f "$CF"' EXIT
+	wget -O "$CF" https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+	apt install -y "$CF"
+else
+  echo "Unsupported distribution" >&2
+  exit 1
+fi
+
+echo "Chrome installed successfully"
+
+ln -sfn /usr/bin/google-chrome /usr/local/bin/chrome

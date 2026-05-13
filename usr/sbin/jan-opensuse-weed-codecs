@@ -1,0 +1,12 @@
+#!/bin/bash
+set -euo pipefail
+
+if [ "$EUID" -ne 0 ]; then
+    echo "must run as root" >&2
+    exit 1
+fi
+
+zypper addrepo -cfp 120 'https://ftp.gwdg.de/pub/linux/misc/packman/suse/openSUSE_Leap_$releasever/' packman
+
+zypper --non-interactive --gpg-auto-import-keys refresh
+zypper --non-interactive install --allow-vendor-change --from packman ffmpeg gstreamer-plugins-{good,bad,ugly,libav} libavcodec vlc-codecs vlc

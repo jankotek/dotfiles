@@ -1,0 +1,94 @@
+#!/bin/bash
+#
+# Sets console (tty) font to Terminus.
+# Installs the font package, configures vconsole.conf and console-setup,
+# and creates a systemd service that re-applies the font on every boot
+# (in case upgrades overwrite vconsole.conf).
+#
+
+if [ "$EUID" -ne 0 ]; then
+    echo "Please run as root"
+    exit 1
+fi
+
+set -euo pipefail
+
+# Install terminus console font
+if command -v zypper &>/dev/null; then
+    zypper install -y terminus-bitmap-fonts
+elif command -v apt-get &>/dev/null; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y console-setup fonts-terminus
+elif command -v dnf &>/dev/null; then
+    dnf install -y terminus-fonts-console
+else
+    echo "Unsupported distribution"
+    exit 1
+fi
+
+# Find the terminus console font file
+FONT=""
+for f in ter-v18b ter-v18n ter-118b ter-118n; do
+    if find /usr/share/kbd/consolefonts /usr/lib/kbd/consolefonts /usr/share/consolefonts 2>/dev/null | grep -q "$f"; then
+        FONT="$f"
+        break
+    fi
+done
+
+if [ -z "$FONT" ]; then
+    echo "WARNING: could not find terminus console font file, using 'ter-v18b'"
+    FONT="ter-v18b"
+fi
+
+# Write the apply script
+cat > /usr/local/sbin/jan-console-font-apply <<SCRIPT
+#!/bin/sh
+# Re-apply terminus font to vconsole.conf if it was overwritten
+grep -q "FONT=${FONT}" /etc/vconsole.conf 2>/dev/null && exit 0
+sed -i "s/^FONT=.*/FONT=${FONT}/" /etc/vconsole.conf 2>/dev/null || \
+    echo "FONT=${FONT}" >> /etc/vconsole.conf
+setfont ${FONT} 2>/dev/null || true
+SCRIPT
+chmod +x /usr/local/sbin/jan-console-font-apply
+
+# Set vconsole.conf now
+cat > /etc/vconsole.conf <<EOF
+KEYMAP=us
+FONT=${FONT}
+EOF
+echo "Updated /etc/vconsole.conf: FONT=${FONT}"
+
+# Configure console-setup (Debian/Ubuntu)
+if [ -f /etc/default/console-setup ]; then
+    cat > /etc/default/console-setup <<EOF
+CHARMAP="UTF-8"
+CODESET="guess"
+FONTFACE="Terminus"
+FONTSIZE="10x18"
+EOF
+    echo "Updated /etc/default/console-setup"
+fi
+
+# Create systemd service that re-applies font on boot
+cat > /etc/systemd/system/jan-console-font.service <<EOF
+[Unit]
+Description=Re-apply Terminus console font
+After=systemd-vconsole-setup.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/jan-console-font-apply
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable jan-console-font.service
+
+# Apply immediately
+systemctl restart systemd-vconsole-setup.service 2>/dev/null || true
+if command -v setupcon &>/dev/null; then
+    setupcon --force 2>/dev/null || true
+fi
+
+echo "Console font set to Terminus (re-applied on every boot)"

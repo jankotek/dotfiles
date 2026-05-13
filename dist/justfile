@@ -1,0 +1,56 @@
+update: update-candy update-sweet update-starship gitadd
+
+update-candy:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    trap 'echo >&2 "${BASH_SOURCE[0]}:${BASH_LINENO[0]}: Command \`$BASH_COMMAND\` failed with exit code $?"; exit $?' ERR
+
+
+    rm -rf candy-icons-master
+
+    wget  --no-verbose  -O- https://github.com/EliverLara/candy-icons/archive/refs/heads/master.tar.gz | tar -xz -C sweet
+
+    rm -rf sweet/candy-icons
+    mv sweet/candy-icons-master sweet/candy-icons
+
+
+    # workaround for webpage shurtcuts showing browser icon
+    rm -f sweet/candy-icons/apps/scalable/*brave*
+    rm -f sweet/candy-icons/apps/scalable/*chrome*
+    rm -f sweet/candy-icons/apps/scalable/*google-chrome*
+    rm -f sweet/candy-icons/apps/scalable/*chromium*
+    rm -f sweet/candy-icons/apps/scalable/*vivaldi*
+
+update-sweet:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    trap 'echo >&2 "${BASH_SOURCE[0]}:${BASH_LINENO[0]}: Command \`$BASH_COMMAND\` failed with exit code $?"; exit $?' ERR
+
+    version=v6.0
+    f=sweet/Sweet-Dark-v40
+
+    rm -rf $f
+    wget  --no-verbose  -O- https://github.com/EliverLara/Sweet/releases/download/$version/Sweet-Dark-v40.tar.xz | tar -xJ -C sweet
+    rm -rf $f/assets $f/cinnamon $f/gnome-shell $f/metacity-1
+
+    # Make main content area backgrounds pure black
+    find $f -name '*.css' -o -name 'gtkrc' | while read -r css; do
+        sed -i 's/#181b28/#000000/g' "$css"
+        sed -i 's/#1a1d2b/#000000/g' "$css"
+        sed -i 's/#171a27/#000000/g' "$css"
+    done
+
+update-starship:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    trap 'echo >&2 "${BASH_SOURCE[0]}:${BASH_LINENO[0]}: Command \`$BASH_COMMAND\` failed with exit code $?"; exit $?' ERR
+
+    rm -rf starship/*
+    wget  --no-verbose -O- https://github.com/starship/starship/releases/latest/download/starship-x86_64-unknown-linux-musl.tar.gz | tar -xz -C starship/
+
+gitadd:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    trap 'echo >&2 "${BASH_SOURCE[0]}:${BASH_LINENO[0]}: Command \`$BASH_COMMAND\` failed with exit code $?"; exit $?' ERR
+
+    git add .

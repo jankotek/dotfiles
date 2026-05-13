@@ -1,0 +1,422 @@
+#!/bin/bash
+set -e
+set -o pipefail
+
+# GitHub API token (optional, increases rate limit from 60 to 5000 requests/hour)
+GITHUB_API_TOKEN="${GITHUB_API_TOKEN:-}"
+
+# Determine base directory from JAN_OPT or default to /opt
+BASE_DIR="${JAN_OPT:-/opt}"
+
+# Check if target location is writeable
+if [ ! -w "$BASE_DIR" ]; then
+    echo "✗ Error: $BASE_DIR is not writeable by current user"
+    echo "  Set JAN_OPT to a writeable directory or run with appropriate permissions"
+    exit 1
+fi
+
+DESKTOP_DIR="$BASE_DIR/applications"
+mkdir -p "$DESKTOP_DIR"
+
+# Helper function for GitHub API calls with optional authentication
+github_api() {
+    if [ -n "$GITHUB_API_TOKEN" ]; then
+        curl -sL -H "Authorization: token $GITHUB_API_TOKEN" "$@"
+    else
+        curl -sL "$@"
+    fi
+}
+
+download_and_extract() {
+    local name=$1 dir=$2 url=$3 version=$4 strip=${5:-1}
+    local version_file="$BASE_DIR/$dir/.version"
+    local current_version=""
+
+    if [ -z "$version" ]; then
+        echo "✗ Failed to fetch version for $name"
+        return 1
+    fi
+
+    [ -f "$version_file" ] && current_version=$(cat "$version_file")
+
+    if [ "$current_version" = "$version" ]; then
+        echo "✓ $name already at version $version"
+        return 0
+    fi
+
+    echo "→ Downloading $name $version..."
+    local temp_dir="$BASE_DIR/${dir}_temp"
+    rm -rf "$temp_dir"
+    mkdir -p "$temp_dir"
+
+    # Download to file first, then extract
+    curl -fLsS "$url" -o "$temp_dir/archive.tar.gz"
+    tar xzf "$temp_dir/archive.tar.gz" -C "$temp_dir" --strip-components=$strip
+    rm "$temp_dir/archive.tar.gz"
+
+    rm -rf "$BASE_DIR/$dir"
+    mv "$temp_dir" "$BASE_DIR/$dir"
+    echo "$version" > "$version_file"
+    echo "✓ $name $version installed"
+}
+
+create_desktop_file() {
+    local filename=$1 name=$2 exec=$3 icon=$4 comment=$5
+    cat > "$DESKTOP_DIR/$filename.desktop" <<EOF
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=$name
+Comment=$comment
+Exec=$exec
+Icon=$icon
+Terminal=false
+Categories=Development;
+EOF
+    chmod +x "$DESKTOP_DIR/$filename.desktop"
+}
+
+install_idea() {
+    local version=$(curl -s 'https://data.services.jetbrains.com/products/releases?code=IIC&latest=true&type=release' | grep -oP '"version":"\K[^"]+' | head -1)
+    local url="https://download.jetbrains.com/idea/ideaIC-${version}.tar.gz"
+    download_and_extract "IntelliJ IDEA" "idea" "$url" "$version"
+    create_desktop_file "intellij-idea" "IntelliJ IDEA" "$BASE_DIR/idea/bin/idea.sh" "$BASE_DIR/idea/bin/idea.svg" "IntelliJ IDEA"
+}
+
+install_nushell() {
+    local version=$(github_api https://api.github.com/repos/nushell/nushell/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+    local url="https://github.com/nushell/nushell/releases/download/${version}/nu-${version}-x86_64-unknown-linux-musl.tar.gz"
+    download_and_extract "Nushell" "nushell" "$url" "$version"
+}
+
+install_starship() {
+    local version=$(github_api https://api.github.com/repos/starship/starship/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+    local url="https://github.com/starship/starship/releases/download/${version}/starship-x86_64-unknown-linux-musl.tar.gz"
+    download_and_extract "Starship" "starship" "$url" "$version" 0
+}
+
+install_obsidian() {
+    local version=$(github_api https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest | grep -oP '"tag_name": "\K[^"]+' | sed 's/^v//')
+    local url="https://github.com/obsidianmd/obsidian-releases/releases/download/v${version}/obsidian-${version}.tar.gz"
+    download_and_extract "Obsidian" "obsidian" "$url" "$version" 1
+    create_desktop_file "obsidian" "Obsidian" "$BASE_DIR/obsidian/obsidian --no-sandbox" "$BASE_DIR/obsidian/resources/icon.png" "Obsidian Notes"
+}
+
+install_corretto() {
+    local jdk_version=$1
+    local latest=$(github_api "https://api.github.com/repos/corretto/corretto-${jdk_version}/releases/latest" | grep -oP '"tag_name": "\K[^"]+')
+    local version=${latest#*-}
+    local url="https://corretto.aws/downloads/latest/amazon-corretto-${jdk_version}-x64-linux-jdk.tar.gz"
+
+    download_and_extract "Amazon Corretto JDK ${jdk_version}" "jdk/${jdk_version}" "$url" "$version"
+}
+
+install_gradle() {
+    local version=$(github_api https://api.github.com/repos/gradle/gradle/releases/latest | grep -oP '"tag_name": "\K[^"]+' | sed 's/^v//')
+
+    if [ -z "$version" ]; then
+        echo "✗ Failed to fetch version for Gradle"
+        return 1
+    fi
+
+    local url="https://services.gradle.org/distributions/gradle-${version}-bin.zip"
+    local version_file="$BASE_DIR/gradle/.version"
+    local current_version=""
+
+    [ -f "$version_file" ] && current_version=$(cat "$version_file")
+
+    if [ "$current_version" = "$version" ]; then
+        echo "✓ Gradle already at version $version"
+        return 0
+    fi
+
+    echo "→ Downloading Gradle $version..."
+    local temp_dir="$BASE_DIR/gradle_temp"
+    rm -rf "$temp_dir"
+    mkdir -p "$temp_dir"
+
+    curl -fLsS "$url" -o "$temp_dir/gradle.zip"
+    unzip -q "$temp_dir/gradle.zip" -d "$temp_dir"
+
+    rm -rf "$BASE_DIR/gradle"
+    mv "$temp_dir/gradle-${version}" "$BASE_DIR/gradle"
+    rm -rf "$temp_dir"
+    echo "$version" > "$version_file"
+    echo "✓ Gradle $version installed"
+}
+
+install_maven() {
+    local version=$(curl -s https://dlcdn.apache.org/maven/maven-3/ | grep -oP 'href="\K[0-9]+\.[0-9]+\.[0-9]+(?=/)' | sort -V | tail -1)
+
+    if [ -z "$version" ]; then
+        echo "✗ Failed to fetch version for Maven"
+        return 1
+    fi
+
+    local url="https://dlcdn.apache.org/maven/maven-3/${version}/binaries/apache-maven-${version}-bin.tar.gz"
+    local version_file="$BASE_DIR/maven/.version"
+    local current_version=""
+
+    [ -f "$version_file" ] && current_version=$(cat "$version_file")
+
+    if [ "$current_version" = "$version" ]; then
+        echo "✓ Maven already at version $version"
+        return 0
+    fi
+
+    echo "→ Downloading Maven $version..."
+    local temp_dir="$BASE_DIR/maven_temp"
+    rm -rf "$temp_dir"
+    mkdir -p "$temp_dir"
+
+    # Download to file first, then extract
+    curl -fLsS "$url" -o "$temp_dir/maven.tar.gz"
+    tar xzf "$temp_dir/maven.tar.gz" -C "$temp_dir" --strip-components=1
+    rm "$temp_dir/maven.tar.gz"
+
+    rm -rf "$BASE_DIR/maven"
+    mv "$temp_dir" "$BASE_DIR/maven"
+    echo "$version" > "$version_file"
+    echo "✓ Maven $version installed"
+}
+
+install_pgadmin() {
+    # pgAdmin uses tags like "REL-9_10" instead of releases
+    local tag=$(github_api https://api.github.com/repos/pgadmin-org/pgadmin4/tags | grep -oP '"name": "REL-\K[0-9]+_[0-9]+' | head -1)
+
+    if [ -z "$tag" ]; then
+        echo "✗ Failed to fetch version for pgAdmin"
+        return 1
+    fi
+
+    # Convert REL-9_10 to 9.10
+    local version=$(echo "$tag" | tr '_' '.')
+    local url="https://ftp.postgresql.org/pub/pgadmin/pgadmin4/v${version}/pip/pgadmin4-${version}-py3-none-any.whl"
+    local version_file="$BASE_DIR/pgadmin/.version"
+    local current_version=""
+
+    [ -f "$version_file" ] && current_version=$(cat "$version_file")
+
+    if [ "$current_version" = "$version" ]; then
+        echo "✓ pgAdmin already at version $version"
+        return 0
+    fi
+
+    echo "→ Downloading pgAdmin $version..."
+    local temp_dir="$BASE_DIR/pgadmin_temp"
+    rm -rf "$temp_dir"
+    mkdir -p "$temp_dir"
+
+    curl -fLsS "$url" -o "$temp_dir/pgadmin4.whl"
+    unzip -q "$temp_dir/pgadmin4.whl" -d "$temp_dir"
+
+    rm -rf "$BASE_DIR/pgadmin"
+    mv "$temp_dir" "$BASE_DIR/pgadmin"
+    echo "$version" > "$version_file"
+
+    cat > "$BASE_DIR/pgadmin/pgadmin4" <<'EOF'
+#!/bin/bash
+cd "$(dirname "$0")"
+python3 -m pgadmin4
+EOF
+    chmod +x "$BASE_DIR/pgadmin/pgadmin4"
+
+    echo "✓ pgAdmin $version installed"
+    create_desktop_file "pgadmin4" "pgAdmin 4" "$BASE_DIR/pgadmin/pgadmin4" "$BASE_DIR/pgadmin/pgadmin4/static/img/logo-256.png" "PostgreSQL Tools"
+}
+
+download_single_binary() {
+    local name=$1 binary=$2 url=$3 version=$4
+    local version_file="$BASE_DIR/.versions/$binary"
+    local current_version=""
+
+    if [ -z "$version" ]; then
+        echo "✗ Failed to fetch version for $name"
+        return 1
+    fi
+
+    [ -f "$version_file" ] && current_version=$(cat "$version_file")
+
+    if [ "$current_version" = "$version" ]; then
+        echo "✓ $name already at version $version"
+        return 0
+    fi
+
+    echo "→ Downloading $name $version..."
+    mkdir -p "$BASE_DIR/bin"
+    mkdir -p "$BASE_DIR/.versions"
+    curl -fLsS "$url" -o "$BASE_DIR/bin/$binary"
+    chmod +x "$BASE_DIR/bin/$binary"
+    echo "$version" > "$version_file"
+    echo "✓ $name $version installed"
+}
+
+install_kubectl() {
+    local version=$(curl -sL https://dl.k8s.io/release/stable.txt)
+    local url="https://dl.k8s.io/release/${version}/bin/linux/amd64/kubectl"
+    download_single_binary "kubectl" "kubectl" "$url" "$version"
+}
+
+install_kind() {
+    local version=$(curl -s https://api.github.com/repos/kubernetes-sigs/kind/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+    local url="https://github.com/kubernetes-sigs/kind/releases/download/${version}/kind-linux-amd64"
+    download_single_binary "kind" "kind" "$url" "$version"
+}
+
+install_k9s() {
+    local version=$(curl -s https://api.github.com/repos/derailed/k9s/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+    local url="https://github.com/derailed/k9s/releases/download/${version}/k9s_Linux_amd64.tar.gz"
+    download_and_extract "k9s" "k9s" "$url" "$version" 0
+}
+
+install_helm() {
+    local version=$(curl -s https://api.github.com/repos/helm/helm/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+    local url="https://get.helm.sh/helm-${version}-linux-amd64.tar.gz"
+    download_and_extract "Helm" "helm" "$url" "$version" 1
+}
+
+install_stern() {
+    local version=$(curl -s https://api.github.com/repos/stern/stern/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+    local url="https://github.com/stern/stern/releases/download/${version}/stern_${version#v}_linux_amd64.tar.gz"
+    download_and_extract "Stern" "stern" "$url" "$version" 0
+}
+
+install_skaffold() {
+    local version=$(curl -s https://api.github.com/repos/GoogleContainerTools/skaffold/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+    local url="https://github.com/GoogleContainerTools/skaffold/releases/download/${version}/skaffold-linux-amd64"
+    download_single_binary "Skaffold" "skaffold" "$url" "$version"
+}
+
+install_jq() {
+    local version=$(curl -s https://api.github.com/repos/jqlang/jq/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+    local url="https://github.com/jqlang/jq/releases/download/${version}/jq-linux-amd64"
+    download_single_binary "jq" "jq" "$url" "$version"
+}
+
+install_yq() {
+    local version=$(github_api https://api.github.com/repos/mikefarah/yq/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+    local url="https://github.com/mikefarah/yq/releases/download/${version}/yq_linux_amd64"
+    download_single_binary "yq" "yq" "$url" "$version"
+}
+
+install_ollama() {
+    local version=$(github_api https://api.github.com/repos/ollama/ollama/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+    local url="https://github.com/ollama/ollama/releases/download/${version}/ollama-linux-amd64.tar.zst"
+    local version_file="$BASE_DIR/ollama/.version"
+    local current_version=""
+
+    if [ -z "$version" ]; then
+        echo "✗ Failed to fetch version for Ollama"
+        return 1
+    fi
+
+    [ -f "$version_file" ] && current_version=$(cat "$version_file")
+
+    if [ "$current_version" = "$version" ]; then
+        echo "✓ Ollama already at version $version"
+        return 0
+    fi
+
+    echo "→ Downloading Ollama $version..."
+    local temp_dir="$BASE_DIR/ollama_temp"
+    rm -rf "$temp_dir"
+    mkdir -p "$temp_dir"
+
+    curl -fLsS "$url" -o "$temp_dir/ollama.tar.zst"
+    tar --zstd -xf "$temp_dir/ollama.tar.zst" -C "$temp_dir"
+    rm "$temp_dir/ollama.tar.zst"
+
+    rm -rf "$BASE_DIR/ollama"
+    mv "$temp_dir" "$BASE_DIR/ollama"
+    echo "$version" > "$version_file"
+    echo "✓ Ollama $version installed"
+}
+
+install_ffmpeg() {
+    local version=$(github_api https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+    local url="https://github.com/BtbN/FFmpeg-Builds/releases/download/${version}/ffmpeg-master-latest-linux64-nonfree.tar.xz"
+    local version_file="$BASE_DIR/ffmpeg/.version"
+    local current_version=""
+
+    if [ -z "$version" ]; then
+        echo "✗ Failed to fetch version for FFmpeg"
+        return 1
+    fi
+
+    [ -f "$version_file" ] && current_version=$(cat "$version_file")
+
+    if [ "$current_version" = "$version" ]; then
+        echo "✓ FFmpeg already at version $version"
+        return 0
+    fi
+
+    echo "→ Downloading FFmpeg $version..."
+    local temp_dir="$BASE_DIR/ffmpeg_temp"
+    rm -rf "$temp_dir"
+    mkdir -p "$temp_dir"
+
+    curl -fLsS "$url" -o "$temp_dir/ffmpeg.tar.xz"
+    tar xJf "$temp_dir/ffmpeg.tar.xz" -C "$temp_dir"
+    rm "$temp_dir/ffmpeg.tar.xz"
+
+    rm -rf "$BASE_DIR/ffmpeg"
+    mv "$temp_dir" "$BASE_DIR/ffmpeg"
+    echo "$version" > "$version_file"
+    echo "✓ FFmpeg $version installed"
+}
+
+echo "Starting software installation in $BASE_DIR..."
+
+install_idea
+install_nushell
+install_starship
+install_obsidian
+install_gradle
+install_maven
+#install_pgadmin
+install_kubectl
+install_kind
+install_k9s
+install_helm
+install_stern
+install_skaffold
+install_jq
+install_yq
+install_ollama
+install_ffmpeg
+
+for ver in 8 11 17 21 23; do
+    install_corretto $ver
+done
+
+# Create symlinks in bin directory for all tools
+mkdir -p "$BASE_DIR/bin"
+[ -f "$BASE_DIR/gradle/bin/gradle" ] && ln -sf "$BASE_DIR/gradle/bin/gradle" "$BASE_DIR/bin/gradle"
+[ -f "$BASE_DIR/maven/bin/mvn" ] && ln -sf "$BASE_DIR/maven/bin/mvn" "$BASE_DIR/bin/mvn"
+[ -f "$BASE_DIR/nushell/nu" ] && ln -sf "$BASE_DIR/nushell/nu" "$BASE_DIR/bin/nu"
+[ -f "$BASE_DIR/starship/starship" ] && ln -sf "$BASE_DIR/starship/starship" "$BASE_DIR/bin/starship"
+[ -f "$BASE_DIR/k9s/k9s" ] && ln -sf "$BASE_DIR/k9s/k9s" "$BASE_DIR/bin/k9s"
+[ -f "$BASE_DIR/helm/helm" ] && ln -sf "$BASE_DIR/helm/helm" "$BASE_DIR/bin/helm"
+[ -f "$BASE_DIR/stern/stern" ] && ln -sf "$BASE_DIR/stern/stern" "$BASE_DIR/bin/stern"
+[ -f "$BASE_DIR/idea/bin/idea.sh" ] && ln -sf "$BASE_DIR/idea/bin/idea.sh" "$BASE_DIR/bin/idea"
+[ -f "$BASE_DIR/obsidian/obsidian" ] && ln -sf "$BASE_DIR/obsidian/obsidian" "$BASE_DIR/bin/obsidian"
+[ -f "$BASE_DIR/ollama/bin/ollama" ] && ln -sf "$BASE_DIR/ollama/bin/ollama" "$BASE_DIR/bin/ollama"
+[ -f "$BASE_DIR/ffmpeg/bin/ffmpeg" ] && ln -sf "$BASE_DIR/ffmpeg/bin/ffmpeg" "$BASE_DIR/bin/ffmpeg"
+[ -f "$BASE_DIR/ffmpeg/bin/ffplay" ] && ln -sf "$BASE_DIR/ffmpeg/bin/ffplay" "$BASE_DIR/bin/ffplay"
+[ -f "$BASE_DIR/ffmpeg/bin/ffprobe" ] && ln -sf "$BASE_DIR/ffmpeg/bin/ffprobe" "$BASE_DIR/bin/ffprobe"
+
+cat > "$BASE_DIR/env.sh" <<EOF
+# Generated by install-software.sh
+# Source this file from your shell config (.bashrc, .zshrc, etc.)
+# Example: echo 'source $BASE_DIR/env.sh' >> ~/.bashrc
+
+export PATH="\$PATH:$BASE_DIR/bin"
+EOF
+
+echo ""
+echo "All software installed successfully!"
+echo "Base directory: $BASE_DIR"
+[ "$EUID" -ne 0 ] && echo "Desktop files: $DESKTOP_DIR"
+echo ""
+echo "To use installed tools, add this to your shell config:"
+echo "  source $BASE_DIR/env.sh"

@@ -1,0 +1,83 @@
+#!/bin/bash
+#
+# Kernel boot parameter tweaks: zswap (lzo), IPv6 disabled.
+# Supports GRUB (/etc/default/grub) and systemd-boot (/etc/kernel/cmdline).
+#
+
+if [ "$EUID" -ne 0 ]; then
+    echo "Please run as root"
+    exit 1
+fi
+
+PARAMS="zswap.enabled=1 zswap.compressor=lzo ipv6.disable=1"
+
+add_params_grub() {
+    local grub_file="/etc/default/grub"
+    local changed=0
+
+    cp -p "$grub_file" "${grub_file}.bak"
+
+    for param in $PARAMS; do
+        local key="${param%%=*}"
+        # only match the active GRUB_CMDLINE_LINUX_DEFAULT line, not commented/other lines
+        if ! grep -E "^GRUB_CMDLINE_LINUX_DEFAULT=.*\b${key}\b" "$grub_file" >/dev/null; then
+            sed -i "s|^\(GRUB_CMDLINE_LINUX_DEFAULT=\"[^\"]*\)\"|\1 $param\"|" "$grub_file"
+            changed=1
+        fi
+    done
+
+    if [[ $changed -eq 0 ]]; then
+        echo "Already configured in $grub_file"
+        return
+    fi
+
+    echo "Updated $grub_file (backup at ${grub_file}.bak)"
+    grep CMDLINE "$grub_file"
+
+    if command -v update-grub &>/dev/null; then
+        update-grub
+    elif command -v grub2-mkconfig &>/dev/null; then
+        grub2-mkconfig -o /boot/grub2/grub.cfg
+    fi
+}
+
+add_params_sdboot() {
+    local cmdline_file="/etc/kernel/cmdline"
+    local changed=0
+
+    if ! command -v sdbootutil &>/dev/null; then
+        echo "ERROR: sdbootutil is not installed"
+        exit 1
+    fi
+
+    cp -p "$cmdline_file" "${cmdline_file}.bak"
+
+    for param in $PARAMS; do
+        local key="${param%%=*}"
+        if ! grep -E "\b${key}\b" "$cmdline_file" >/dev/null; then
+            sed -i "s|$| $param|" "$cmdline_file"
+            changed=1
+        fi
+    done
+
+    if [[ $changed -eq 0 ]]; then
+        echo "Already configured in $cmdline_file"
+        return
+    fi
+
+    echo "Updated $cmdline_file (backup at ${cmdline_file}.bak)"
+    cat "$cmdline_file"
+
+    sdbootutil update-all-entries
+}
+
+if [ -f /etc/kernel/cmdline ]; then
+    add_params_sdboot
+elif [ -f /etc/default/grub ]; then
+    add_params_grub
+else
+    echo "No supported bootloader config found"
+    exit 1
+fi
+
+echo "Reboot to apply changes."

@@ -1,0 +1,37 @@
+#!/bin/bash
+set -euo pipefail
+
+if [ "$EUID" -ne 0 ]; then
+    echo "must run as root" >&2
+    exit 1
+fi
+
+. /etc/os-release
+
+case $ID in
+    opensuse-leap|opensuse-tumbleweed)
+        rpm --import https://brave-browser-rpm-release.s3.brave.com/brave-core.asc
+        zypper addrepo https://brave-browser-rpm-release.s3.brave.com/brave-browser.repo
+        zypper --non-interactive --gpg-auto-import-keys ref
+        zypper --non-interactive install brave-browser
+        ;;
+    fedora)
+        rpm --import https://brave-browser-rpm-release.s3.brave.com/brave-core.asc
+        dnf config-manager addrepo --from-repofile=https://brave-browser-rpm-release.s3.brave.com/brave-browser.repo
+        dnf install -y brave-browser
+        ;;
+    ubuntu|debian|mint)
+        apt update
+        apt install -y curl gnupg
+        curl -fsSL https://brave-browser-apt-release.s3.brave.com/brave-core.asc | gpg --dearmor -o /etc/apt/trusted.gpg.d/brave-browser-archive-keyring.gpg
+        echo "deb [arch=amd64 signed-by=/etc/apt/trusted.gpg.d/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main" > /etc/apt/sources.list.d/brave-browser-release.list
+        apt update
+        apt install -y brave-browser
+        ;;
+    *)
+        echo "Unsupported distribution: $ID" >&2
+        exit 1
+        ;;
+esac
+
+ln -sfn /usr/bin/brave-browser /usr/local/bin/brave

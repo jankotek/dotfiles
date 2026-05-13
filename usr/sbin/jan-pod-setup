@@ -1,0 +1,801 @@
+#!/usr/bin/env bash
+#
+# jan-pod-setup — Create a maximally restricted user + rootless podman pod
+#                 as a systemd user service.
+#
+# Usage:  sudo jan-pod-setup <name>
+#
+# The <name> becomes ALL of: username, home dir name, pod name, service name.
+# User home: /var/pod/<name>
+# Admin: jan-pod-manage <name> <command>
+#
+# Supports: Ubuntu 24.04 (AppArmor), openSUSE Tumbleweed (SELinux or AppArmor).
+#
+set -euo pipefail
+
+# ---------- validation ----------
+
+if [[ $EUID -ne 0 ]]; then
+    echo "ERROR: must run as root." >&2
+    exit 1
+fi
+
+NAME="${1:?Usage: $0 <name>}"
+
+if ! [[ "$NAME" =~ ^[a-z][a-z0-9_-]{0,31}$ ]]; then
+    echo "ERROR: name must match ^[a-z][a-z0-9_-]{0,31}$" >&2
+    exit 1
+fi
+
+HOME_DIR="/var/pod/${NAME}"
+
+# ---------- detect distro & MAC ----------
+# Source os-release in a subshell — it exports NAME= which clobbers ours.
+
+DISTRO_NAME=$(. /etc/os-release 2>/dev/null && echo "$PRETTY_NAME") || {
+    echo "ERROR: cannot detect distro." >&2
+    exit 1
+}
+
+MAC="none"
+if command -v aa-status &>/dev/null && aa-status --enabled 2>/dev/null; then
+    MAC="apparmor"
+elif command -v getenforce &>/dev/null && [[ "$(getenforce 2>/dev/null)" != "Disabled" ]]; then
+    MAC="selinux"
+fi
+
+echo "==> Distro: ${DISTRO_NAME}  MAC: ${MAC}"
+
+# ---------- install deps if missing ----------
+
+install_if_missing() {
+    local bins=("$@")
+    local missing=()
+    for b in "${bins[@]}"; do
+        command -v "$b" &>/dev/null || missing+=("$b")
+    done
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        echo "==> Installing missing tools: ${missing[*]}"
+        if command -v apt-get &>/dev/null; then
+            apt-get update -qq
+            local pkgs=()
+            for m in "${missing[@]}"; do
+                case "$m" in
+                    podman)      pkgs+=(podman) ;;
+                    pasta)       pkgs+=(passt) ;;
+                    newuidmap)   pkgs+=(uidmap) ;;
+                    slirp4netns) pkgs+=(slirp4netns) ;;
+                    setfacl)     pkgs+=(acl) ;;
+                    *)           pkgs+=("$m") ;;
+                esac
+            done
+            apt-get install -y -qq "${pkgs[@]}"
+        elif command -v zypper &>/dev/null; then
+            local pkgs=()
+            for m in "${missing[@]}"; do
+                case "$m" in
+                    podman)      pkgs+=(podman) ;;
+                    pasta)       pkgs+=(passt) ;;
+                    newuidmap)   pkgs+=(shadow) ;;
+                    slirp4netns) pkgs+=(slirp4netns) ;;
+                    setfacl)     pkgs+=(acl) ;;
+                    *)           pkgs+=("$m") ;;
+                esac
+            done
+            zypper -n install "${pkgs[@]}"
+        else
+            echo "ERROR: unsupported package manager." >&2
+            exit 1
+        fi
+    fi
+}
+
+install_if_missing podman pasta newuidmap setfacl
+
+# ---------- detect podman version ----------
+
+PODMAN_VER=$(podman --version | grep -oP '\d+\.\d+' | head -1)
+PODMAN_MAJOR=${PODMAN_VER%%.*}
+if (( PODMAN_MAJOR >= 5 )); then
+    QUADLET_POD=true
+    echo "==> Podman ${PODMAN_VER} — using Quadlet .pod + .container files"
+else
+    QUADLET_POD=false
+    echo "==> Podman ${PODMAN_VER} — using Quadlet .container only (no .pod support before 5.0)"
+fi
+
+# ---------- allocate non-overlapping subuid range ----------
+
+allocate_subuid_range() {
+    local size=65536
+    local start=100000
+    # Find the highest allocated range end across all users.
+    while IFS=: read -r _ range_start range_count; do
+        local range_end=$(( range_start + range_count ))
+        if (( range_end > start )); then
+            start=$range_end
+        fi
+    done < /etc/subuid 2>/dev/null || true
+    # Align to 65536 boundary for clean mapping.
+    start=$(( ((start + size - 1) / size) * size ))
+    echo "${start}-$(( start + size - 1 ))"
+}
+
+# ---------- create maximally restricted user ----------
+
+# Ensure /var/pod exists with restricted permissions.
+# 0711: others can traverse into it (needed for systemd to reach the
+# user's home) but cannot list its contents — users cannot discover
+# what other pods exist. Idempotent — safe on repeat runs.
+install -d -m 0711 /var/pod
+
+if id "$NAME" &>/dev/null; then
+    echo "==> User '$NAME' already exists."
+else
+    echo "==> Creating maximally restricted user '$NAME'"
+    useradd \
+        --system \
+        --no-user-group \
+        --gid nogroup \
+        --create-home \
+        --home-dir "$HOME_DIR" \
+        --shell /usr/sbin/nologin \
+        --no-log-init \
+        "$NAME"
+fi
+
+# ---------- user hardening (idempotent — runs every invocation) ----------
+# Hoisted out of the user-creation guard so re-running on a partially set up
+# pod completes the hardening rather than silently skipping it.
+
+# Force 0700 on home — useradd may use system UMASK which could be laxer.
+chmod 0700 "$HOME_DIR"
+
+# Lock the password — no password login ever.
+# Combined with nologin shell, this makes SSH login impossible
+# without needing DenyUsers in sshd_config.
+passwd -l "$NAME" &>/dev/null || true
+
+# Deny cron and at — only append if not already present.
+for denyfile in /etc/cron.deny /etc/at.deny; do
+    [ -f "$denyfile" ] || touch "$denyfile"
+    grep -qxF "$NAME" "$denyfile" 2>/dev/null || echo "$NAME" >> "$denyfile"
+done
+
+# Deny sudo — create a sudoers drop-in that explicitly blocks this user.
+# Belt-and-suspenders: user has no password and isn't in sudo/wheel,
+# but this prevents accidental future `usermod -aG sudo <name>`.
+cat > "/etc/sudoers.d/deny-${NAME}" <<SUDOERS
+# Deny all sudo access for pod user ${NAME}
+${NAME} ALL=(ALL) !ALL
+SUDOERS
+chmod 0440 "/etc/sudoers.d/deny-${NAME}"
+
+# Ensure subuid/subgid ranges exist (needed for rootless podman).
+# flock /etc/subuid: serialize concurrent jan-pod-setup invocations so two
+# pods don't get overlapping subuid ranges (which would let one pod's
+# containers see/modify the other's storage).
+(
+    flock -x 9
+    if ! grep -q "^${NAME}:" /etc/subuid 2>/dev/null; then
+        SUBID_RANGE=$(allocate_subuid_range)
+        echo "==> Allocating subordinate UID/GID range: ${SUBID_RANGE}"
+        usermod --add-subuids "$SUBID_RANGE" --add-subgids "$SUBID_RANGE" "$NAME"
+    fi
+) 9>/etc/subuid
+
+USER_UID=$(id -u "$NAME")
+
+# ---------- enable linger (starts user systemd at boot) ----------
+
+echo "==> Enabling linger for '$NAME'"
+loginctl enable-linger "$NAME"
+
+# ---------- cgroup delegation (required for rootless podman on cgroup v2) ----------
+
+DELEGATE_DIR="/etc/systemd/system/user@${USER_UID}.service.d"
+if [[ ! -f "${DELEGATE_DIR}/delegate.conf" ]]; then
+    install -d -m 0755 "$DELEGATE_DIR"
+    cat > "${DELEGATE_DIR}/delegate.conf" <<DELEGATE
+[Service]
+Delegate=cpu cpuset io memory pids
+DELEGATE
+    systemctl daemon-reload
+    echo "==> Enabled cgroup delegation for user@${USER_UID}.service"
+fi
+
+# ---------- directory structure ----------
+
+echo "==> Setting up directory structure"
+
+QUADLET_DIR="${HOME_DIR}/.config/containers/systemd"
+CONTAINER_CONF_DIR="${HOME_DIR}/.config/containers"
+
+# Private tmp inside home — podman uses TMPDIR for image layer downloads.
+# This avoids any need for /tmp or /var/tmp access.
+POD_TMP="${HOME_DIR}/.tmp"
+
+install -d -o "$NAME" -g nogroup -m 0700 \
+    "$HOME_DIR" \
+    "${HOME_DIR}/.config" \
+    "${HOME_DIR}/.config/containers" \
+    "$QUADLET_DIR" \
+    "${HOME_DIR}/.local" \
+    "${HOME_DIR}/.local/share" \
+    "${HOME_DIR}/.local/share/containers" \
+    "${HOME_DIR}/.local/share/containers/storage" \
+    "${HOME_DIR}/bin" \
+    "${HOME_DIR}/data" \
+    "$POD_TMP"
+
+# Empty dir used to mask /home and /root inside containers.
+install -d -o "$NAME" -g nogroup -m 0000 "${HOME_DIR}/.empty"
+
+# ---------- containers.conf — hardened defaults ----------
+
+cat > "${CONTAINER_CONF_DIR}/containers.conf" <<CONF
+[containers]
+# Drop all capabilities; add back only what individual containers need.
+default_capabilities = []
+
+# Read-only root filesystem — uncomment if your image supports it.
+# Many images (Nextcloud, etc.) need writable rootfs.
+# Use ReadOnly=true in the .container file for images that support it.
+# read_only = true
+
+# No default devices.
+default_devices = []
+
+# Private namespaces — no host leakage.
+pidns = "private"
+ipcns = "private"
+utsns = "private"
+cgroupns = "private"
+
+# No new privileges.
+no_new_privileges = true
+
+[engine]
+# Use crun if available (faster), otherwise fall back to runc.
+# runtime = "crun"
+
+# Pass TMPDIR to podman processes — never touch system /tmp or /var/tmp.
+env = ["TMPDIR=${POD_TMP}"]
+CONF
+
+chown "$NAME":nogroup "${CONTAINER_CONF_DIR}/containers.conf"
+
+# ---------- storage.conf — explicit paths ----------
+
+cat > "${CONTAINER_CONF_DIR}/storage.conf" <<CONF
+[storage]
+driver = "overlay"
+graphroot = "${HOME_DIR}/.local/share/containers/storage"
+runroot = "/run/user/${USER_UID}/containers"
+
+[storage.options.overlay]
+mount_program = "/usr/bin/fuse-overlayfs"
+CONF
+
+chown "$NAME":nogroup "${CONTAINER_CONF_DIR}/storage.conf"
+
+# ---------- registries.conf ----------
+
+cat > "${CONTAINER_CONF_DIR}/registries.conf" <<'CONF'
+unqualified-search-registries = ["docker.io"]
+
+[[registry]]
+prefix = "docker.io"
+location = "docker.io"
+CONF
+
+chown "$NAME":nogroup "${CONTAINER_CONF_DIR}/registries.conf"
+
+# ---------- Quadlet files ----------
+
+if [[ "$QUADLET_POD" == true ]]; then
+    # Podman 5.x+ — native .pod file support.
+    cat > "${QUADLET_DIR}/${NAME}.pod" <<EOF
+[Unit]
+Description=Pod ${NAME}
+Wants=network-online.target
+After=network-online.target
+
+[Pod]
+PodName=${NAME}
+
+# --- Port mapping (host:container, high ports only) ---
+# PublishPort=8080:8080
+# PublishPort=9090:9090
+
+# --- DNS ---
+# DNS=1.1.1.1
+# AddHost=dbhost:10.0.0.5
+
+[Install]
+WantedBy=default.target
+EOF
+    POD_REF="Pod=${NAME}.pod"
+    SERVICE_NAME="${NAME}-pod.service"
+else
+    # Podman 4.x — no .pod support; container manages its own ports.
+    POD_REF="# Pod support requires podman 5.x+"
+    SERVICE_NAME="${NAME}-app.service"
+fi
+
+cat > "${QUADLET_DIR}/${NAME}-app.container" <<EOF
+[Unit]
+Description=${NAME} application container
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+# --- EDIT: image and command ---
+Image=docker.io/library/alpine:latest
+Exec=sleep infinity
+ContainerName=${NAME}-app
+
+${POD_REF}
+
+# --- Security ---
+DropCapability=ALL
+NoNewPrivileges=true
+ReadOnly=true
+
+# --- Logging: container stdout/stderr goes to journald ---
+LogDriver=journald
+
+# --- Environment ---
+# Environment=KEY=value
+# EnvironmentFile=${HOME_DIR}/data/env
+
+# --- Port mapping (when not using a .pod file) ---
+$(if [[ "$QUADLET_POD" != true ]]; then
+    echo "# PublishPort=8080:8080"
+    echo "# PublishPort=9090:9090"
+fi)
+
+# --- Volumes ---
+Volume=${HOME_DIR}/.empty:/home:ro
+Volume=${HOME_DIR}/.empty:/root:ro
+Volume=${HOME_DIR}/data:/data:Z
+
+# --- Writable tmpfs inside container (if app needs /tmp or /run) ---
+# Tmpfs=/tmp:rw,noexec,nosuid,size=64m
+# Tmpfs=/run:rw,noexec,nosuid,size=32m
+
+# --- Health check ---
+# HealthCmd=curl -f http://localhost:8080/health || exit 1
+# HealthInterval=30s
+# HealthTimeout=5s
+# HealthRetries=3
+
+# --- Auto-update from registry ---
+# AutoUpdate=registry
+
+# --- Resource limits (Quadlet level — applied via podman) ---
+# Memory=512M
+# PodmanArgs=--pids-limit=128
+# PodmanArgs=--cpus=0.5
+
+[Service]
+# --- Resource limits (systemd level — applied via cgroup) ---
+# CPUQuota=50%
+# MemoryMax=512M
+# TasksMax=64
+
+[Install]
+WantedBy=default.target
+EOF
+
+chown -R "$NAME":nogroup "$QUADLET_DIR"
+
+# ---------- symlinks at top level for convenience ----------
+# Everything you'd ever want to edit is one ls away in /var/pod/<name>/.
+
+echo "==> Creating convenience symlinks"
+
+# Quadlet definitions (the main config you'll edit)
+if [[ "$QUADLET_POD" == true ]]; then
+    ln -sfn "${QUADLET_DIR}/${NAME}.pod"  "${HOME_DIR}/pod.conf"
+    chown -h "$NAME":nogroup "${HOME_DIR}/pod.conf"
+fi
+ln -sfn "${QUADLET_DIR}/${NAME}-app.container"  "${HOME_DIR}/app.container"
+
+# Podman engine / storage / registry config
+ln -sfn "${CONTAINER_CONF_DIR}/containers.conf"  "${HOME_DIR}/containers.conf"
+ln -sfn "${CONTAINER_CONF_DIR}/storage.conf"     "${HOME_DIR}/storage.conf"
+ln -sfn "${CONTAINER_CONF_DIR}/registries.conf"  "${HOME_DIR}/registries.conf"
+
+# Environment vars injected into the user systemd session
+ln -sfn "${HOME_DIR}/.config/environment.d/pod.conf" "${HOME_DIR}/environment.conf"
+
+# Record the service name for helper scripts.
+echo "$SERVICE_NAME" > "${HOME_DIR}/.service-name"
+chown "$NAME":nogroup "${HOME_DIR}/.service-name"
+
+chown -h "$NAME":nogroup \
+    "${HOME_DIR}/app.container" \
+    "${HOME_DIR}/containers.conf" \
+    "${HOME_DIR}/storage.conf" \
+    "${HOME_DIR}/registries.conf" \
+    "${HOME_DIR}/environment.conf"
+
+# ---------- helper scripts ----------
+
+cat > "${HOME_DIR}/bin/upgrade" <<'SCRIPT'
+#!/usr/bin/env bash
+# Pull latest images for all containers in the pod, then restart.
+set -euo pipefail
+HOME_DIR="$(dirname "$(dirname "$0")")"
+SVC=$(cat "${HOME_DIR}/.service-name")
+
+echo "==> Pulling images ..."
+podman images --format '{{.Repository}}:{{.Tag}}' \
+    | grep -v '<none>' | sort -u \
+    | while read -r img; do
+        podman pull "$img" && echo "    $img OK" || echo "    $img FAILED"
+    done
+
+echo "==> Restarting service ..."
+systemctl --user restart "$SVC"
+echo "==> Done."
+podman ps -a --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"
+SCRIPT
+
+cat > "${HOME_DIR}/bin/recreate" <<'SCRIPT'
+#!/usr/bin/env bash
+# Reload Quadlet files and restart the service.
+set -euo pipefail
+HOME_DIR="$(dirname "$(dirname "$0")")"
+SVC=$(cat "${HOME_DIR}/.service-name")
+
+echo "==> Reloading systemd units ..."
+systemctl --user daemon-reload
+echo "==> Restarting service ..."
+systemctl --user restart "$SVC"
+echo "==> Status:"
+systemctl --user status "$SVC" --no-pager || true
+SCRIPT
+
+cat > "${HOME_DIR}/bin/status" <<'SCRIPT'
+#!/usr/bin/env bash
+# Show pod/container and service status.
+set -euo pipefail
+HOME_DIR="$(dirname "$(dirname "$0")")"
+SVC=$(cat "${HOME_DIR}/.service-name")
+
+echo "=== Containers ==="
+podman ps -a --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
+if podman pod ls &>/dev/null; then
+    echo ""
+    echo "=== Pods ==="
+    podman pod ps
+fi
+echo ""
+echo "=== Service ==="
+systemctl --user status "$SVC" --no-pager 2>/dev/null || true
+SCRIPT
+
+chmod 0700 "${HOME_DIR}/bin/"*
+chown "$NAME":nogroup "${HOME_DIR}/bin/"*
+
+# ---------- environment file for the user session ----------
+# This ensures TMPDIR and XDG vars are set whenever the user's
+# systemd instance starts (including at boot via linger).
+
+install -d -o "$NAME" -g nogroup -m 0700 "${HOME_DIR}/.config/environment.d"
+
+cat > "${HOME_DIR}/.config/environment.d/pod.conf" <<EOF
+TMPDIR=${POD_TMP}
+XDG_RUNTIME_DIR=/run/user/${USER_UID}
+EOF
+
+chown "$NAME":nogroup "${HOME_DIR}/.config/environment.d/pod.conf"
+
+# ---------- sysctl: raise unprivileged port floor to 1024 for this user ----------
+# This is a kernel-level guarantee — even if someone manages to add
+# NET_BIND_SERVICE to a container, the kernel will refuse bind() < 1024
+# for any process running under this UID.
+
+SYSCTL_CONF="/etc/sysctl.d/90-podman-${NAME}.conf"
+cat > "$SYSCTL_CONF" <<EOF
+# Prevent UID ${USER_UID} (${NAME}) from binding ports below 1024.
+# net.ipv4.ip_unprivileged_port_start applies system-wide, so we only
+# write it if the current value is < 1024 (it defaults to 1024 on most
+# distros; this is a safety net).
+net.ipv4.ip_unprivileged_port_start = 1024
+
+# Restrict dmesg to root — prevents leaking kernel info, hardware, boot params.
+kernel.dmesg_restrict = 1
+EOF
+
+# Apply now. This is a system-wide sysctl — it raises the floor for ALL
+# unprivileged users, which is fine since privileged services use root.
+CURRENT_PORT_START=$(cat /proc/sys/net/ipv4/ip_unprivileged_port_start 2>/dev/null || echo 1024)
+if (( CURRENT_PORT_START < 1024 )); then
+    sysctl -w net.ipv4.ip_unprivileged_port_start=1024 >/dev/null
+    echo "==> Raised net.ipv4.ip_unprivileged_port_start from ${CURRENT_PORT_START} to 1024"
+else
+    echo "==> net.ipv4.ip_unprivileged_port_start already ${CURRENT_PORT_START} (>= 1024)"
+fi
+sysctl -w kernel.dmesg_restrict=1 >/dev/null 2>&1 && \
+    echo "==> kernel.dmesg_restrict=1 (dmesg restricted to root)" || true
+
+# ---------- AppArmor profile (Ubuntu) ----------
+
+if [[ "$MAC" == "apparmor" ]]; then
+    echo "==> Installing AppArmor profile for '${NAME}'"
+
+    cat > "/etc/apparmor.d/podman-${NAME}" <<APPARMOR
+# AppArmor profile for rootless podman pod user: ${NAME}
+# Maximally restrictive — only paths podman absolutely needs.
+
+#include <tunables/global>
+
+profile podman-${NAME} flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+  #include <abstractions/nameservice>
+
+  # --- Networking: pasta/slirp4netns need to create sockets ---
+  # TCP and UDP for container traffic forwarding.
+  network inet     stream,
+  network inet     dgram,
+  network inet6    stream,
+  network inet6    dgram,
+  # Unix sockets for podman API, conmon, pasta communication.
+  network unix     stream,
+  network unix     dgram,
+  # Netlink for pasta to read routing tables and configure interfaces.
+  network netlink  raw,
+  network netlink  dgram,
+
+  # --- User home: full R/W (container storage, config, private tmp) ---
+  owner ${HOME_DIR}/              r,
+  owner ${HOME_DIR}/**            rwlk,
+
+  # --- XDG_RUNTIME_DIR: podman sockets + runtime state ---
+  owner /run/user/${USER_UID}/          r,
+  owner /run/user/${USER_UID}/**        rwlk,
+
+  # --- Podman / OCI runtime binaries (read + exec, no write) ---
+  /usr/bin/podman              rix,
+  /usr/bin/crun                rix,
+  /usr/bin/conmon              rix,
+  /usr/bin/pasta               rix,
+  /usr/bin/slirp4netns         rix,
+  /usr/bin/newuidmap           rix,
+  /usr/bin/newgidmap           rix,
+  /usr/bin/fuse-overlayfs      rix,
+  /usr/libexec/podman/**       rix,
+  /usr/lib/podman/**           rix,
+  /usr/libexec/cni/**          rix,
+
+  # --- Read-only system paths podman + networking need ---
+  /etc/containers/**           r,
+  /etc/subuid                  r,
+  /etc/subgid                  r,
+  /usr/share/containers/**     r,
+  # pasta copies these into the container network namespace:
+  /etc/resolv.conf             r,
+  /etc/hosts                   r,
+  /etc/host.conf               r,
+
+  # --- Minimal kernel interfaces ---
+  @{PROC}/                     r,
+  @{PROC}/**                   r,
+  /sys/                        r,
+  /sys/**                      r,
+  /dev/null                    rw,
+  /dev/zero                    r,
+  /dev/urandom                 r,
+  /dev/full                    r,
+  /dev/fuse                    rw,
+  /dev/net/tun                 rw,
+
+  # --- User namespace creation (required on Ubuntu 24.04+) ---
+  userns,
+
+  # --- DENY: privilege escalation tools ---
+  deny /usr/bin/sudo             rx,
+  deny /usr/bin/su               rx,
+  deny /usr/bin/pkexec           rx,
+  deny /usr/bin/newgrp           rx,
+  deny /usr/bin/sg               rx,
+  deny /usr/bin/chsh             rx,
+  deny /usr/bin/chfn             rx,
+  deny /usr/bin/passwd           rx,
+  deny /usr/bin/gpasswd          rx,
+  deny /usr/bin/crontab          rx,
+  deny /usr/bin/at               rx,
+  deny /usr/sbin/visudo          rx,
+  deny /usr/sbin/usermod         rx,
+  deny /usr/sbin/useradd         rx,
+
+  # --- DENY: low ports ---
+  # AppArmor cannot filter by port number directly, but the sysctl
+  # net.ipv4.ip_unprivileged_port_start=1024 enforces this at kernel level.
+  # We also block NET_BIND_SERVICE capability to prevent any override:
+  deny capability net_bind_service,
+
+  # --- DENY: shared temp, other homes, sensitive files ---
+  deny /tmp/                   r,
+  deny /tmp/**                 rwlk,
+  deny /var/tmp/               r,
+  deny /var/tmp/**             rwlk,
+  deny /home/                  r,
+  deny /home/**                rwlk,
+  deny /root/                  r,
+  deny /root/**                rwlk,
+  deny /etc/shadow             r,
+  deny /etc/gshadow            r,
+  deny /etc/passwd             w,
+  deny /etc/ssh/               r,
+  deny /etc/ssh/**             rwlk,
+  deny /var/log/               r,
+  deny /var/log/**             rwlk,
+  deny /var/mail/              r,
+  deny /var/mail/**            rwlk,
+  deny /var/spool/             r,
+  deny /var/spool/**           rwlk,
+  # Other users' /run/user/UID dirs are blocked implicitly: only the
+  # owner-allow rule above grants access to our UID, and AppArmor
+  # default-denies any path not explicitly allowed. We do NOT add a broad
+  # deny on /run/user/[0-9]*/ here because in AppArmor deny rules are
+  # absolute — it would override the owner-allow above and break podman.
+}
+APPARMOR
+
+    apparmor_parser -r "/etc/apparmor.d/podman-${NAME}" 2>/dev/null || \
+        echo "WARNING: could not load AppArmor profile. Load manually: apparmor_parser -r /etc/apparmor.d/podman-${NAME}"
+fi
+
+# ---------- SELinux policy (Tumbleweed) ----------
+
+if [[ "$MAC" == "selinux" ]]; then
+    echo "==> SELinux detected. Labeling container paths."
+    semanage fcontext -a -t container_var_lib_t "${HOME_DIR}/.local/share/containers(/.*)?" 2>/dev/null || true
+    semanage fcontext -a -t container_file_t    "${HOME_DIR}/data(/.*)?" 2>/dev/null || true
+    semanage fcontext -a -t container_var_lib_t "${HOME_DIR}/.tmp(/.*)?" 2>/dev/null || true
+    restorecon -Rv "$HOME_DIR" 2>/dev/null || true
+    echo "    If you hit denials: ausearch -m AVC -ts recent"
+fi
+
+# ---------- tmpfiles.d — ensure /run/user/<UID> exists at boot ----------
+
+cat > "/etc/tmpfiles.d/podman-${NAME}.conf" <<EOF
+d /run/user/${USER_UID} 0700 ${NAME} nogroup -
+EOF
+
+install -d -o "$NAME" -g nogroup -m 0700 "/run/user/${USER_UID}" 2>/dev/null || true
+
+# ---------- /proc hidepid — hide other users' processes ----------
+# hidepid=2: users can only see their own processes in /proc.
+# gid=<admin>: members of that group keep visibility into all PIDs, so
+# `ps`, `htop`, `loginctl session-status` continue to work for admins.
+# Without gid=, the remount is system-wide and breaks those tools for ALL
+# unprivileged users — including admin accounts that aren't running as root.
+#
+# Group preference: wheel (RHEL/SUSE) → sudo (Debian/Ubuntu) → root (gid 0,
+# meaning only root keeps visibility, which is the legacy behavior).
+
+ADMIN_GID=0
+ADMIN_GROUP_NAME="root"
+for g in wheel sudo; do
+    if getent group "$g" >/dev/null 2>&1; then
+        ADMIN_GID=$(getent group "$g" | cut -d: -f3)
+        ADMIN_GROUP_NAME="$g"
+        break
+    fi
+done
+
+PROC_HIDEPID="/etc/systemd/system/proc-hidepid.service"
+# Always rewrite — re-running jan-pod-setup picks up admin-group changes
+# (e.g. user installs `wheel` package between runs).
+cat > "$PROC_HIDEPID" <<HIDEPID
+[Unit]
+Description=Remount /proc with hidepid=2 (admin gid=${ADMIN_GID} / ${ADMIN_GROUP_NAME})
+DefaultDependencies=no
+Before=sysinit.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/mount -o remount,hidepid=2,gid=${ADMIN_GID} /proc
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target
+HIDEPID
+systemctl daemon-reload
+systemctl enable proc-hidepid.service 2>/dev/null
+mount -o remount,hidepid=2,gid=${ADMIN_GID} /proc 2>/dev/null && \
+    echo "==> /proc remounted with hidepid=2,gid=${ADMIN_GID} (group '${ADMIN_GROUP_NAME}' keeps PID visibility)" || \
+    echo "WARNING: could not remount /proc with hidepid=2"
+
+# ---------- POSIX ACLs — deny access to sensitive host directories ----------
+# ACLs are the primary enforcement mechanism for filesystem isolation.
+# AppArmor profile is defense-in-depth but cannot be reliably attached to all
+# user processes (it attaches to executables, not UIDs).
+
+echo "==> Applying filesystem ACLs for '${NAME}'"
+for dir in /home /root /tmp /var/tmp /var/log /var/spool /var/mail /etc/ssh; do
+    if [ -d "$dir" ]; then
+        setfacl -m "u:${NAME}:---" "$dir" 2>/dev/null && \
+            echo "    deny: $dir" || \
+            echo "    WARNING: could not set ACL on $dir"
+    fi
+done
+
+# ---------- symlinks to system-level config (read-only for the user) ----------
+
+# These are owned by root but visible from the home dir for easy discovery.
+ln -sfn "/etc/tmpfiles.d/podman-${NAME}.conf"  "${HOME_DIR}/tmpfiles.conf"
+ln -sfn "/etc/sysctl.d/90-podman-${NAME}.conf"  "${HOME_DIR}/sysctl.conf"
+if [[ "$MAC" == "apparmor" ]]; then
+    ln -sfn "/etc/apparmor.d/podman-${NAME}"     "${HOME_DIR}/apparmor.conf"
+fi
+
+# ---------- enable the pod service ----------
+
+echo "==> Enabling pod service for '${NAME}'"
+
+run_as_user() {
+    sudo -u "$NAME" \
+        XDG_RUNTIME_DIR="/run/user/${USER_UID}" \
+        DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${USER_UID}/bus" \
+        TMPDIR="${POD_TMP}" \
+        HOME="${HOME_DIR}" \
+        bash -c "cd ${HOME_DIR} && $1"
+}
+
+sleep 1
+systemd-tmpfiles --create "/etc/tmpfiles.d/podman-${NAME}.conf" 2>/dev/null || true
+
+run_as_user "systemctl --user daemon-reload"
+run_as_user "systemctl --user enable --now ${SERVICE_NAME}" || \
+    echo "NOTE: service start may fail until images are pulled. Run: jan-pod-manage ${NAME} upgrade"
+
+# ---------- summary ----------
+
+cat <<EOF
+
+================================================================
+  Pod service '${NAME}' is ready.  (podman ${PODMAN_VER}, service: ${SERVICE_NAME})
+================================================================
+
+  User:     ${NAME}  (uid ${USER_UID}, nologin, ssh=denied, cron=denied)
+  Home:     ${HOME_DIR}/
+  Ports:    >= 1024 only (sysctl + AppArmor + no NET_BIND_SERVICE)
+
+  Config files at top level of ${HOME_DIR}/:
+
+    app.container       Quadlet container definition (image, env, volumes)
+EOF
+if [[ "$QUADLET_POD" == true ]]; then
+    echo "    pod.conf            Quadlet pod definition (ports, DNS)"
+fi
+cat <<EOF
+    containers.conf     Podman engine defaults (capabilities, namespaces)
+    storage.conf        Storage driver config
+    registries.conf     Image registry config
+    environment.conf    Env vars for the user systemd session
+    data/               Persistent data — mounted as /data inside containers
+    bin/                Helper scripts: upgrade, recreate, status
+EOF
+if [[ "$MAC" == "apparmor" ]]; then
+    echo "    apparmor.conf       -> /etc/apparmor.d/podman-${NAME}"
+fi
+cat <<EOF
+    sysctl.conf         -> /etc/sysctl.d/90-podman-${NAME}.conf
+    tmpfiles.conf       -> /etc/tmpfiles.d/podman-${NAME}.conf
+
+  Admin commands (run as root):
+    jan-pod-manage ${NAME} shell       # bash shell as the pod user
+    jan-pod-manage ${NAME} status      # pod + container + service status
+    jan-pod-manage ${NAME} upgrade     # pull images + restart
+    jan-pod-manage ${NAME} recreate    # reload Quadlet + restart
+    jan-pod-manage ${NAME} logs        # follow journald logs
+    jan-pod-manage ${NAME} exec ${NAME}-app sh   # exec into container
+
+================================================================
+EOF

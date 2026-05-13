@@ -1,0 +1,73 @@
+#!/bin/bash
+#
+# Configures kernel boot parameters for AMD Strix Halo unified memory.
+# Maximizes shared GPU-accessible RAM for llama.cpp / ROCm workloads.
+#
+# Fixed VRAM size is set to minimum (512MB) in BIOS manually.
+# This script sets GTT (shared VRAM) to ~118GB so GPU can use nearly all system RAM.
+#
+# Sets: amdgpu.gttsize=120832, iommu=pt, amd_iommu=on, amdgpu.noretry=0,
+#        ttm.page_pool_size=25600000, ttm.pages_limit=32505856
+#
+
+if [ "$EUID" -ne 0 ]; then
+    echo "Please run as root"
+    exit 1
+fi
+
+# Verify this is a Strix Halo system
+if ! lspci -nn | grep -qi 'Strix Halo'; then
+    echo "ERROR: This does not appear to be a Strix Halo system"
+    lspci -nn | grep -i 'display\|vga'
+    exit 1
+fi
+
+# GTT size: ~118GB in MB — leaves ~10GB for OS/kernel
+GTT_SIZE=120832
+
+STRIX_PARAMS="amdgpu.gttsize=${GTT_SIZE} iommu=pt amd_iommu=on amdgpu.noretry=0 ttm.page_pool_size=25600000 ttm.pages_limit=32505856"
+
+if [ -f /etc/kernel/cmdline ]; then
+    if ! command -v sdbootutil &>/dev/null; then
+        echo "ERROR: sdbootutil is not installed"
+        exit 1
+    fi
+
+    if grep -q 'amdgpu.gttsize' /etc/kernel/cmdline; then
+        echo "Already configured in /etc/kernel/cmdline"
+        cat /etc/kernel/cmdline
+        exit 0
+    fi
+
+    sed -i "s|$| ${STRIX_PARAMS}|" /etc/kernel/cmdline
+
+    echo "Updated /etc/kernel/cmdline:"
+    cat /etc/kernel/cmdline
+
+    sdbootutil update-all-entries
+
+elif [ -f /etc/default/grub ]; then
+    if grep -q 'amdgpu.gttsize' /etc/default/grub; then
+        echo "Already configured in /etc/default/grub"
+        grep CMDLINE /etc/default/grub
+        exit 0
+    fi
+
+    sed -i "s|^\(GRUB_CMDLINE_LINUX_DEFAULT=\"[^\"]*\)\"|\1 ${STRIX_PARAMS}\"|" /etc/default/grub
+
+    echo "Updated /etc/default/grub:"
+    grep CMDLINE /etc/default/grub
+
+    if command -v update-grub &>/dev/null; then
+        update-grub
+    elif command -v grub2-mkconfig &>/dev/null; then
+        grub2-mkconfig -o /boot/grub2/grub.cfg
+    fi
+else
+    echo "No supported bootloader config found"
+    exit 1
+fi
+
+echo ""
+echo "Reboot to apply. After reboot, verify with:"
+echo "  cat /sys/class/drm/card*/device/mem_info_gtt_total"

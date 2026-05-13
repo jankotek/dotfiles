@@ -1,0 +1,69 @@
+#!/bin/bash
+#
+# Disable KWin's lock-screen DPMS hooks for every user with a home
+# directory under /home/. Stops KWin from sending power-off signals
+# to monitors during compositor handoff (e.g. TTY switch).
+#
+# Idempotent: re-running just verifies/refreshes the keys.
+
+if [ "$EUID" -ne 0 ]; then
+    echo "Please run as root" >&2
+    exit 1
+fi
+
+set -euo pipefail
+
+# Apply the two relevant keys via kwriteconfig5/kwriteconfig6 if available
+# (preserves any other config); fall back to plain ini block append.
+apply_dpms() {
+    local user="$1" home="$2"
+    local kwinrc="$home/.config/kwinrc"
+
+    install -d -m 0700 -o "$user" -g "$(id -gn "$user")" "$home/.config"
+
+    # Try kwriteconfig (Plasma's official tool) — atomic and conflict-aware.
+    local writer=""
+    for c in kwriteconfig6 kwriteconfig5; do
+        command -v "$c" &>/dev/null && { writer="$c"; break; }
+    done
+
+    if [[ -n "$writer" ]]; then
+        sudo -u "$user" "$writer" --file kwinrc \
+            --group 'Effect-dpms' --key 'LockAfterLockScreen' 'false'
+        sudo -u "$user" "$writer" --file kwinrc \
+            --group 'Wayland' --key 'DpmsLockAfterLockScreen' 'false'
+        echo "==> $user: kwinrc updated via $writer"
+        return
+    fi
+
+    # Fallback: append the [section]/key pairs if not already there.
+    if ! grep -q '^\[Effect-dpms\]' "$kwinrc" 2>/dev/null; then
+        printf '\n[Effect-dpms]\nLockAfterLockScreen=false\n' >> "$kwinrc"
+    fi
+    if ! grep -q '^\[Wayland\]' "$kwinrc" 2>/dev/null; then
+        printf '\n[Wayland]\nDpmsLockAfterLockScreen=false\n' >> "$kwinrc"
+    fi
+    chown "$user":"$(id -gn "$user")" "$kwinrc"
+    echo "==> $user: kwinrc appended (raw ini fallback)"
+}
+
+count=0
+for d in /home/*; do
+    [[ -d "$d" ]] || continue
+    user=$(stat -c '%U' "$d")
+    [[ -n "$user" && "$user" != UNKNOWN ]] || continue
+    id "$user" &>/dev/null || continue
+    # Skip service accounts — only real users have a Plasma session.
+    shell=$(getent passwd "$user" | cut -d: -f7)
+    case "$shell" in
+        ''|*/nologin|*/false|*/sync|*/halt|*/shutdown) continue ;;
+    esac
+    pgrp=$(id -gn "$user")
+    [[ "$pgrp" == "$user" ]] && continue
+
+    apply_dpms "$user" "$d"
+    count=$((count + 1))
+done
+
+echo ""
+echo "Patched $count user(s). Affected sessions need to log out and back in."

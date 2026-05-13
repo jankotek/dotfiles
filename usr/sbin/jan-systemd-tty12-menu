@@ -1,0 +1,39 @@
+#!/bin/bash
+
+#
+# Puts some into and actions on TTY12
+#
+
+SERVICE_FILE_CONTENT="[Unit]
+Description=Menu and info on TTY12
+
+[Service]
+ExecStart=/usr/local/sbin/tty12-menu
+TTYPath=/dev/tty12
+Type=simple
+User=root
+StandardInput=tty-force
+StandardOutput=tty
+StandardError=tty
+Type=idle
+Restart=always
+RestartSec=0
+KillMode=control-group
+IgnoreSIGPIPE=no
+TimeoutStopSec=90
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target"
+
+# Set the service file path
+SERVICE_FILE_PATH="/etc/systemd/system/tty12-menu.service"
+
+# Echo the service file content to the file
+echo "$SERVICE_FILE_CONTENT" | tee "$SERVICE_FILE_PATH" > /dev/null
+
+# Enable and start the service
+systemctl enable tty12-menu.service
+systemctl start tty12-menu.service
+
+echo "Service installed and started successfully."

@@ -1,0 +1,47 @@
+#!/bin/bash
+#
+# Add `render` and `video` group membership to every user with a home
+# directory under /home/. Without these groups, modeset retries amplify
+# monitor flicker on TTY switching.
+#
+# Idempotent — safe to re-run.
+
+if [ "$EUID" -ne 0 ]; then
+    echo "Please run as root" >&2
+    exit 1
+fi
+
+set -euo pipefail
+
+changed=0
+for d in /home/*; do
+    [[ -d "$d" ]] || continue
+    user=$(stat -c '%U' "$d")
+    [[ -n "$user" && "$user" != UNKNOWN ]] || continue
+    id "$user" &>/dev/null || continue
+    # Skip service accounts — only real users need GPU group membership.
+    # Heuristic: interactive shell AND primary group != login name
+    # (service users typically have a dedicated own-named primary group,
+    # e.g. forgejo-runner, www-data).
+    shell=$(getent passwd "$user" | cut -d: -f7)
+    case "$shell" in
+        ''|*/nologin|*/false|*/sync|*/halt|*/shutdown) continue ;;
+    esac
+    pgrp=$(id -gn "$user")
+    [[ "$pgrp" == "$user" ]] && continue
+
+    for grp in render video; do
+        if ! id -nG "$user" 2>/dev/null | tr ' ' '\n' | grep -qxF "$grp"; then
+            usermod -aG "$grp" "$user"
+            echo "==> $user: added to $grp"
+            changed=1
+        fi
+    done
+done
+
+if [[ $changed -eq 0 ]]; then
+    echo "All home users already have render+video membership."
+else
+    echo ""
+    echo "Users must log out and back in for the new groups to take effect."
+fi

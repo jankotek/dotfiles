@@ -1,0 +1,31 @@
+#!/bin/bash
+
+# service that cleans /tmp  folder on every reboot
+# needed by podman, if killed it would not start on next boot due to garbage in /tmp
+
+
+# Create the systemd service file
+tee /etc/systemd/system/tmp-clean.service > /dev/null << EOF
+[Unit]
+Description=Clear /tmp folder on boot
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/find /tmp -mindepth 1 -xdev -delete
+RemainAfterExit=yes
+ProtectSystem=strict
+ReadWritePaths=/tmp
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=sysinit.target
+EOF
+
+# Reload systemd daemon to pick up the new service file
+systemctl daemon-reload
+
+# Enable the service to start on boot
+systemctl enable tmp-clean.service
+
+

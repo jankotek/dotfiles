@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+#
+# jan-pod-manage — Admin wrapper for pod services. Run as root.
+#
+# Usage:  jan-pod-manage <pod> <command>
+#
+#   shell       Open a bash shell as the pod user
+#   upgrade     Pull latest images and restart
+#   recreate    Reload Quadlet files and restart
+#   status      Show pod, container, and service status
+#   logs        Follow journald logs for this pod
+#   exec <ctr>  Exec into a running container
+#   prune       Stop, remove containers/images, free disk (keeps data/)
+#   <anything>  Run arbitrary command as the pod user
+#
+set -euo pipefail
+
+# ---------- admin gating ----------
+# Allowed callers: root, or a member of the `jan-pod-admin` group.
+# A `sudoers.d` drop-in lets group members re-exec as root without a password
+# (see HOW TO ENABLE below). Every invocation is logged via journald
+# (auth.notice) with the original user, pod name, and command.
+
+ADMIN_GROUP="jan-pod-admin"
+
+if [[ $EUID -ne 0 ]]; then
+    INVOKER="${SUDO_USER:-${USER:-$(id -un)}}"
+    if ! id -nG "$INVOKER" 2>/dev/null | tr ' ' '\n' | grep -qxF "$ADMIN_GROUP"; then
+        cat <<MSG >&2
+ERROR: must be root or a member of '$ADMIN_GROUP' to run this command.
+
+HOW TO ENABLE:
+  sudo groupadd -f $ADMIN_GROUP
+  sudo usermod -aG $ADMIN_GROUP $INVOKER
+  echo "%$ADMIN_GROUP ALL=(root) NOPASSWD: /opt/jan/usr/sbin/jan-pod-manage" \\
+      | sudo tee /etc/sudoers.d/jan-pod-admin >/dev/null
+  sudo chmod 0440 /etc/sudoers.d/jan-pod-admin
+
+Then log out and back in for the group to take effect.
+MSG
+        exit 1
+    fi
+    exec sudo -n -- "$0" "$@"
+fi
+
+# Audit log — recorded BEFORE the action so a kill-mid-execution still leaves
+# evidence of who attempted what.
+logger -t jan-pod-manage -p auth.notice \
+    "invoked by ${SUDO_USER:-root}: pod=${1:-?} cmd=${2:-help} args=${*:3}"
+
+NAME="${1:-}"
+CMD="${2:-help}"
+
+if [[ -z "$NAME" ]]; then
+    echo "Usage: $0 <pod> <command>"
+    echo ""
+    echo "Commands:"
+    echo "  shell       Open a bash shell as the pod user"
+    echo "  status      Show pod, container, and service status"
+    echo "  upgrade     Pull latest images and restart"
+    echo "  recreate    Reload Quadlet files and restart"
+    echo "  logs        Follow container and service logs"
+    echo "  exec <ctr>  Exec into a running container"
+    echo "  prune       Stop, remove containers/images, free disk (keeps data/)"
+    echo ""
+    echo "Available pods:"
+    for d in /var/pod/*/bin/upgrade; do
+        [[ -f "$d" ]] && basename "$(dirname "$(dirname "$d")")"
+    done 2>/dev/null | sed 's/^/  /'
+    exit 1
+fi
+
+HOME_DIR="/var/pod/${NAME}"
+
+if [[ ! -d "$HOME_DIR" ]]; then
+    echo "ERROR: pod '${NAME}' not found (no ${HOME_DIR}/)." >&2
+    exit 1
+fi
+
+if ! id "$NAME" &>/dev/null; then
+    echo "ERROR: user '${NAME}' does not exist." >&2
+    exit 1
+fi
+
+USER_UID=$(id -u "$NAME")
+SVC_NAME=$(cat "${HOME_DIR}/.service-name" 2>/dev/null || echo "${NAME}-app.service")
+
+shift 2 || shift $#  # consume pod name and command, rest are args
+
+# Argv-form runner: each arg is exec'd literally on the guest with no shell
+# re-expansion. The bash -c trick uses positional params ($1, $2, ...) which
+# are NOT subject to word splitting or glob expansion.
+run_as_user() {
+    sudo -u "${NAME}" \
+        XDG_RUNTIME_DIR="/run/user/${USER_UID}" \
+        DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${USER_UID}/bus" \
+        TMPDIR="${HOME_DIR}/.tmp" \
+        HOME="${HOME_DIR}" \
+        bash -c 'cd "$1" && shift && exec "$@"' bash "$HOME_DIR" "$@"
+}
+
+case "$CMD" in
+    shell)
+        echo "==> Opening shell as ${NAME} (exit to return)"
+        machinectl shell "${NAME}@.host" /bin/bash 2>/dev/null || \
+        sudo -u "${NAME}" \
+            XDG_RUNTIME_DIR="/run/user/${USER_UID}" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${USER_UID}/bus" \
+            TMPDIR="${HOME_DIR}/.tmp" \
+            HOME="${HOME_DIR}" \
+            /bin/bash
+        ;;
+    upgrade)
+        run_as_user "${HOME_DIR}/bin/upgrade"
+        ;;
+    recreate)
+        run_as_user "${HOME_DIR}/bin/recreate"
+        ;;
+    status)
+        run_as_user "${HOME_DIR}/bin/status"
+        ;;
+    logs)
+        journalctl _SYSTEMD_USER_UNIT="${SVC_NAME}" _UID="${USER_UID}" -f
+        ;;
+    exec)
+        run_as_user podman exec -it "$@"
+        ;;
+    prune)
+        echo "==> Stopping all services for ${NAME} ..."
+        run_as_user systemctl --user stop "${SVC_NAME}" 2>/dev/null || true
+        run_as_user systemctl --user stop "${NAME}-pod.service" 2>/dev/null || true
+        echo "==> Removing all pods and containers ..."
+        run_as_user podman pod rm -f -a 2>/dev/null || true
+        run_as_user podman rm -f -a 2>/dev/null || true
+        echo "==> Pruning images, build cache, volumes (not data/) ..."
+        run_as_user podman system prune -a -f --volumes
+        echo "==> Terminating user manager (release podman sockets, conmon) ..."
+        # loginctl on a lingering user is the supported way; fall back to
+        # systemctl stop user@UID.service if loginctl is unavailable.
+        loginctl terminate-user "${NAME}" 2>/dev/null || \
+            systemctl stop "user@${USER_UID}.service" 2>/dev/null || true
+        echo "==> Done. Data in ${HOME_DIR}/data/ is untouched."
+        echo "    To restart: $0 ${NAME} recreate"
+        ;;
+    help)
+        echo "Usage: $0 ${NAME} <command>"
+        echo ""
+        echo "  shell       Open a bash shell as the pod user"
+        echo "  status      Show pod, container, and service status"
+        echo "  upgrade     Pull latest images and restart"
+        echo "  recreate    Reload Quadlet files and restart"
+        echo "  logs        Follow container and service logs"
+        echo "  exec <ctr>  Exec into a running container"
+        echo "  prune       Stop, remove containers/images, free disk (keeps data/)"
+        ;;
+    *)
+        run_as_user "$CMD" "$@"
+        ;;
+esac

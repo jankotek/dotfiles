@@ -1,0 +1,33 @@
+#!/bin/bash
+#
+# Host setup — applies basic hardening to a fresh system.
+#
+
+if [ "$EUID" -ne 0 ]; then
+    echo "Please run as root"
+    exit 1
+fi
+
+set -euo pipefail
+
+REPO_DIR="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+
+echo "=== Setting /home permissions ==="
+chmod 0755 /home
+for dir in /home/*/; do
+    [ -d "$dir" ] || continue
+    chmod 0700 "$dir"
+    echo "  $dir -> 0700"
+done
+echo "  /home -> 0755"
+
+echo "=== Installing jan-* tools into /usr/local ==="
+cp -f -s -r "${REPO_DIR}/usr/"* /usr/local
+
+echo "=== Setting console font ==="
+jan-console-font
+
+echo "=== Package manager safety ==="
+jan-setup-pkg-safety
+
+echo "=== Done ==="
