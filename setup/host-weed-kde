@@ -1,0 +1,167 @@
+#!/bin/bash
+#
+# host-weed-kde — finish a fresh openSUSE Tumbleweed + KDE Plasma install.
+#
+# Counterpart to setup/vm-baseweed, but for a bare-metal / desktop HOST
+# running Plasma 6 on Wayland (not a headless XFCE VM). It:
+#
+#   - symlinks /usr/local <- repo usr/
+#   - installs KDE apps, virt stack, and CLI tools via zypper
+#   - locks packages we never want pulled in (X server, vim, PackageKit, ...)
+#   - masks services we replace or don't use (sddm, fwupd, ollama, ...)
+#   - sets up greetd+tuigreet logins on tty3-9 (sddm stays masked)
+#   - runs the cross-distro jan-* helpers
+#   - syncs repo home dotfiles WITHOUT --delete (user data survives re-runs)
+#
+# Idempotent: safe to re-run. Run as root from a checkout, e.g.
+#   sudo /opt/jan/setup/host-weed-kde
+#
+# NOTE: unlike vm-baseweed this does NOT install jan-systemd-tty11-root —
+# that grants unauthenticated root on a console TTY and is VM-only.
+
+if [ "$EUID" -ne 0 ]; then
+    echo "Please run as root" >&2
+    exit 1
+fi
+
+set -euo pipefail
+trap 'echo >&2 "${BASH_SOURCE[0]}:${BASH_LINENO[0]}: Command \`$BASH_COMMAND\` failed with exit code $?"; exit $?' ERR
+
+# Sanity check: this is a Tumbleweed-specific script.
+if ! grep -q '^ID="\?opensuse-tumbleweed' /etc/os-release 2>/dev/null; then
+    echo "ERROR: this script targets openSUSE Tumbleweed" >&2
+    exit 1
+fi
+
+# This is a host/desktop finisher; warn (don't fail) if run inside a VM —
+# use setup/vm-baseweed for VMs.
+if systemd-detect-virt -q -v; then
+    echo "WARNING: running inside a VM — setup/vm-baseweed is the VM script" >&2
+fi
+
+REPO_DIR="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+
+# ---------- repo usr/ -> /usr/local symlinks ----------
+
+echo "==> Symlinking ${REPO_DIR}/usr -> /usr/local"
+cp -f -s -r "${REPO_DIR}/usr/"* /usr/local
+
+# ---------- Package install ----------
+
+echo "==> Refreshing repositories"
+zypper -n --no-gpg-checks refresh
+
+# Core set: confirmed-valid package names, must succeed.
+echo "==> Installing KDE apps, virt stack, and CLI tools"
+zypper -n install --no-recommends \
+    konsole dolphin kate kwrite ark gwenview okular spectacle \
+    kdenlive kdiff3 kfind krename krita kstars ksystemlog ktorrent \
+    filelight partitionmanager \
+    greetd tuigreet \
+    virt-manager virt-install virt-viewer qemu podman lima \
+    mc htop git curl powertop fish iotop ncdu nano mosh \
+    pwgen telnet jdupes just bats zim sshpass jq yq fzf rsync dconf \
+    NetworkManager-tui jetbrains-mono-fonts \
+    java-17-openjdk-devel maven
+
+# Dev toolchains — best-effort (package names drift on a rolling distro;
+# portable tools live in /opt via jan-update-opt instead).
+echo "==> Installing dev toolchains (best-effort)"
+zypper -n install --no-recommends nodejs22 || \
+  zypper -n install --no-recommends nodejs || \
+  echo "WARNING: nodejs install skipped (install via jan-update-opt)"
+
+# ---------- Package locks (the "masked" packages) ----------
+# Remove if present, then lock so they can't be pulled back in. The X server
+# is locked because this host runs pure Wayland; vim/emacs/PackageKit are
+# deliberately unwanted.
+
+LOCK_PKGS=(PackageKit emacs icewm vim xterm xorg-x11-server)
+echo "==> Removing and locking unwanted packages"
+for pkg in "${LOCK_PKGS[@]}"; do
+    rpm -q "$pkg" &>/dev/null && zypper -n rm -u "$pkg" 2>/dev/null || true
+    zypper -n addlock "$pkg" 2>/dev/null || true
+done
+# Block the kde_pim pattern (kmail/akonadi stack).
+zypper -n addlock -t pattern kde_pim 2>/dev/null || true
+
+# ---------- Mask unused / replaced services ----------
+# sddm is replaced by greetd (below). The rest are simply not used here.
+# Guard each: a fresh install may not have all of these units.
+echo "==> Masking unused services"
+for unit in sddm.service fwupd.service ollama.service forgejo-runner.service; do
+    systemctl mask "$unit" 2>/dev/null || true
+done
+
+# ---------- Cross-distro jan-* helpers ----------
+# Each helper detects distro internally. greetd setup masks getty@tty3-9 and
+# enables greetd-tty3-9. tty11-root is intentionally omitted (see header).
+
+echo "==> Running jan-* setup helpers"
+jan-console-font            || echo "WARNING: console font setup failed (non-fatal)"
+jan-setup-pkg-safety        || echo "WARNING: pkg safety setup failed (non-fatal)"
+jan-setup-kernel-tweaks     || echo "WARNING: kernel tweaks setup failed (non-fatal)"
+jan-setup-greetd            || echo "WARNING: greetd setup failed (non-fatal)"
+jan-systemd-tty12-menu      || echo "WARNING: tty12 menu setup failed (non-fatal)"
+# Patch virt-manager/remote-viewer to run under XWayland (fractional scaling fix).
+jan-fix-virtman-scaling     || echo "WARNING: virt-manager scaling fix failed (non-fatal)"
+
+# AMD Strix Halo unified-memory tuning — only on matching hardware.
+if lspci -nn 2>/dev/null | grep -qi 'Strix Halo'; then
+    echo "==> Strix Halo detected — applying GPU/memory tweaks"
+    jan-setup-strix-halo    || echo "WARNING: strix-halo setup failed (non-fatal)"
+fi
+
+# Boot straight to the graphical session.
+systemctl set-default graphical.target
+
+# ---------- xdg user-dirs (lowercase) ----------
+
+echo "==> Configuring lowercase XDG user dirs"
+cat << EOF > /etc/xdg/user-dirs.defaults
+DESKTOP=desk
+DOWNLOAD=down
+DOCUMENTS=doc
+TEMPLATES=doc/templates
+PUBLICSHARE=media/share
+MUSIC=media/music
+PICTURES=media/pic
+VIDEOS=media/video
+EOF
+
+# ---------- Sync repo home (NO --delete) ----------
+# Detect the primary unprivileged user — the same probe vm-baseweed uses.
+
+HOME_USER=""
+for u in jan playai opensuse tumbleweed; do
+    if id "$u" &>/dev/null; then
+        HOME_USER="$u"
+        break
+    fi
+done
+if [[ -z "$HOME_USER" ]]; then
+    echo "ERROR: no candidate user found (tried: jan playai opensuse tumbleweed)" >&2
+    exit 1
+fi
+HOME_GROUP=$(id -gn "$HOME_USER")
+HOME_DIR=$(getent passwd "$HOME_USER" | cut -d: -f6)
+echo "==> Syncing repo home to ${HOME_DIR} (user=${HOME_USER})"
+
+# Backup before sync (timestamped, kept until manually removed).
+cp -a "$HOME_DIR" "${HOME_DIR}-backup-$(date +%Y-%m-%d-%H%M)" 2>/dev/null || true
+chmod 0700 "${HOME_DIR}-backup-"* 2>/dev/null || true
+
+# Sync without --delete: dotfiles deploy, user data survives.
+rsync -r "${REPO_DIR}/home/" "${HOME_DIR}/"
+[[ -d "${REPO_DIR}/home-root" ]] && rsync -r "${REPO_DIR}/home-root/" /root/
+
+su - "$HOME_USER" -c 'mkdir -p ~/desk ~/down ~/doc ~/doc/templates ~/media/share ~/media/music ~/media/pic ~/media/video'
+
+chmod 0755 /home
+chmod 0700 "$HOME_DIR" /root
+chown "$HOME_USER":"$HOME_GROUP" -R "$HOME_DIR"
+
+systemctl daemon-reload
+
+echo "=========== DONE ==========="
+echo "Reboot to activate greetd logins (tty3-9) and the graphical target."
