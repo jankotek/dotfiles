@@ -46,6 +46,11 @@ REPO_DIR="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 echo "==> Symlinking ${REPO_DIR}/usr -> /usr/local"
 cp -f -s -r "${REPO_DIR}/usr/"* /usr/local
 
+# The jan-* helpers now live in /usr/local/{sbin,bin}. Make sure they're on
+# PATH for the rest of this script regardless of how it was invoked (a
+# locked-down sudo secure_path or a guest-agent exec may omit /usr/local).
+export PATH="/usr/local/sbin:/usr/local/bin:$PATH"
+
 # ---------- Package install ----------
 
 echo "==> Refreshing repositories"
@@ -155,11 +160,14 @@ chmod 0700 "${HOME_DIR}-backup-"* 2>/dev/null || true
 rsync -r "${REPO_DIR}/home/" "${HOME_DIR}/"
 [[ -d "${REPO_DIR}/home-root" ]] && rsync -r "${REPO_DIR}/home-root/" /root/
 
-su - "$HOME_USER" -c 'mkdir -p ~/desk ~/down ~/doc ~/doc/templates ~/media/share ~/media/music ~/media/pic ~/media/video'
-
+# Fix ownership BEFORE the su below, otherwise the freshly-synced (root-owned)
+# dotfiles aren't readable by the user and their login shell errors out
+# sourcing ~/.profile.
 chmod 0755 /home
 chmod 0700 "$HOME_DIR" /root
 chown "$HOME_USER":"$HOME_GROUP" -R "$HOME_DIR"
+
+su - "$HOME_USER" -c 'mkdir -p ~/desk ~/down ~/doc ~/doc/templates ~/media/share ~/media/music ~/media/pic ~/media/video'
 
 systemctl daemon-reload
 
