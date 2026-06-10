@@ -27,8 +27,58 @@ github_api() {
     fi
 }
 
+# ---------- checksum verification ----------
+# Every download is verified against a checksum published by the same project
+# (fetched at run time, since versions are not pinned). This protects against
+# corrupted downloads and CDN/mirror tampering — not against a fully
+# compromised publisher, which would require signature verification.
+
+# fetch_checksum <url> [filename] [hexlen]
+# Print the lowercase hex digest published at <url>. Handles bare-digest files
+# and sum-style lists ("<hash>  <file>", "<file> <hash>...", "<hash> *<file>",
+# "<hash> ./<file>"); with <filename> only the matching line is considered.
+# hexlen defaults to 64 (SHA-256); pass 128 for SHA-512.
+# Prints nothing on failure — callers must treat empty output as fatal.
+fetch_checksum() {
+    local url=$1 fname=${2:-} hexlen=${3:-64}
+    curl -fLsS "$url" 2>/dev/null | awk -v f="$fname" -v len="$hexlen" '
+        f != "" {
+            ok = 0
+            for (i = 1; i <= NF; i++)
+                if ($i == f || $i == "*" f || $i == "./" f) ok = 1
+            if (!ok) next
+        }
+        {
+            for (i = 1; i <= NF; i++)
+                if ($i ~ ("^[0-9a-fA-F]{" len "}$")) { print tolower($i); exit }
+        }'
+}
+
+# verify_file <file> <expected>
+# <expected> is a sha256 hex digest, or "sha512:<hex>" for sha512.
+verify_file() {
+    local file=$1 expected=$2 algo=sha256
+    if [[ "$expected" == sha512:* ]]; then
+        algo=sha512
+        expected=${expected#sha512:}
+    fi
+    expected=${expected,,}
+    local actual
+    actual=$("${algo}sum" "$file" | awk '{print $1}')
+    if [ "$actual" != "$expected" ]; then
+        echo "✗ Checksum mismatch ($algo) for $file"
+        echo "  expected: $expected"
+        echo "  actual:   $actual"
+        return 1
+    fi
+    echo "  ✓ $algo verified"
+}
+
+# 6th arg: expected checksum for the archive ("<sha256>" or "sha512:<hex>").
+# Empty means the publisher ships no checksum — install proceeds with a
+# loud warning (currently only Obsidian).
 download_and_extract() {
-    local name=$1 dir=$2 url=$3 version=$4 strip=${5:-1}
+    local name=$1 dir=$2 url=$3 version=$4 strip=${5:-1} expected=${6:-}
     local version_file="$BASE_DIR/$dir/.version"
     local current_version=""
 
@@ -49,8 +99,13 @@ download_and_extract() {
     rm -rf "$temp_dir"
     mkdir -p "$temp_dir"
 
-    # Download to file first, then extract
+    # Download to file first, verify, then extract
     curl -fLsS "$url" -o "$temp_dir/archive.tar.gz"
+    if [ -n "$expected" ]; then
+        verify_file "$temp_dir/archive.tar.gz" "$expected" || { rm -rf "$temp_dir"; return 1; }
+    else
+        echo "  ⚠ $name: publisher provides no checksum — installing unverified"
+    fi
     tar xzf "$temp_dir/archive.tar.gz" -C "$temp_dir" --strip-components=$strip
     rm "$temp_dir/archive.tar.gz"
 
@@ -77,25 +132,40 @@ EOF
 }
 
 install_idea() {
-    local version=$(curl -s 'https://data.services.jetbrains.com/products/releases?code=IIC&latest=true&type=release' | grep -oP '"version":"\K[^"]+' | head -1)
-    local url="https://download.jetbrains.com/idea/ideaIC-${version}.tar.gz"
-    download_and_extract "IntelliJ IDEA" "idea" "$url" "$version"
+    # The releases API is the source of truth for both the download URL and
+    # its checksum (download filenames changed from ideaIC-* to idea-*).
+    local json=$(curl -s 'https://data.services.jetbrains.com/products/releases?code=IIC&latest=true&type=release')
+    local version=$(grep -oP '"version":"\K[^"]+' <<<"$json" | head -1)
+    local url=$(grep -oP '"link":"\K[^"]+\.tar\.gz' <<<"$json" | grep -v aarch64 | head -1)
+    local sum_url=$(grep -oP '"checksumLink":"\K[^"]+\.tar\.gz\.sha256' <<<"$json" | grep -v aarch64 | head -1)
+    local sum=$(fetch_checksum "$sum_url")
+    if [ -z "$url" ] || [ -z "$sum" ]; then
+        echo "✗ Failed to fetch download/checksum info for IntelliJ IDEA"
+        return 1
+    fi
+    download_and_extract "IntelliJ IDEA" "idea" "$url" "$version" 1 "$sum"
     create_desktop_file "intellij-idea" "IntelliJ IDEA" "$BASE_DIR/idea/bin/idea.sh" "$BASE_DIR/idea/bin/idea.svg" "IntelliJ IDEA"
 }
 
 install_nushell() {
     local version=$(github_api https://api.github.com/repos/nushell/nushell/releases/latest | grep -oP '"tag_name": "\K[^"]+')
-    local url="https://github.com/nushell/nushell/releases/download/${version}/nu-${version}-x86_64-unknown-linux-musl.tar.gz"
-    download_and_extract "Nushell" "nushell" "$url" "$version"
+    local file="nu-${version}-x86_64-unknown-linux-musl.tar.gz"
+    local url="https://github.com/nushell/nushell/releases/download/${version}/${file}"
+    local sum=$(fetch_checksum "https://github.com/nushell/nushell/releases/download/${version}/SHA256SUMS" "$file")
+    [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for Nushell"; return 1; }
+    download_and_extract "Nushell" "nushell" "$url" "$version" 1 "$sum"
 }
 
 install_starship() {
     local version=$(github_api https://api.github.com/repos/starship/starship/releases/latest | grep -oP '"tag_name": "\K[^"]+')
     local url="https://github.com/starship/starship/releases/download/${version}/starship-x86_64-unknown-linux-musl.tar.gz"
-    download_and_extract "Starship" "starship" "$url" "$version" 0
+    local sum=$(fetch_checksum "${url}.sha256")
+    [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for Starship"; return 1; }
+    download_and_extract "Starship" "starship" "$url" "$version" 0 "$sum"
 }
 
 install_obsidian() {
+    # Obsidian publishes no checksums in its release assets — unverified.
     local version=$(github_api https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest | grep -oP '"tag_name": "\K[^"]+' | sed 's/^v//')
     local url="https://github.com/obsidianmd/obsidian-releases/releases/download/v${version}/obsidian-${version}.tar.gz"
     download_and_extract "Obsidian" "obsidian" "$url" "$version" 1
@@ -107,8 +177,17 @@ install_corretto() {
     local latest=$(github_api "https://api.github.com/repos/corretto/corretto-${jdk_version}/releases/latest" | grep -oP '"tag_name": "\K[^"]+')
     local version=${latest#*-}
     local url="https://corretto.aws/downloads/latest/amazon-corretto-${jdk_version}-x64-linux-jdk.tar.gz"
+    local sum=$(fetch_checksum "https://corretto.aws/downloads/latest_sha256/amazon-corretto-${jdk_version}-x64-linux-jdk.tar.gz")
+    [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for Corretto JDK ${jdk_version}"; return 1; }
 
-    download_and_extract "Amazon Corretto JDK ${jdk_version}" "jdk/${jdk_version}" "$url" "$version"
+    download_and_extract "Amazon Corretto JDK ${jdk_version}" "jdk/${jdk_version}" "$url" "$version" 1 "$sum"
+}
+
+install_corretto_all() {
+    local ver
+    for ver in 8 11 17 21 23; do
+        install_corretto "$ver"
+    done
 }
 
 install_gradle() {
@@ -130,12 +209,16 @@ install_gradle() {
         return 0
     fi
 
+    local sum=$(fetch_checksum "${url}.sha256")
+    [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for Gradle"; return 1; }
+
     echo "→ Downloading Gradle $version..."
     local temp_dir="$BASE_DIR/gradle_temp"
     rm -rf "$temp_dir"
     mkdir -p "$temp_dir"
 
     curl -fLsS "$url" -o "$temp_dir/gradle.zip"
+    verify_file "$temp_dir/gradle.zip" "$sum" || { rm -rf "$temp_dir"; return 1; }
     unzip -q "$temp_dir/gradle.zip" -d "$temp_dir"
 
     rm -rf "$BASE_DIR/gradle"
@@ -164,13 +247,19 @@ install_maven() {
         return 0
     fi
 
+    # Cross-host verification: artifact from the CDN, canonical sha512 from
+    # Apache's origin server — tampering would have to hit both.
+    local sum=$(fetch_checksum "https://downloads.apache.org/maven/maven-3/${version}/binaries/apache-maven-${version}-bin.tar.gz.sha512" "" 128)
+    [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for Maven"; return 1; }
+
     echo "→ Downloading Maven $version..."
     local temp_dir="$BASE_DIR/maven_temp"
     rm -rf "$temp_dir"
     mkdir -p "$temp_dir"
 
-    # Download to file first, then extract
+    # Download to file first, verify, then extract
     curl -fLsS "$url" -o "$temp_dir/maven.tar.gz"
+    verify_file "$temp_dir/maven.tar.gz" "sha512:$sum" || { rm -rf "$temp_dir"; return 1; }
     tar xzf "$temp_dir/maven.tar.gz" -C "$temp_dir" --strip-components=1
     rm "$temp_dir/maven.tar.gz"
 
@@ -225,8 +314,10 @@ EOF
     create_desktop_file "pgadmin4" "pgAdmin 4" "$BASE_DIR/pgadmin/pgadmin4" "$BASE_DIR/pgadmin/pgadmin4/static/img/logo-256.png" "PostgreSQL Tools"
 }
 
+# 5th arg: expected sha256 of the binary — same convention as
+# download_and_extract.
 download_single_binary() {
-    local name=$1 binary=$2 url=$3 version=$4
+    local name=$1 binary=$2 url=$3 version=$4 expected=${5:-}
     local version_file="$BASE_DIR/.versions/$binary"
     local current_version=""
 
@@ -245,7 +336,13 @@ download_single_binary() {
     echo "→ Downloading $name $version..."
     mkdir -p "$BASE_DIR/bin"
     mkdir -p "$BASE_DIR/.versions"
-    curl -fLsS "$url" -o "$BASE_DIR/bin/$binary"
+    curl -fLsS "$url" -o "$BASE_DIR/bin/$binary.tmp"
+    if [ -n "$expected" ]; then
+        verify_file "$BASE_DIR/bin/$binary.tmp" "$expected" || { rm -f "$BASE_DIR/bin/$binary.tmp"; return 1; }
+    else
+        echo "  ⚠ $name: publisher provides no checksum — installing unverified"
+    fi
+    mv "$BASE_DIR/bin/$binary.tmp" "$BASE_DIR/bin/$binary"
     chmod +x "$BASE_DIR/bin/$binary"
     echo "$version" > "$version_file"
     echo "✓ $name $version installed"
@@ -254,49 +351,73 @@ download_single_binary() {
 install_kubectl() {
     local version=$(curl -sL https://dl.k8s.io/release/stable.txt)
     local url="https://dl.k8s.io/release/${version}/bin/linux/amd64/kubectl"
-    download_single_binary "kubectl" "kubectl" "$url" "$version"
+    local sum=$(fetch_checksum "${url}.sha256")
+    [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for kubectl"; return 1; }
+    download_single_binary "kubectl" "kubectl" "$url" "$version" "$sum"
 }
 
 install_kind() {
-    local version=$(curl -s https://api.github.com/repos/kubernetes-sigs/kind/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+    local version=$(github_api https://api.github.com/repos/kubernetes-sigs/kind/releases/latest | grep -oP '"tag_name": "\K[^"]+')
     local url="https://github.com/kubernetes-sigs/kind/releases/download/${version}/kind-linux-amd64"
-    download_single_binary "kind" "kind" "$url" "$version"
+    local sum=$(fetch_checksum "${url}.sha256sum" "kind-linux-amd64")
+    [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for kind"; return 1; }
+    download_single_binary "kind" "kind" "$url" "$version" "$sum"
 }
 
 install_k9s() {
-    local version=$(curl -s https://api.github.com/repos/derailed/k9s/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+    local version=$(github_api https://api.github.com/repos/derailed/k9s/releases/latest | grep -oP '"tag_name": "\K[^"]+')
     local url="https://github.com/derailed/k9s/releases/download/${version}/k9s_Linux_amd64.tar.gz"
-    download_and_extract "k9s" "k9s" "$url" "$version" 0
+    local sum=$(fetch_checksum "https://github.com/derailed/k9s/releases/download/${version}/checksums.sha256" "k9s_Linux_amd64.tar.gz")
+    [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for k9s"; return 1; }
+    download_and_extract "k9s" "k9s" "$url" "$version" 0 "$sum"
 }
 
 install_helm() {
-    local version=$(curl -s https://api.github.com/repos/helm/helm/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+    local version=$(github_api https://api.github.com/repos/helm/helm/releases/latest | grep -oP '"tag_name": "\K[^"]+')
     local url="https://get.helm.sh/helm-${version}-linux-amd64.tar.gz"
-    download_and_extract "Helm" "helm" "$url" "$version" 1
+    local sum=$(fetch_checksum "${url}.sha256")
+    [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for Helm"; return 1; }
+    download_and_extract "Helm" "helm" "$url" "$version" 1 "$sum"
 }
 
 install_stern() {
-    local version=$(curl -s https://api.github.com/repos/stern/stern/releases/latest | grep -oP '"tag_name": "\K[^"]+')
-    local url="https://github.com/stern/stern/releases/download/${version}/stern_${version#v}_linux_amd64.tar.gz"
-    download_and_extract "Stern" "stern" "$url" "$version" 0
+    local version=$(github_api https://api.github.com/repos/stern/stern/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+    local file="stern_${version#v}_linux_amd64.tar.gz"
+    local url="https://github.com/stern/stern/releases/download/${version}/${file}"
+    local sum=$(fetch_checksum "https://github.com/stern/stern/releases/download/${version}/checksums.txt" "$file")
+    [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for Stern"; return 1; }
+    download_and_extract "Stern" "stern" "$url" "$version" 0 "$sum"
 }
 
 install_skaffold() {
-    local version=$(curl -s https://api.github.com/repos/GoogleContainerTools/skaffold/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+    local version=$(github_api https://api.github.com/repos/GoogleContainerTools/skaffold/releases/latest | grep -oP '"tag_name": "\K[^"]+')
     local url="https://github.com/GoogleContainerTools/skaffold/releases/download/${version}/skaffold-linux-amd64"
-    download_single_binary "Skaffold" "skaffold" "$url" "$version"
+    local sum=$(fetch_checksum "${url}.sha256" "skaffold-linux-amd64")
+    [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for Skaffold"; return 1; }
+    download_single_binary "Skaffold" "skaffold" "$url" "$version" "$sum"
 }
 
 install_jq() {
-    local version=$(curl -s https://api.github.com/repos/jqlang/jq/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+    local version=$(github_api https://api.github.com/repos/jqlang/jq/releases/latest | grep -oP '"tag_name": "\K[^"]+')
     local url="https://github.com/jqlang/jq/releases/download/${version}/jq-linux-amd64"
-    download_single_binary "jq" "jq" "$url" "$version"
+    local sum=$(fetch_checksum "https://github.com/jqlang/jq/releases/download/${version}/sha256sum.txt" "jq-linux-amd64")
+    [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for jq"; return 1; }
+    download_single_binary "jq" "jq" "$url" "$version" "$sum"
 }
 
 install_yq() {
     local version=$(github_api https://api.github.com/repos/mikefarah/yq/releases/latest | grep -oP '"tag_name": "\K[^"]+')
-    local url="https://github.com/mikefarah/yq/releases/download/${version}/yq_linux_amd64"
-    download_single_binary "yq" "yq" "$url" "$version"
+    local base="https://github.com/mikefarah/yq/releases/download/${version}"
+    local url="${base}/yq_linux_amd64"
+    # yq's "checksums" file has one row per file and one column per hash
+    # algorithm; the column order is published in checksums_hashes_order.
+    local idx=$(curl -fLsS "${base}/checksums_hashes_order" 2>/dev/null | grep -nx 'SHA-256' | cut -d: -f1)
+    local sum=""
+    [ -n "$idx" ] && sum=$(curl -fLsS "${base}/checksums" 2>/dev/null \
+        | awk -v c=$((idx + 1)) '$1 == "yq_linux_amd64" { print tolower($c); exit }' \
+        | grep -E '^[0-9a-f]{64}$' || true)
+    [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for yq"; return 1; }
+    download_single_binary "yq" "yq" "$url" "$version" "$sum"
 }
 
 install_ollama() {
@@ -317,12 +438,16 @@ install_ollama() {
         return 0
     fi
 
+    local sum=$(fetch_checksum "https://github.com/ollama/ollama/releases/download/${version}/sha256sum.txt" "ollama-linux-amd64.tar.zst")
+    [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for Ollama"; return 1; }
+
     echo "→ Downloading Ollama $version..."
     local temp_dir="$BASE_DIR/ollama_temp"
     rm -rf "$temp_dir"
     mkdir -p "$temp_dir"
 
     curl -fLsS "$url" -o "$temp_dir/ollama.tar.zst"
+    verify_file "$temp_dir/ollama.tar.zst" "$sum" || { rm -rf "$temp_dir"; return 1; }
     tar --zstd -xf "$temp_dir/ollama.tar.zst" -C "$temp_dir"
     rm "$temp_dir/ollama.tar.zst"
 
@@ -333,8 +458,10 @@ install_ollama() {
 }
 
 install_ffmpeg() {
+    # BtbN dropped nonfree builds; gpl is the closest remaining variant.
     local version=$(github_api https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest | grep -oP '"tag_name": "\K[^"]+')
-    local url="https://github.com/BtbN/FFmpeg-Builds/releases/download/${version}/ffmpeg-master-latest-linux64-nonfree.tar.xz"
+    local file="ffmpeg-master-latest-linux64-gpl.tar.xz"
+    local url="https://github.com/BtbN/FFmpeg-Builds/releases/download/${version}/${file}"
     local version_file="$BASE_DIR/ffmpeg/.version"
     local current_version=""
 
@@ -350,13 +477,17 @@ install_ffmpeg() {
         return 0
     fi
 
+    local sum=$(fetch_checksum "https://github.com/BtbN/FFmpeg-Builds/releases/download/${version}/checksums.sha256" "$file")
+    [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for FFmpeg"; return 1; }
+
     echo "→ Downloading FFmpeg $version..."
     local temp_dir="$BASE_DIR/ffmpeg_temp"
     rm -rf "$temp_dir"
     mkdir -p "$temp_dir"
 
     curl -fLsS "$url" -o "$temp_dir/ffmpeg.tar.xz"
-    tar xJf "$temp_dir/ffmpeg.tar.xz" -C "$temp_dir"
+    verify_file "$temp_dir/ffmpeg.tar.xz" "$sum" || { rm -rf "$temp_dir"; return 1; }
+    tar xJf "$temp_dir/ffmpeg.tar.xz" -C "$temp_dir" --strip-components=1
     rm "$temp_dir/ffmpeg.tar.xz"
 
     rm -rf "$BASE_DIR/ffmpeg"
@@ -365,28 +496,29 @@ install_ffmpeg() {
     echo "✓ FFmpeg $version installed"
 }
 
+# Default install set; pass tool names as arguments to install a subset,
+# e.g.:  jan-update-opt jq yq kubectl
+ALL_TOOLS=(idea nushell starship obsidian gradle maven kubectl kind k9s helm
+           stern skaffold jq yq ollama ffmpeg corretto_all)
+#          pgadmin disabled
+
+if [ $# -gt 0 ]; then
+    TOOLS=("$@")
+else
+    TOOLS=("${ALL_TOOLS[@]}")
+fi
+
+for tool in "${TOOLS[@]}"; do
+    if ! declare -F "install_${tool}" >/dev/null; then
+        echo "✗ Unknown tool: $tool (available: ${ALL_TOOLS[*]})"
+        exit 1
+    fi
+done
+
 echo "Starting software installation in $BASE_DIR..."
 
-install_idea
-install_nushell
-install_starship
-install_obsidian
-install_gradle
-install_maven
-#install_pgadmin
-install_kubectl
-install_kind
-install_k9s
-install_helm
-install_stern
-install_skaffold
-install_jq
-install_yq
-install_ollama
-install_ffmpeg
-
-for ver in 8 11 17 21 23; do
-    install_corretto $ver
+for tool in "${TOOLS[@]}"; do
+    "install_${tool}"
 done
 
 # Create symlinks in bin directory for all tools

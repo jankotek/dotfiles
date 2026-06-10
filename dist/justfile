@@ -45,8 +45,15 @@ update-starship:
     set -euo pipefail
     trap 'echo >&2 "${BASH_SOURCE[0]}:${BASH_LINENO[0]}: Command \`$BASH_COMMAND\` failed with exit code $?"; exit $?' ERR
 
+    url=https://github.com/starship/starship/releases/latest/download/starship-x86_64-unknown-linux-musl.tar.gz
+    tmp=$(mktemp -d)
+    wget  --no-verbose -O "$tmp/starship.tar.gz" "$url"
+    wget  --no-verbose -O "$tmp/starship.tar.gz.sha256" "$url.sha256"
+    echo "$(cat "$tmp/starship.tar.gz.sha256")  $tmp/starship.tar.gz" | sha256sum -c -
+
     rm -rf starship/*
-    wget  --no-verbose -O- https://github.com/starship/starship/releases/latest/download/starship-x86_64-unknown-linux-musl.tar.gz | tar -xz -C starship/
+    tar -xz -C starship/ -f "$tmp/starship.tar.gz"
+    rm -rf "$tmp"
 
 gitadd:
     #!/usr/bin/env bash
