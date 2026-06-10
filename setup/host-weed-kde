@@ -193,7 +193,45 @@ chmod 0755 /home
 chmod 0700 "$HOME_DIR" /root
 chown "$HOME_USER":"$HOME_GROUP" -R "$HOME_DIR"
 
-su - "$HOME_USER" -c 'mkdir -p ~/desk ~/down ~/doc ~/doc/templates ~/media/share ~/media/music ~/media/pic ~/media/video'
+configure-user-dirs() {
+    local user=$1
+    local group=$2
+    local home_dir=$3
+
+    su - "$user" -c 'mkdir -p ~/desk ~/down ~/doc ~/doc/templates ~/media/share ~/media/music ~/media/pic ~/media/video'
+    install -d -o "$user" -g "$group" "$home_dir/.config"
+    cat > "$home_dir/.config/user-dirs.dirs" <<'EOF'
+XDG_DESKTOP_DIR="$HOME/desk"
+XDG_DOWNLOAD_DIR="$HOME/down"
+XDG_TEMPLATES_DIR="$HOME/doc/templates"
+XDG_PUBLICSHARE_DIR="$HOME/media/share"
+XDG_DOCUMENTS_DIR="$HOME/doc"
+XDG_MUSIC_DIR="$HOME/media/music"
+XDG_PICTURES_DIR="$HOME/media/pic"
+XDG_VIDEOS_DIR="$HOME/media/video"
+EOF
+    chown "$user":"$group" "$home_dir/.config/user-dirs.dirs"
+    su - "$user" -c '
+        migrate_dir() {
+            src=$1
+            dst=$2
+            [ -d "$src" ] || return 0
+            mkdir -p "$dst"
+            find "$src" -mindepth 1 -maxdepth 1 -exec mv -n -t "$dst" {} +
+            rmdir "$src" 2>/dev/null || true
+        }
+        migrate_dir ~/Desktop ~/desk
+        migrate_dir ~/Documents ~/doc
+        migrate_dir ~/Downloads ~/down
+        migrate_dir ~/Music ~/media/music
+        migrate_dir ~/Pictures ~/media/pic
+        migrate_dir ~/Public ~/media/share
+        migrate_dir ~/Templates ~/doc/templates
+        migrate_dir ~/Videos ~/media/video
+    '
+}
+
+configure-user-dirs "$HOME_USER" "$HOME_GROUP" "$HOME_DIR"
 
 systemctl daemon-reload
 

@@ -1,5 +1,10 @@
 #!/bin/bash
 
+# Xubuntu 26.04 VM provisioning.
+#
+# Kept separate from vm-xub24 so package differences can diverge cleanly over
+# time, while preserving the same VM deployment contract.
+
 # Sanity check: verify running inside a VM
 if ! systemd-detect-virt -q -v; then
     echo "ERROR: This script must run inside a virtual machine"
@@ -30,27 +35,27 @@ apt-get install -y \
   xfce4-fsguard-plugin xfce4-systemload-plugin xfce4-taskmanager \
   links mc htop git curl powertop fish iftop iotop sshpass ncdu nano mosh \
   fonts-jetbrains-mono fonts-terminus console-setup \
-  pwgen telnet jdupes just bats
+  pwgen telnet jdupes just bats xdotool
 
 # Guest agents — install but don't restart (masked above)
 apt-get install -y spice-vdagent qemu-guest-agent
 
 
-apt-get purge -y  snapd  \
-  tumbler tumbler*   \
-  xfce4-terminal     \
-  libwebkit2gtk-*    \
-  cups* printer-driver*      \
-  xfce4-screensaver  network-manager-gnome           \
-  *packagekit*  apport*  yelp*    \
-  xterm xfce4-screensaver  xscreensaver     \
-pulseaudio* gstreamer* bluez* pipewire* pavucontrol     \
-network-manager-gnome   \
-xserver-xorg-video-all memtest86+ mesa-vulkan-drivers  \
-bind9*  colord*  \
-avahi-daemon apparmor *fwup* \
-poppler-*  libavcodec*  libcodec* \
-fonts-noto-cjk
+apt-get purge -y snapd \
+  tumbler tumbler* \
+  xfce4-terminal \
+  libwebkit2gtk-* \
+  cups* printer-driver* \
+  xfce4-screensaver network-manager-gnome \
+  *packagekit* apport* yelp* \
+  xterm xfce4-screensaver xscreensaver \
+  pulseaudio* gstreamer* bluez* pipewire* pavucontrol \
+  network-manager-gnome \
+  xserver-xorg-video-all memtest86+ mesa-vulkan-drivers \
+  bind9* colord* \
+  avahi-daemon apparmor *fwup* \
+  poppler-* libavcodec* libcodec* \
+  fonts-noto-cjk
 
 block-pkg() {
    for PKG in "$@"; do

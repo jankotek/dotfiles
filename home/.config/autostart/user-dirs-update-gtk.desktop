@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=User folders update
+Exec=true
+Hidden=true
+OnlyShowIn=XFCE;
+StartupNotify=false
+Terminal=false
+

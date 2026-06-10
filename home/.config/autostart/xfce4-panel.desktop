@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=XFCE Panel
+Exec=sh -c 'pgrep -u "$USER" xfce4-panel >/dev/null || exec xfce4-panel --disable-wm-check'
+OnlyShowIn=XFCE;
+StartupNotify=false
+Terminal=false
+

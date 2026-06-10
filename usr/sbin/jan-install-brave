@@ -6,6 +6,19 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+configure_chromium_sandbox_sysctl() {
+    # Ubuntu 24.04+ can restrict unprivileged user namespaces through
+    # AppArmor. These VM images remove AppArmor, so Chromium-based browsers
+    # need the sysctl opened explicitly for their sandbox to initialize.
+    cat > /etc/sysctl.d/30-brave.conf <<'EOF'
+# Required for Chromium/Brave sandboxing on VM images without AppArmor.
+kernel.unprivileged_userns_clone = 1
+kernel.apparmor_restrict_unprivileged_userns = 0
+EOF
+    sysctl -w kernel.unprivileged_userns_clone=1 >/dev/null 2>&1 || true
+    sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 >/dev/null 2>&1 || true
+}
+
 . /etc/os-release
 
 case $ID in
@@ -34,4 +47,5 @@ case $ID in
         ;;
 esac
 
+configure_chromium_sandbox_sysctl
 ln -sfn /usr/bin/brave-browser /usr/local/bin/brave

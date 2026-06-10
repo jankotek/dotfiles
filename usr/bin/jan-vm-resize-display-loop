@@ -8,6 +8,8 @@
 # the script leaves xev running as an orphan.
 trap 'pkill -P $$ xev 2>/dev/null; exit 0' INT TERM EXIT
 
+xrandr --output Virtual-1 --auto 2>/dev/null || xrandr --auto 2>/dev/null || true
+
 while true; do
     xev -root -event randr \
         | grep --line-buffered 'subtype XRROutputChangeNotifyEvent' \

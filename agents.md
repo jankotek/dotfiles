@@ -65,14 +65,15 @@ Tests use [bats-core](https://github.com/bats-core/bats-core). Three test scenar
 ```bash
 /opt/jan/test/test-vm-deploy.sh          # clone xub -> provision -> reboot -> test -> destroy
 /opt/jan/test/test-vm-deploy.sh --keep   # same, but keep VM for debugging
+/opt/jan/test/test-vm-xub26-deploy.sh    # clone xub26 -> setup/vm-xub26 -> test -> destroy
 ```
 
 The deploy script:
-1. Shuts down the base `xub` VM (QEMU locks the backing file)
+1. Shuts down the base VM (default `xub`; override with `BASE_VM`)
 2. Creates a qcow2 overlay (copy-on-write, fast)
 3. Clones the VM XML (new name `test-YYMMDD-HHMM`, new MAC, same virtiofs share)
 4. Starts the clone, waits for the guest agent
-5. Runs `setup/vm-xub24` (provisioning)
+5. Runs the setup script (default `setup/vm-xub24`; override with `SETUP_SCRIPT`)
 6. Reboots, waits for desktop session (autologin + XFCE)
 7. Installs bats, runs `test-vm.sh`
 8. On exit: destroys VM and deletes overlay (unless `--keep`)

@@ -8,6 +8,7 @@ fi
 
 # disable caps lock
 setxkbmap -option caps:ctrl_modifier
+xset s off -dpms s noblank
 
 # give some time to desktop session to initialize
 sleep 2
@@ -47,6 +48,10 @@ if [ "$XDG_CURRENT_DESKTOP" = "KDE" ]; then
 fi
 
 # XFCE-only desktop apps (harmless no-ops if not installed, e.g. on KDE)
-terminator &
+if command -v terminator >/dev/null 2>&1; then
+    terminator &
+fi
 
-idea &
+if command -v idea >/dev/null 2>&1; then
+    idea &
+fi

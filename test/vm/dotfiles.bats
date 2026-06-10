@@ -53,5 +53,17 @@ load ../helpers
     assert_file "$JAN_HOME/.config/user-dirs.dirs"
     assert_file_contains "$JAN_HOME/.config/user-dirs.dirs" 'XDG_DESKTOP_DIR="\$HOME/desk"'
     assert_file_contains "$JAN_HOME/.config/user-dirs.dirs" 'XDG_DOWNLOAD_DIR="\$HOME/down"'
+    assert_file_contains "$JAN_HOME/.config/user-dirs.dirs" 'XDG_TEMPLATES_DIR="\$HOME/doc/templates"'
+    assert_file_contains "$JAN_HOME/.config/user-dirs.dirs" 'XDG_PUBLICSHARE_DIR="\$HOME/media/share"'
     assert_file_contains "$JAN_HOME/.config/user-dirs.dirs" 'XDG_DOCUMENTS_DIR="\$HOME/doc"'
+    assert_file_contains "$JAN_HOME/.config/user-dirs.dirs" 'XDG_MUSIC_DIR="\$HOME/media/music"'
+    assert_file_contains "$JAN_HOME/.config/user-dirs.dirs" 'XDG_PICTURES_DIR="\$HOME/media/pic"'
+    assert_file_contains "$JAN_HOME/.config/user-dirs.dirs" 'XDG_VIDEOS_DIR="\$HOME/media/video"'
+    ! [ -e "$JAN_HOME/Documents" ]
+    ! [ -e "$JAN_HOME/Downloads" ]
+    ! [ -e "$JAN_HOME/Music" ]
+    ! [ -e "$JAN_HOME/Pictures" ]
+    ! [ -e "$JAN_HOME/Public" ]
+    ! [ -e "$JAN_HOME/Templates" ]
+    ! [ -e "$JAN_HOME/Videos" ]
 }

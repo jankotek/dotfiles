@@ -7,9 +7,13 @@ All tests use [bats-core](https://github.com/bats-core/bats-core). Shared assert
 ```bash
 test/test-host.sh              # runs basic/ + host/     (on the host)
 test/test-vm.sh                # runs basic/ + vm/       (inside a VM)
-test/test-vm-deploy.sh         # clone xub -> provision -> reboot -> test -> destroy
-test/test-vm-deploy.sh --keep  # same, but keep VM for debugging
+test/test-vm-deploy.sh             # clone xub -> provision -> reboot -> test -> destroy
+test/test-vm-deploy.sh --keep      # same, but keep VM for debugging
+test/test-vm-xub26-deploy.sh       # clone xub26 -> setup/vm-xub26 -> test -> destroy
 ```
+
+`test-vm-deploy.sh` can also be pointed at another base with `BASE_VM`,
+`BASE_DISK`, `SETUP_SCRIPT`, and `VM_NAME_PREFIX`.
 
 ## Test directories
 

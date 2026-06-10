@@ -1,0 +1,29 @@
+if [ "${XDG_CURRENT_DESKTOP:-}" = "XFCE" ] || [ "${DESKTOP_SESSION:-}" = "xubuntu" ]; then
+    xset s off -dpms s noblank 2>/dev/null || true
+    if command -v xfconf-query >/dev/null 2>&1; then
+        xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/dpms-enabled -n -t bool -s false 2>/dev/null || true
+        xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/presentation-mode -n -t bool -s true 2>/dev/null || true
+        xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/blank-on-ac -n -t int -s 0 2>/dev/null || true
+        xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/blank-on-battery -n -t int -s 0 2>/dev/null || true
+        xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/dpms-on-ac-sleep -n -t uint -s 0 2>/dev/null || true
+        xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/dpms-on-ac-off -n -t uint -s 0 2>/dev/null || true
+        xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/dpms-on-battery-sleep -n -t uint -s 0 2>/dev/null || true
+        xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/dpms-on-battery-off -n -t uint -s 0 2>/dev/null || true
+        xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/inactivity-on-ac -n -t uint -s 14 2>/dev/null || true
+        xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/inactivity-on-battery -n -t uint -s 14 2>/dev/null || true
+        xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/inactivity-sleep-mode-on-ac -n -t int -s 0 2>/dev/null || true
+        xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/inactivity-sleep-mode-on-battery -n -t int -s 0 2>/dev/null || true
+        xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/lock-screen-suspend-hibernate -n -t bool -s false 2>/dev/null || true
+    fi
+    (
+        sleep 8
+        export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+        export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
+        xset s off -dpms s noblank 2>/dev/null || true
+        if systemd-detect-virt -q -v 2>/dev/null; then
+            pgrep -u "$USER" -f jan-vm-resize-display-loop >/dev/null 2>&1 || jan-vm-resize-display-loop >/tmp/jan-vm-resize-display-loop.log 2>&1 &
+        fi
+        pgrep -u "$USER" xfce4-panel >/dev/null 2>&1 || xfce4-panel --disable-wm-check >/tmp/xfce4-panel-fallback.log 2>&1 &
+        pgrep -u "$USER" xfdesktop >/dev/null 2>&1 || xfdesktop >/tmp/xfdesktop-fallback.log 2>&1 &
+    ) &
+fi
