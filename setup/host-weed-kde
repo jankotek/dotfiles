@@ -117,6 +117,32 @@ if lspci -nn 2>/dev/null | grep -qi 'Strix Halo'; then
     jan-setup-strix-halo    || echo "WARNING: strix-halo setup failed (non-fatal)"
 fi
 
+# ---------- Replace all wallpapers with a single image ----------
+# Point every wallpaper/background image under /usr/share at the single
+# wallpaper shipped in the repo (usr/share/jan-wallpaper.jpg, deployed to
+# /usr/local/share/jan-wallpaper.jpg by the symlink step above), so KDE (and
+# anything else) always shows it regardless of which theme / resolution
+# variant it picks. Symlinks are idempotent, so re-runs are safe.
+
+echo "==> Replacing /usr/share wallpapers with a single image"
+WALLPAPER_FILE="/usr/local/share/jan-wallpaper.jpg"
+if [[ -e "$WALLPAPER_FILE" ]]; then
+    WALL_DIRS=()
+    for d in /usr/share/wallpapers /usr/share/backgrounds; do
+        [[ -d "$d" ]] && WALL_DIRS+=("$d")
+    done
+    if [[ ${#WALL_DIRS[@]} -gt 0 ]]; then
+        find "${WALL_DIRS[@]}" \( -type f -o -type l \) \
+            \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' \
+               -o -iname '*.webp' -o -iname '*.bmp' -o -iname '*.svg' \) \
+            -print0 | while IFS= read -r -d '' img; do
+            ln -sf "$WALLPAPER_FILE" "$img"
+        done
+    fi
+else
+    echo "WARNING: ${WALLPAPER_FILE} missing — keeping existing wallpapers" >&2
+fi
+
 # Boot straight to the graphical session.
 systemctl set-default graphical.target
 
