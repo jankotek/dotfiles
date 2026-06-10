@@ -54,7 +54,7 @@ export PATH="/usr/local/sbin:/usr/local/bin:$PATH"
 # ---------- Package install ----------
 
 echo "==> Refreshing repositories"
-zypper -n --no-gpg-checks refresh
+zypper -n refresh
 
 # Core set: confirmed-valid package names, must succeed.
 echo "==> Installing KDE apps, virt stack, and CLI tools"
@@ -81,7 +81,7 @@ zypper -n install --no-recommends nodejs22 || \
 # is locked because this host runs pure Wayland; vim/emacs/PackageKit are
 # deliberately unwanted.
 
-LOCK_PKGS=(PackageKit emacs icewm vim xterm xorg-x11-server)
+LOCK_PKGS=(PackageKit emacs icewm vim vim-small xterm xorg-x11-server)
 echo "==> Removing and locking unwanted packages"
 for pkg in "${LOCK_PKGS[@]}"; do
     rpm -q "$pkg" &>/dev/null && zypper -n rm -u "$pkg" 2>/dev/null || true
