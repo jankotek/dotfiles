@@ -37,3 +37,31 @@ load ../helpers
     assert_file /usr/share/applications/remote-viewer.desktop
     assert_file_contains /usr/share/applications/remote-viewer.desktop 'GDK_BACKEND=x11'
 }
+
+# Read a key from a specific section of an INI-style file.
+# Section header is matched literally, e.g. "[AC][SuspendAndShutdown]".
+# Prints the value (empty if section/key absent).
+ini_value() {
+    local file="$1" section="$2" key="$3"
+    [[ -f "$file" ]] || return 0
+    awk -F= -v sec="$section" -v key="$key" '
+        $0 == sec { insec = 1; next }
+        /^\[/     { insec = 0 }
+        insec && $1 == key { gsub(/[ \t\r]+$/, "", $2); print $2; exit }
+    ' "$file"
+}
+
+# On AC power the machine must never auto-suspend/sleep: it should stay running
+# whenever the adapter is plugged in. PowerDevil stores this in powerdevilrc as
+# [AC][SuspendAndShutdown] AutoSuspendAction, where 0 = do nothing and any
+# non-zero value = suspend/sleep/hibernate after AutoSuspendIdleTimeoutSec.
+@test "plasma does not auto-suspend on AC power" {
+    local rc="$JAN_HOME/.config/powerdevilrc"
+    local action
+    action="$(ini_value "$rc" '[AC][SuspendAndShutdown]' AutoSuspendAction)"
+    if [[ -n "$action" && "$action" != "0" ]]; then
+        echo "AutoSuspendAction=$action on AC in $rc (expected 0 / unset)" >&2
+        echo "machine would suspend while plugged in; it must stay always-on" >&2
+        return 1
+    fi
+}
