@@ -56,6 +56,7 @@ ini_value() {
 # [AC][SuspendAndShutdown] AutoSuspendAction, where 0 = do nothing and any
 # non-zero value = suspend/sleep/hibernate after AutoSuspendIdleTimeoutSec.
 @test "plasma does not auto-suspend on AC power" {
+    command -v plasmashell &>/dev/null || skip "plasma not installed"
     local rc="$JAN_HOME/.config/powerdevilrc"
     local action
     action="$(ini_value "$rc" '[AC][SuspendAndShutdown]' AutoSuspendAction)"
