@@ -52,16 +52,26 @@ ini_value() {
 }
 
 # On AC power the machine must never auto-suspend/sleep: it should stay running
-# whenever the adapter is plugged in. PowerDevil stores this in powerdevilrc as
-# [AC][SuspendAndShutdown] AutoSuspendAction, where 0 = do nothing and any
-# non-zero value = suspend/sleep/hibernate after AutoSuspendIdleTimeoutSec.
-@test "plasma does not auto-suspend on AC power" {
+# whenever the adapter is plugged in. PowerDevil stores this per-user in
+# powerdevilrc as [AC][SuspendAndShutdown] AutoSuspendAction, where 0 = do
+# nothing and any non-zero value = suspend/sleep/hibernate after the idle
+# timeout. The suite runs as root, so check every user whose home is under
+# /home/* (excludes root and system accounts) — any one of them suspending
+# would put the box to sleep.
+@test "no user auto-suspends on AC power" {
     command -v plasmashell &>/dev/null || skip "plasma not installed"
-    local rc="$JAN_HOME/.config/powerdevilrc"
-    local action
-    action="$(ini_value "$rc" '[AC][SuspendAndShutdown]' AutoSuspendAction)"
-    if [[ -n "$action" && "$action" != "0" ]]; then
-        echo "AutoSuspendAction=$action on AC in $rc (expected 0 / unset)" >&2
+    local failed=0
+    while IFS=: read -r user _ uid _ _ home _; do
+        [[ "$home" == /home/* ]] || continue
+        local rc="$home/.config/powerdevilrc"
+        local action
+        action="$(ini_value "$rc" '[AC][SuspendAndShutdown]' AutoSuspendAction)"
+        if [[ -n "$action" && "$action" != "0" ]]; then
+            echo "AutoSuspendAction=$action on AC for user $user ($rc)" >&2
+            failed=1
+        fi
+    done < <(getent passwd)
+    if [[ "$failed" -ne 0 ]]; then
         echo "machine would suspend while plugged in; it must stay always-on" >&2
         return 1
     fi
