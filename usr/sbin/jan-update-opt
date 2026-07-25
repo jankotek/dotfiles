@@ -164,6 +164,41 @@ install_starship() {
     download_and_extract "Starship" "starship" "$url" "$version" 0 "$sum"
 }
 
+install_herdr() {
+    local release version arch file url sum
+    release=$(github_api https://api.github.com/repos/ogulcancelik/herdr/releases/latest)
+    version=$(grep -oP '"tag_name": "\K[^"]+' <<<"$release" | head -1)
+
+    case "$(uname -m)" in
+        x86_64|amd64) arch=x86_64 ;;
+        aarch64|arm64) arch=aarch64 ;;
+        *)
+            echo "✗ Herdr does not publish a Linux binary for architecture $(uname -m)"
+            return 1
+            ;;
+    esac
+
+    file="herdr-linux-${arch}"
+    url="https://github.com/ogulcancelik/herdr/releases/download/${version}/${file}"
+    # GitHub calculates and publishes a SHA-256 digest for every release
+    # asset, even though Herdr does not ship a separate checksum file.
+    sum=$(awk -v file="$file" '
+        index($0, "\"name\": \"" file "\"") { found = 1 }
+        found && /"digest": "sha256:[0-9a-f]+"/ {
+            sub(/^.*"digest": "sha256:/, "")
+            sub(/".*$/, "")
+            print
+            exit
+        }
+    ' <<<"$release")
+    [[ "$sum" =~ ^[0-9a-f]{64}$ ]] || {
+        echo "✗ Failed to fetch checksum for Herdr"
+        return 1
+    }
+
+    download_single_binary "Herdr" "herdr" "$url" "$version" "$sum"
+}
+
 install_obsidian() {
     # Obsidian publishes no checksums in its release assets — unverified.
     local version=$(github_api https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest | grep -oP '"tag_name": "\K[^"]+' | sed 's/^v//')
@@ -498,7 +533,7 @@ install_ffmpeg() {
 
 # Default install set; pass tool names as arguments to install a subset,
 # e.g.:  jan-update-opt jq yq kubectl
-ALL_TOOLS=(idea nushell starship obsidian gradle maven kubectl kind k9s helm
+ALL_TOOLS=(idea nushell starship herdr obsidian gradle maven kubectl kind k9s helm
            stern skaffold jq yq ollama ffmpeg corretto_all)
 #          pgadmin disabled
 

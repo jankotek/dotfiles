@@ -43,14 +43,17 @@ test/test-vm-xub26-deploy.sh       # clone xub26 -> setup/vm-xub26 -> test -> de
 | `agents.bats` | Running inside VM, spice-vdagent installed + service enabled + process running as jan, spice-vdagentd running, qemu-guest-agent installed + enabled |
 | `system.bats` | /opt/jan/usr symlinked into /usr/local, terminator/rofi/mousepad installed, home owned by jan with 0700, snapd/xfce4-screensaver/xfce4-terminal removed, snapd blocked from reinstall, tty11-root service enabled |
 
-### utils/ — manual integration tests (destructive)
+### utils/ — manual integration tests
 
-Not triggered by any launcher. Run individually as root.
+Not triggered by any launcher. Run individually; tests that modify system state
+must be run as root.
 
 | File | What it checks |
 |------|---------------|
+| `update-opt.bats` | Downloads Herdr into a temporary `JAN_OPT`, verifies the binary and version tracking, then checks an idempotent re-run |
 | `pod-security.bats` | Creates a temporary pod user via `jan-pod-setup`, verifies all security hardening layers (nologin shell, locked password, nogroup, 0700 home, sudo denied, cron denied, filesystem ACLs blocking /home /root /tmp /var/log /etc/ssh /var/spool, /var/pod not listable, podman configs, linger, cgroup delegation, sysctl port restriction), then deletes everything |
 
 ```bash
+OPT_JAN="$PWD" bats test/utils/update-opt.bats
 sudo bats test/utils/pod-security.bats
 ```
