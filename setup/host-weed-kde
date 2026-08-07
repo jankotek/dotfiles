@@ -64,7 +64,7 @@ zypper -n install --no-recommends \
     filelight partitionmanager \
     greetd tuigreet \
     virt-manager virt-install virt-viewer qemu podman lima \
-    mc htop git curl powertop fish iotop ncdu nano mosh \
+    mc htop git curl powertop fish iotop ncdu nano mosh ripgrep \
     pwgen telnet jdupes just bats zim sshpass jq yq fzf rsync dconf \
     NetworkManager-tui jetbrains-mono-fonts \
     java-17-openjdk-devel maven

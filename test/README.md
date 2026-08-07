@@ -21,7 +21,7 @@ test/test-vm-xub26-deploy.sh       # clone xub26 -> setup/vm-xub26 -> test -> de
 
 | File | What it checks |
 |------|---------------|
-| `cli.bats` | Common CLI tools: git, curl, mc, htop, fish, nano, ncdu, starship, iotop, powertop, pwgen, telnet, jdupes, just, bats, zim, JetBrains Mono font |
+| `cli.bats` | Common CLI tools: git, curl, mc, htop, fish, nano, ncdu, rg, starship, iotop, powertop, pwgen, telnet, jdupes, just, bats, zim, JetBrains Mono font |
 | `optjan.bats` | `/opt/jan` directory structure, key scripts exist in repo |
 | `zswap.bats` | zswap enabled with zstd compressor in boot params and at runtime |
 
@@ -50,7 +50,7 @@ must be run as root.
 
 | File | What it checks |
 |------|---------------|
-| `update-opt.bats` | Downloads Herdr into a temporary `JAN_OPT`, verifies the binary and version tracking, then checks an idempotent re-run |
+| `update-opt.bats` | Downloads Herdr and Grok into a temporary `JAN_OPT`, verifies binaries/checksums and version tracking, then checks idempotent re-runs (Grok is ~160 MiB) |
 | `pod-security.bats` | Creates a temporary pod user via `jan-pod-setup`, verifies all security hardening layers (nologin shell, locked password, nogroup, 0700 home, sudo denied, cron denied, filesystem ACLs blocking /home /root /tmp /var/log /etc/ssh /var/spool, /var/pod not listable, podman configs, linger, cgroup delegation, sysctl port restriction), then deletes everything |
 
 ```bash

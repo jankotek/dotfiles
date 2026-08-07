@@ -55,12 +55,15 @@ fetch_checksum() {
 }
 
 # verify_file <file> <expected>
-# <expected> is a sha256 hex digest, or "sha512:<hex>" for sha512.
+# <expected> is a sha256 hex digest, "sha512:<hex>" for sha512, or "md5:<hex>".
 verify_file() {
     local file=$1 expected=$2 algo=sha256
     if [[ "$expected" == sha512:* ]]; then
         algo=sha512
         expected=${expected#sha512:}
+    elif [[ "$expected" == md5:* ]]; then
+        algo=md5
+        expected=${expected#md5:}
     fi
     expected=${expected,,}
     local actual
@@ -197,6 +200,55 @@ install_herdr() {
     }
 
     download_single_binary "Herdr" "herdr" "$url" "$version" "$sum"
+}
+
+install_grok() {
+    # Official Grok Build CLI (https://x.ai/cli). Source is open on GitHub
+    # (xai-org/grok-build) but prebuilt binaries are published only via the
+    # x.ai/cli CDN / GCS bucket — no GitHub release assets.
+    local version arch platform url meta md5_b64 md5_hex
+    local base_primary="https://x.ai/cli"
+    local base_fallback="https://storage.googleapis.com/grok-build-public-artifacts/cli"
+
+    version=$(curl -fLsS --max-time 30 "${base_primary}/stable" 2>/dev/null \
+        | tr -d '\r' | head -n1 | tr -d '[:space:]')
+    if [ -z "$version" ]; then
+        version=$(curl -fLsS --max-time 30 "${base_fallback}/stable" 2>/dev/null \
+            | tr -d '\r' | head -n1 | tr -d '[:space:]')
+    fi
+    [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9._]+)?$ ]] || {
+        echo "✗ Failed to fetch version for Grok"
+        return 1
+    }
+
+    case "$(uname -m)" in
+        x86_64|amd64) arch=x86_64 ;;
+        aarch64|arm64) arch=aarch64 ;;
+        *)
+            echo "✗ Grok does not publish a Linux binary for architecture $(uname -m)"
+            return 1
+            ;;
+    esac
+
+    platform="linux-${arch}"
+    url="${base_primary}/grok-${version}-${platform}"
+
+    # Publisher ships no separate SHA-256 file; GCS object metadata includes
+    # the object MD5 (same integrity model as the official install.sh which
+    # only smoke-runs --version after download).
+    meta=$(curl -fLsS --max-time 30 \
+        "https://storage.googleapis.com/storage/v1/b/grok-build-public-artifacts/o/cli%2Fgrok-${version}-${platform}" \
+        2>/dev/null) || true
+    md5_b64=$(grep -oP '"md5Hash": "\K[^"]+' <<<"$meta" | head -1)
+    if [ -n "$md5_b64" ]; then
+        md5_hex=$(printf '%s' "$md5_b64" | base64 -d 2>/dev/null | od -An -tx1 | tr -d ' \n')
+    fi
+    [[ "$md5_hex" =~ ^[0-9a-f]{32}$ ]] || {
+        echo "✗ Failed to fetch checksum for Grok"
+        return 1
+    }
+
+    download_single_binary "Grok" "grok" "$url" "$version" "md5:${md5_hex}"
 }
 
 install_obsidian() {
@@ -533,7 +585,7 @@ install_ffmpeg() {
 
 # Default install set; pass tool names as arguments to install a subset,
 # e.g.:  jan-update-opt jq yq kubectl
-ALL_TOOLS=(idea nushell starship herdr obsidian gradle maven kubectl kind k9s helm
+ALL_TOOLS=(idea nushell starship herdr grok obsidian gradle maven kubectl kind k9s helm
            stern skaffold jq yq ollama ffmpeg corretto_all)
 #          pgadmin disabled
 

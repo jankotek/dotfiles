@@ -35,6 +35,10 @@ load ../helpers
     assert_command ncdu
 }
 
+@test "rg (ripgrep) is installed" {
+    assert_command rg
+}
+
 @test "starship is installed" {
     assert_command starship
 }
