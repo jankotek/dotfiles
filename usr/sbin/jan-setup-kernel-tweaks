@@ -1,6 +1,7 @@
 #!/bin/bash
 #
-# Kernel boot parameter tweaks: zswap (lzo), IPv6 disabled.
+# Kernel boot parameter tweaks: zswap (lzo), IPv6 disabled, plus optional
+# parameters supplied by machine-specific bootstrap scripts.
 # Supports GRUB (/etc/default/grub) and systemd-boot (/etc/kernel/cmdline).
 #
 
@@ -9,7 +10,12 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-PARAMS="zswap.enabled=1 zswap.compressor=lzo ipv6.disable=1"
+PARAMS=(
+    zswap.enabled=1
+    zswap.compressor=lzo
+    ipv6.disable=1
+    "$@"
+)
 
 add_params_grub() {
     local grub_file="/etc/default/grub"
@@ -17,7 +23,7 @@ add_params_grub() {
 
     cp -p "$grub_file" "${grub_file}.bak"
 
-    for param in $PARAMS; do
+    for param in "${PARAMS[@]}"; do
         local key="${param%%=*}"
         # only match the active GRUB_CMDLINE_LINUX_DEFAULT line, not commented/other lines
         if ! grep -E "^GRUB_CMDLINE_LINUX_DEFAULT=.*\b${key}\b" "$grub_file" >/dev/null; then
@@ -52,7 +58,7 @@ add_params_sdboot() {
 
     cp -p "$cmdline_file" "${cmdline_file}.bak"
 
-    for param in $PARAMS; do
+    for param in "${PARAMS[@]}"; do
         local key="${param%%=*}"
         if ! grep -E "\b${key}\b" "$cmdline_file" >/dev/null; then
             sed -i "s|$| $param|" "$cmdline_file"

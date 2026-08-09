@@ -76,7 +76,12 @@ apt-get clean
 jan-systemd-tty11-root
 jan-systemd-vm-cleanup
 jan-console-font || echo "WARNING: console font setup failed (non-fatal)"
-jan-setup-kernel-tweaks || echo "WARNING: kernel tweaks setup failed (non-fatal)"
+# sysfb/simpledrm may take DRM card0 before virtio_gpu and later disappear,
+# leaving virtio_gpu at card1. spice-vdagent expects card0 when mapping the
+# SPICE display to XRandR, so this breaks resize and absolute pointer mapping.
+jan-setup-kernel-tweaks \
+    initcall_blacklist=sysfb_init,simpledrm_platform_driver_init \
+    || echo "WARNING: kernel tweaks setup failed (non-fatal)"
 jan-setup-pkg-safety || echo "WARNING: pkg safety setup failed (non-fatal)"
 
 
