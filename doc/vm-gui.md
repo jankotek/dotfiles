@@ -2,6 +2,9 @@
 
 Interact with the VM's graphical desktop from the host CLI. Uses `xdotool` inside the guest (via `vm-exec`) and `virsh screenshot` for visual feedback.
 
+For virtio/SPICE video configuration and multiple viewer displays, see
+[`vm-multi-displays.md`](vm-multi-displays.md).
+
 ## Prerequisites
 
 - VM must have `xdotool` installed (`apt install xdotool`)

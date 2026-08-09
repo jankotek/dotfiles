@@ -1,3 +1,177 @@
 #!/bin/bash
+#
+# Apply every connected display's preferred mode and arrange the displays in
+# one non-overlapping row. A single xrandr invocation avoids intermediate
+# framebuffer layouts while several SPICE monitors are changing at once.
 
-xrandr --output Virtual-1 --auto
+set -u
+
+XRANDR_STATE=$(xrandr --query) || exit $?
+
+# Virtio GPU exposes additional heads as disconnected outputs with no modes
+# until the guest enables them once. Seed such outputs with the first connected
+# display's preferred mode. This does not require an XFCE display daemon.
+SEED_MODE=$(
+    awk '
+        /^[^[:space:]]+[[:space:]]+connected([[:space:]]|$)/ {
+            if (in_output)
+                exit
+            in_output = 1
+            next
+        }
+
+        /^[^[:space:]]+[[:space:]]+(connected|disconnected)([[:space:]]|$)/ {
+            if (in_output)
+                exit
+            next
+        }
+
+        in_output && $1 ~ /^[0-9]+x[0-9]+/ {
+            if (fallback == "")
+                fallback = $1
+            if ($0 ~ /\+/) {
+                print $1
+                found = 1
+                exit
+            }
+        }
+
+        END {
+            if (!found && fallback != "")
+                print fallback
+        }
+    ' <<< "$XRANDR_STATE"
+)
+
+if [[ -n "$SEED_MODE" ]]; then
+    mapfile -t EMPTY_OUTPUTS < <(
+        awk '
+            function emit() {
+                if (output != "" && !has_mode)
+                    print output
+            }
+
+            /^[^[:space:]]+[[:space:]]+(connected|disconnected)([[:space:]]|$)/ {
+                emit()
+                output = $1
+                has_mode = 0
+                next
+            }
+
+            output != "" && $1 ~ /^[0-9]+x[0-9]+/ { has_mode = 1 }
+            END { emit() }
+        ' <<< "$XRANDR_STATE"
+    )
+
+    for output in "${EMPTY_OUTPUTS[@]}"; do
+        xrandr --addmode "$output" "$SEED_MODE" 2>/dev/null || true
+    done
+
+    if (( ${#EMPTY_OUTPUTS[@]} > 0 )); then
+        XRANDR_STATE=$(xrandr --query) || exit $?
+    fi
+fi
+
+# Output: name, preferred mode, mode width, current geometry, primary flag.
+# XRandR marks a preferred mode with '+'. Some drivers do not mark one, so
+# retain the first advertised mode as a fallback.
+mapfile -t OUTPUTS < <(
+    awk '
+        function emit(    mode, dimensions) {
+            if (output == "" || fallback == "")
+                return
+
+            mode = preferred != "" ? preferred : fallback
+            split(mode, dimensions, "x")
+            printf "%s|%s|%s|%s|%s\n", output, mode, dimensions[1], current, primary
+        }
+
+        /^[^[:space:]]+[[:space:]]+(connected|disconnected)([[:space:]]|$)/ {
+            emit()
+            output = $1
+            preferred = ""
+            fallback = ""
+            current = ""
+            primary = 0
+
+            for (i = 2; i <= NF; i++) {
+                if ($i ~ /^[0-9]+x[0-9]+[+-][0-9]+[+-][0-9]+$/)
+                    current = $i
+                if ($i == "primary")
+                    primary = 1
+            }
+            next
+        }
+
+        output != "" && $1 ~ /^[0-9]+x[0-9]+/ {
+            if (fallback == "")
+                fallback = $1
+            if (preferred == "" && $0 ~ /\+/)
+                preferred = $1
+        }
+
+        END { emit() }
+    ' <<< "$XRANDR_STATE" | sort -V -k1,1
+)
+
+(( ${#OUTPUTS[@]} > 0 )) || exit 0
+
+# ARandR may have deliberately changed only monitor positions. If every output
+# is already using its preferred (or best available) mode, leave the complete
+# layout untouched, including positions and the primary-output choice.
+ALL_PREFERRED=1
+FIRST_OUTPUT_NAME=""
+FIRST_OUTPUT_PRIMARY=0
+for entry in "${OUTPUTS[@]}"; do
+    IFS='|' read -r output mode width current primary <<< "$entry"
+    if [[ -z "$FIRST_OUTPUT_NAME" ]]; then
+        FIRST_OUTPUT_NAME="$output"
+        FIRST_OUTPUT_PRIMARY="$primary"
+    fi
+    if [[ "$current" != "${mode}+"* && "$current" != "${mode}-"* ]]; then
+        ALL_PREFERRED=0
+        break
+    fi
+done
+
+if (( ALL_PREFERRED == 1 )); then
+    # Preserve an ARandR layout, but keep the first output as the primary
+    # monitor without changing any mode or position.
+    if [[ "$FIRST_OUTPUT_PRIMARY" != "1" ]]; then
+        xrandr --output "$FIRST_OUTPUT_NAME" --primary
+    fi
+    exit 0
+fi
+
+declare -a XRANDR_ARGS=()
+X_OFFSET=0
+NEEDS_UPDATE=0
+FIRST_OUTPUT=1
+
+for entry in "${OUTPUTS[@]}"; do
+    IFS='|' read -r output mode width current primary <<< "$entry"
+
+    XRANDR_ARGS+=(--output "$output")
+
+    if (( FIRST_OUTPUT == 1 )); then
+        XRANDR_ARGS+=(--primary)
+        if [[ "$primary" != "1" ]]; then
+            NEEDS_UPDATE=1
+        fi
+        FIRST_OUTPUT=0
+    fi
+
+    XRANDR_ARGS+=(
+        --mode "$mode"
+        --pos "${X_OFFSET}x0"
+    )
+
+    if [[ "$current" != "${mode}+${X_OFFSET}+0" ]]; then
+        NEEDS_UPDATE=1
+    fi
+
+    X_OFFSET=$((X_OFFSET + width))
+done
+
+(( NEEDS_UPDATE == 1 )) || exit 0
+xrandr "${XRANDR_ARGS[@]}"

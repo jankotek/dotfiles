@@ -41,7 +41,7 @@ test/test-vm-xub26-deploy.sh       # clone xub26 -> setup/vm-xub26 -> test -> de
 | `dotfiles.bats` | Deployed dotfiles: .bashrc (EDITOR, VISUAL, starship), fish config, .profile (GTK_THEME), git config (name, email, defaultBranch), user-dirs (lowercase folders) |
 | `xfce.bats` | xfce4-session, Xorg, autologin (xfce4-panel + xfdesktop running as jan), jan-vm-resize-display-loop running, terminator config (font, fish, titlebar), rofi, XFCE panel/xfwm4/xsettings XML, autostart entry, desktop shortcuts |
 | `agents.bats` | Running inside VM, spice-vdagent installed + service enabled + process running as jan, spice-vdagentd running, qemu-guest-agent installed + enabled |
-| `system.bats` | /opt/jan/usr symlinked into /usr/local, terminator/rofi/mousepad installed, home owned by jan with 0700, snapd/xfce4-screensaver/xfce4-terminal removed, snapd blocked from reinstall, tty11-root service enabled |
+| `system.bats` | /opt/jan/usr symlinked into /usr/local, terminator/rofi/mousepad/arandr installed, home owned by jan with 0700, snapd/xfce4-screensaver/xfce4-terminal removed, snapd blocked from reinstall, tty11-root service enabled |
 
 ### utils/ — manual integration tests
 

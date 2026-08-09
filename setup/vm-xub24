@@ -26,7 +26,7 @@ systemctl mask qemu-guest-agent.service 2>/dev/null || true
 
 apt-get update
 apt-get install -y \
-  terminator rofi mousepad dconf-cli zim \
+  terminator rofi mousepad arandr dconf-cli zim \
   xfce4-fsguard-plugin xfce4-systemload-plugin xfce4-taskmanager \
   links mc htop git curl powertop fish iftop iotop sshpass ncdu nano mosh ripgrep \
   fonts-jetbrains-mono fonts-terminus console-setup \

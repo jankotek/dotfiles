@@ -1,21 +1,32 @@
 #!/bin/bash
 #
-# Auto-resize the VM display when the host's spice/virt-viewer window is
-# resized. Listens for XRandR output changes via xev and triggers
-# `xrandr --auto` to pick up the new size.
+# Watch for SPICE/virt-viewer XRandR output changes and ask the one-shot
+# jan-vm-resize-display command to normalize all monitor modes and positions.
 
 # Kill any spawned xev when we get a signal — without this, a SIGTERM to
 # the script leaves xev running as an orphan.
 trap 'pkill -P $$ xev 2>/dev/null; exit 0' INT TERM EXIT
 
-xrandr --output Virtual-1 --auto 2>/dev/null || xrandr --auto 2>/dev/null || true
+SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
+RESIZE_DISPLAY="$SCRIPT_DIR/jan-vm-resize-display"
+CHANGE_DELAY=0.15
+
+resize_displays() {
+    "$RESIZE_DISPLAY" 2>/dev/null || true
+}
+
+resize_displays
 
 while true; do
     xev -root -event randr \
         | grep --line-buffered 'subtype XRROutputChangeNotifyEvent' \
         | while read -r _; do
-            xrandr --output Virtual-1 --auto
+            # Give SPICE time to publish all monitor mode changes before
+            # calculating and applying the combined layout.
+            sleep "$CHANGE_DELAY"
+            resize_displays
         done
+
     # If xev or X dies the pipeline returns immediately. Wait before
     # respawning to avoid a tight fork-loop when X is unavailable.
     sleep 5

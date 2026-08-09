@@ -28,6 +28,10 @@ load ../helpers
     assert_command mousepad
 }
 
+@test "arandr is installed" {
+    assert_command arandr
+}
+
 @test "home directory owned by jan" {
     [[ "$(stat -c %U "$JAN_HOME")" == "jan" ]]
 }

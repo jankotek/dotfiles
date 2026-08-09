@@ -36,7 +36,7 @@ zypper -n --no-gpg-checks refresh
 # control channel. Limit zypper install to packages that don't restart
 # system services.
 zypper -n install --no-recommends \
-    terminator rofi mousepad \
+    terminator rofi mousepad arandr \
     mc htop git curl powertop fish iftop iotop ncdu nano mosh ripgrep \
     pwgen telnet jdupes just bats zim \
     jetbrains-mono-fonts terminus-bitmap-fonts
