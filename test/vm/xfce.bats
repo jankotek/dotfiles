@@ -53,6 +53,11 @@ load ../helpers
     assert_file "$JAN_HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml"
 }
 
+@test "desktop icons are restricted to the primary monitor" {
+    assert_file_contains "$JAN_HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml" \
+        '<property name="primary" type="bool" value="true"/>'
+}
+
 @test "xfce4 panel plugins are installed" {
     dpkg -s xfce4-systemload-plugin
     assert_file /usr/lib/x86_64-linux-gnu/xfce4/panel/plugins/libsystemload.so

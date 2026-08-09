@@ -12,7 +12,19 @@ RESIZE_DISPLAY="$SCRIPT_DIR/jan-vm-resize-display"
 CHANGE_DELAY=0.15
 
 resize_displays() {
+    # Do not let xfdesktop save a temporary 640x480 secondary head as the
+    # desktop that owns the icons while SPICE outputs are being activated.
+    xfdesktop --quit 2>/dev/null || true
+    sleep 0.2
+
     "$RESIZE_DISPLAY" 2>/dev/null || true
+    xfconf-query -c xfce4-desktop \
+        -p /desktop-icons/primary -n -t bool -s true \
+        2>/dev/null || true
+
+    if ! pgrep -u "$USER" -x xfdesktop >/dev/null; then
+        xfdesktop >/dev/null 2>&1 &
+    fi
 }
 
 resize_displays
