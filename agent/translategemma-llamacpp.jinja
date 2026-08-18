@@ -1,0 +1,74 @@
+{#- llama.cpp-compatible TranslateGemma prompt.
+    Official template requires structured user.content[{source_lang_code,target_lang_code,text}].
+    That makes llama-server fail to load. This version accepts a plain string.
+
+    Prefix the user message with language codes, e.g.:
+      en->de Hello world
+      pl->en Dzień dobry
+    Default if omitted: en->en (override with --chat-template-kwargs).
+-#}
+{%- set languages = {
+    "ar": "Arabic", "bg": "Bulgarian", "bn": "Bengali", "ca": "Catalan",
+    "cs": "Czech", "da": "Danish", "de": "German", "el": "Greek",
+    "en": "English", "es": "Spanish", "et": "Estonian", "fa": "Persian",
+    "fi": "Finnish", "fr": "French", "he": "Hebrew", "hi": "Hindi",
+    "hr": "Croatian", "hu": "Hungarian", "id": "Indonesian", "it": "Italian",
+    "ja": "Japanese", "ko": "Korean", "lt": "Lithuanian", "lv": "Latvian",
+    "nl": "Dutch", "no": "Norwegian", "pl": "Polish", "pt": "Portuguese",
+    "ro": "Romanian", "ru": "Russian", "sk": "Slovak", "sl": "Slovenian",
+    "sr": "Serbian", "sv": "Swedish", "sw": "Swahili", "ta": "Tamil",
+    "te": "Telugu", "th": "Thai", "tr": "Turkish", "uk": "Ukrainian",
+    "ur": "Urdu", "vi": "Vietnamese", "zh": "Chinese", "zh-Hans": "Chinese",
+    "zh-Hant": "Chinese"
+} -%}
+{%- set def_src = source_lang_code if source_lang_code is defined else "en" -%}
+{%- set def_tgt = target_lang_code if target_lang_code is defined else "en" -%}
+{{ bos_token }}
+{%- for message in messages -%}
+    {%- if message['role'] == 'system' -%}
+        {%- set _ = none -%}
+    {%- elif message['role'] == 'assistant' -%}
+        {{ '<start_of_turn>model\n' }}
+        {%- if message['content'] is string -%}
+            {{ message['content'] | trim }}
+        {%- endif -%}
+        {{ '<end_of_turn>\n' }}
+    {%- else -%}
+        {%- set src = def_src -%}
+        {%- set tgt = def_tgt -%}
+        {%- set text = "" -%}
+        {%- if message['content'] is string -%}
+            {%- set raw = message['content'] | trim -%}
+            {%- if raw[2:4] == "->" -%}
+                {%- set src = raw[0:2] -%}
+                {%- set tgt = raw[4:6] -%}
+                {%- set text = raw[6:] | trim -%}
+            {%- else -%}
+                {%- set text = raw -%}
+            {%- endif -%}
+        {%- elif message['content'] is iterable -%}
+            {%- set item = message['content'][0] -%}
+            {%- if item is mapping -%}
+                {%- if item['source_lang_code'] is defined -%}{%- set src = item['source_lang_code'] -%}{%- endif -%}
+                {%- if item['target_lang_code'] is defined -%}{%- set tgt = item['target_lang_code'] -%}{%- endif -%}
+                {%- if item['text'] is defined and item['text'] is not none -%}
+                    {%- set text = item['text'] -%}
+                {%- elif item['type'] is defined and item['type'] == 'image' -%}
+                    {%- set text = "<start_of_image>" -%}
+                {%- endif -%}
+            {%- endif -%}
+        {%- endif -%}
+        {%- set src_name = languages[src] if src in languages else src -%}
+        {%- set tgt_name = languages[tgt] if tgt in languages else tgt -%}
+        {{ '<start_of_turn>user\nYou are a professional ' + src_name + ' (' + src + ') to ' + tgt_name + ' (' + tgt + ') translator. Your goal is to accurately convey the meaning and nuances of the original ' + src_name + ' text while adhering to ' + tgt_name + ' grammar, vocabulary, and cultural sensitivities.\n' }}
+        {%- if text == "<start_of_image>" -%}
+            {{ 'Please translate the ' + src_name + ' text in the provided image into ' + tgt_name + '. Produce only the ' + tgt_name + ' translation, without any additional explanations, alternatives or commentary. Focus only on the text, do not output where the text is located, surrounding objects or any other explanation about the picture. Ignore symbols, pictogram, and arrows!\n\n\n<start_of_image>' }}
+        {%- else -%}
+            {{ 'Produce only the ' + tgt_name + ' translation, without any additional explanations or commentary. Please translate the following ' + src_name + ' text into ' + tgt_name + ':\n\n\n' + text }}
+        {%- endif -%}
+        {{ '<end_of_turn>\n' }}
+    {%- endif -%}
+{%- endfor -%}
+{%- if add_generation_prompt -%}
+    {{ '<start_of_turn>model\n' }}
+{%- endif -%}
