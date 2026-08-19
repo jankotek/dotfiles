@@ -51,9 +51,11 @@ must be run as root.
 | File | What it checks |
 |------|---------------|
 | `update-opt.bats` | Downloads Herdr and Grok into a temporary `JAN_OPT`, verifies binaries/checksums and version tracking, then checks idempotent re-runs (Grok is ~160 MiB) |
-| `pod-security.bats` | Creates a temporary pod user via `jan-pod-setup`, verifies all security hardening layers (nologin shell, locked password, nogroup, 0700 home, sudo denied, cron denied, filesystem ACLs blocking /home /root /tmp /var/log /etc/ssh /var/spool, /var/pod not listable, podman configs, linger, cgroup delegation, sysctl port restriction), then deletes everything |
+| `pod-subid-allocation.bats` | Fixture-only unit tests for non-overlapping subordinate UID/GID allocation; does not require root |
+| `pod-security.bats` | Creates a temporary pod user via `jan-pod-setup`, verifies subordinate-ID preservation and matching UID/GID ranges plus all security hardening layers (nologin shell, locked password, nogroup, 0700 home, sudo denied, cron denied, filesystem ACLs, podman configs, linger, cgroup delegation, sysctl port restriction), then deletes everything |
 
 ```bash
+OPT_JAN="$PWD" bats test/utils/pod-subid-allocation.bats
 OPT_JAN="$PWD" bats test/utils/update-opt.bats
 sudo bats test/utils/pod-security.bats
 ```

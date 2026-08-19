@@ -28,8 +28,16 @@ setup_file() {
     echo "$POD_NAME" > "$(_pod_name_file)"
     POD_HOME="/var/pod/${POD_NAME}"
 
-    "$OPT_JAN/usr/sbin/jan-pod-setup" "$POD_NAME" >/dev/null 2>&1 || \
+    # Preserve unrelated mappings so the test catches accidental truncation
+    # of either global subordinate-ID database.
+    awk -F: -v user="$POD_NAME" '$1 != user' /etc/subuid > "${BATS_FILE_TMPDIR}/subuid.before"
+    awk -F: -v user="$POD_NAME" '$1 != user' /etc/subgid > "${BATS_FILE_TMPDIR}/subgid.before"
+
+    if [[ -x "$OPT_JAN/usr/sbin/jan-pod-setup" ]]; then
+        "$OPT_JAN/usr/sbin/jan-pod-setup" "$POD_NAME" >/dev/null 2>&1
+    else
         jan-pod-setup "$POD_NAME" >/dev/null 2>&1
+    fi
 }
 
 setup() {
@@ -107,6 +115,23 @@ run_as_pod() {
     gid=$(id -g "$POD_NAME")
     group=$(getent group "$gid" | cut -d: -f1)
     [[ "$group" == "nogroup" || "$group" == "nobody" ]]
+}
+
+# --- Subordinate IDs ---
+
+@test "unrelated subuid and subgid mappings are preserved" {
+    awk -F: -v user="$POD_NAME" '$1 != user' /etc/subuid > "$BATS_TEST_TMPDIR/subuid.after"
+    awk -F: -v user="$POD_NAME" '$1 != user' /etc/subgid > "$BATS_TEST_TMPDIR/subgid.after"
+    cmp "${BATS_FILE_TMPDIR}/subuid.before" "$BATS_TEST_TMPDIR/subuid.after"
+    cmp "${BATS_FILE_TMPDIR}/subgid.before" "$BATS_TEST_TMPDIR/subgid.after"
+}
+
+@test "pod user has matching subuid and subgid ranges" {
+    local subuid_ranges subgid_ranges
+    subuid_ranges=$(awk -F: -v user="$POD_NAME" '$1 == user { print $2 ":" $3 }' /etc/subuid | sort -u)
+    subgid_ranges=$(awk -F: -v user="$POD_NAME" '$1 == user { print $2 ":" $3 }' /etc/subgid | sort -u)
+    [[ -n "$subuid_ranges" ]]
+    [[ "$subuid_ranges" == "$subgid_ranges" ]]
 }
 
 # --- Home directory ---

@@ -104,21 +104,44 @@ else
     echo "==> Podman ${PODMAN_VER} — using Quadlet .container only (no .pod support before 5.0)"
 fi
 
-# ---------- allocate non-overlapping subuid range ----------
+# ---------- allocate non-overlapping subuid/subgid range ----------
 
 allocate_subuid_range() {
+    local subuid_file="${1:-/etc/subuid}"
+    local subgid_file="${2:-/etc/subgid}"
     local size=65536
     local start=100000
-    # Find the highest allocated range end across all users.
-    while IFS=: read -r _ range_start range_count; do
-        local range_end=$(( range_start + range_count ))
-        if (( range_end > start )); then
-            start=$range_end
-        fi
-    done < /etc/subuid 2>/dev/null || true
+    local subid_file owner range_start range_count extra range_end
+
+    # Find the highest allocated range end across both databases. The same
+    # numeric range is assigned for subordinate UIDs and GIDs, so consulting
+    # only one file can overlap an allocation that exists only in the other.
+    for subid_file in "$subuid_file" "$subgid_file"; do
+        [[ -e "$subid_file" ]] || continue
+        while IFS=: read -r owner range_start range_count extra; do
+            [[ -z "$owner" ]] && continue
+            if [[ -n "$extra" || ! "$range_start" =~ ^[0-9]+$ || ! "$range_count" =~ ^[0-9]+$ || "$range_count" == 0 ]]; then
+                echo "ERROR: invalid subordinate-ID entry in ${subid_file}: ${owner}:${range_start}:${range_count}${extra:+:${extra}}" >&2
+                return 1
+            fi
+            range_end=$(( range_start + range_count ))
+            if (( range_end > start )); then
+                start=$range_end
+            fi
+        done < "$subid_file"
+    done
+
     # Align to 65536 boundary for clean mapping.
     start=$(( ((start + size - 1) / size) * size ))
     echo "${start}-$(( start + size - 1 ))"
+}
+
+subid_ranges_for_user() {
+    local subid_file="$1"
+    local user="$2"
+
+    [[ -e "$subid_file" ]] || return 0
+    awk -F: -v user="$user" '$1 == user { print $2 ":" $3 }' "$subid_file" | LC_ALL=C sort -u
 }
 
 # ---------- create maximally restricted user ----------
@@ -171,18 +194,34 @@ ${NAME} ALL=(ALL) !ALL
 SUDOERS
 chmod 0440 "/etc/sudoers.d/deny-${NAME}"
 
-# Ensure subuid/subgid ranges exist (needed for rootless podman).
-# flock /etc/subuid: serialize concurrent jan-pod-setup invocations so two
-# pods don't get overlapping subuid ranges (which would let one pod's
-# containers see/modify the other's storage).
+# Ensure matching subuid/subgid ranges exist (needed for rootless podman).
+# Lock a dedicated file rather than either account database: opening
+# /etc/subuid or /etc/subgid with `>` would truncate it before flock runs.
+# The shared lock serializes jan-pod-setup invocations so two pods cannot be
+# allocated overlapping ranges.
+SUBID_LOCK_DIR=/run/jan-pod-setup
+install -d -o root -g root -m 0700 "$SUBID_LOCK_DIR"
+SUBID_LOCK_FILE="${SUBID_LOCK_DIR}/subids.lock"
 (
     flock -x 9
-    if ! grep -q "^${NAME}:" /etc/subuid 2>/dev/null; then
-        SUBID_RANGE=$(allocate_subuid_range)
+
+    SUBUID_RANGES=$(subid_ranges_for_user /etc/subuid "$NAME")
+    SUBGID_RANGES=$(subid_ranges_for_user /etc/subgid "$NAME")
+
+    if [[ -z "$SUBUID_RANGES" && -z "$SUBGID_RANGES" ]]; then
+        SUBID_RANGE=$(allocate_subuid_range /etc/subuid /etc/subgid)
         echo "==> Allocating subordinate UID/GID range: ${SUBID_RANGE}"
         usermod --add-subuids "$SUBID_RANGE" --add-subgids "$SUBID_RANGE" "$NAME"
+    elif [[ -z "$SUBUID_RANGES" || -z "$SUBGID_RANGES" ]]; then
+        echo "ERROR: user '${NAME}' has only one of subuid/subgid configured; refusing an inconsistent allocation." >&2
+        exit 1
+    elif [[ "$SUBUID_RANGES" != "$SUBGID_RANGES" ]]; then
+        echo "ERROR: user '${NAME}' has different subuid and subgid ranges; refusing to change them automatically." >&2
+        exit 1
+    else
+        echo "==> Existing subordinate UID/GID range: ${SUBUID_RANGES//$'\n'/, }"
     fi
-) 9>/etc/subuid
+) 9>>"$SUBID_LOCK_FILE"
 
 USER_UID=$(id -u "$NAME")
 
