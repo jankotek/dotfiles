@@ -90,7 +90,7 @@ install_if_missing() {
     fi
 }
 
-install_if_missing podman pasta newuidmap setfacl
+install_if_missing podman pasta newuidmap setfacl python3
 
 # ---------- detect podman version ----------
 
@@ -125,8 +125,10 @@ parse_subid_line() {
         echo "ERROR: invalid subordinate-ID entry in ${src:-unknown}: ${line}" >&2
         return 1
     fi
-    if (( 10#$range_start > 4294967296 - 10#$range_count )); then
-        echo "ERROR: subordinate-ID range exceeds 32-bit UID space in ${src:-unknown}: ${line}" >&2
+    # UID/GID 4294967295 is reserved as the unmapped sentinel. Keep the
+    # exclusive end at or below that value so no range contains the sentinel.
+    if (( 10#$range_start > 4294967295 - 10#$range_count )); then
+        echo "ERROR: subordinate-ID range exceeds usable 32-bit ID space in ${src:-unknown}: ${line}" >&2
         return 1
     fi
     range_end=$((10#$range_start + 10#$range_count))
@@ -143,6 +145,67 @@ subid_file_is_shadow_writable() {
     [[ ! -s "$subid_file" ]] && return 0
     last_byte=$(tail -c1 "$subid_file" | od -An -tuC | tr -d '[:space:]')
     [[ "$last_byte" == 10 ]]
+}
+
+require_shadow_writable_subid_files() {
+    local subid_file
+
+    for subid_file in "$@"; do
+        if ! subid_file_is_shadow_writable "$subid_file"; then
+            echo "ERROR: ${subid_file} has an unterminated final record; shadow usermod cannot safely update it." >&2
+            echo "       Repair the database's final newline before running jan-pod-setup." >&2
+            return 1
+        fi
+    done
+}
+
+# Run a read-only planner while owning shadow's global lckpwdf() POSIX lock.
+# The planner emits a NUL-delimited argv, then this same lock-owning process
+# execs the shadow mutator. Keeping the final exec out of Bash matters because
+# Bash closes temporary descriptors while starting, which releases POSIX locks.
+shadow_lock_plan_exec() {
+    local lock_file="$1"
+    shift
+
+    python3 - "$lock_file" "$@" <<'PY'
+import errno
+import fcntl
+import os
+import subprocess
+import sys
+import time
+
+lock_file = sys.argv[1]
+planner = sys.argv[2:]
+if not planner:
+    raise SystemExit("shadow_lock_plan_exec: missing planner")
+
+fd = os.open(lock_file, os.O_WRONLY | os.O_CREAT, 0o600)
+os.set_inheritable(fd, True)
+deadline = time.monotonic() + 15
+while True:
+    try:
+        fcntl.lockf(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        break
+    except OSError as exc:
+        if exc.errno not in (errno.EACCES, errno.EAGAIN):
+            raise
+        if time.monotonic() >= deadline:
+            raise SystemExit(f"cannot lock {lock_file}; try again later")
+        time.sleep(0.1)
+
+result = subprocess.run(planner, stdout=subprocess.PIPE, check=False)
+if result.returncode:
+    raise SystemExit(result.returncode)
+if not result.stdout:
+    raise SystemExit(0)
+if not result.stdout.endswith(b"\0"):
+    raise SystemExit("shadow_lock_plan_exec: planner returned malformed argv")
+command = [os.fsdecode(arg) for arg in result.stdout[:-1].split(b"\0")]
+if not command or not command[0]:
+    raise SystemExit("shadow_lock_plan_exec: planner returned an empty command")
+os.execvp(command[0], command)
+PY
 }
 
 allocate_subuid_range() {
@@ -167,8 +230,8 @@ allocate_subuid_range() {
     done
 
     start=$(( ((start + size - 1) / size) * size ))
-    if (( start > 4294967295 - size + 1 )); then
-        echo "ERROR: no 32-bit subordinate-ID range remaining" >&2
+    if (( start > 4294967295 - size )); then
+        echo "ERROR: no usable 32-bit subordinate-ID range remaining" >&2
         return 1
     fi
     echo "${start}-$(( start + size - 1 ))"
@@ -177,6 +240,7 @@ allocate_subuid_range() {
 subid_ranges_for_user() {
     local subid_file="$1"
     local user="$2"
+    local user_uid="$3"
     local line owner range_start range_count range_end
     local -a ranges=()
 
@@ -184,7 +248,10 @@ subid_ranges_for_user() {
     while IFS= read -r line || [[ -n "$line" ]]; do
         [[ -z "$line" ]] && continue
         parse_subid_line "$line" "$subid_file" || return 1
-        if [[ "$owner" == "$user" ]]; then
+        if [[ "$owner" == "$user" \
+                || ( "$owner" =~ ^(0|[1-9][0-9]*)$ \
+                    && ${#owner} -le 10 \
+                    && "$((10#$owner))" == "$user_uid" ) ]]; then
             ranges+=("${range_start}:${range_count}")
         fi
     done < "$subid_file"
@@ -225,13 +292,46 @@ subid_can_copy_range() {
     return 0
 }
 
-for subid_file in /etc/subuid /etc/subgid; do
-    if ! subid_file_is_shadow_writable "$subid_file"; then
-        echo "ERROR: ${subid_file} has an unterminated final record; shadow usermod cannot safely update it." >&2
-        echo "       Repair the database's final newline before running jan-pod-setup." >&2
-        exit 1
+plan_subid_reconciliation_locked() {
+    local subuid_file="$1"
+    local subgid_file="$2"
+    local user="$3"
+    local user_uid="$4"
+    local usermod_cmd="$5"
+    local subuid_ranges subgid_ranges subid_range
+
+    require_shadow_writable_subid_files "$subuid_file" "$subgid_file"
+    subuid_ranges=$(subid_ranges_for_user "$subuid_file" "$user" "$user_uid")
+    subgid_ranges=$(subid_ranges_for_user "$subgid_file" "$user" "$user_uid")
+
+    if [[ -z "$subuid_ranges" && -z "$subgid_ranges" ]]; then
+        subid_range=$(allocate_subuid_range "$subuid_file" "$subgid_file")
+        echo "==> Allocating subordinate UID/GID range: ${subid_range}" >&2
+        printf '%s\0' "$usermod_cmd" --add-subuids "$subid_range" --add-subgids "$subid_range" "$user"
+    elif [[ -z "$subuid_ranges" && -n "$subgid_ranges" && "$subgid_ranges" != *$'\n'* ]]; then
+        subid_can_copy_range "$subuid_file" "$subgid_ranges"
+        echo "==> Completing missing subuid from existing subgid ${subgid_ranges}" >&2
+        printf '%s\0' "$usermod_cmd" --add-subuids "$(subid_to_usermod_range "$subgid_ranges")" "$user"
+    elif [[ -z "$subgid_ranges" && -n "$subuid_ranges" && "$subuid_ranges" != *$'\n'* ]]; then
+        subid_can_copy_range "$subgid_file" "$subuid_ranges"
+        echo "==> Completing missing subgid from existing subuid ${subuid_ranges}" >&2
+        printf '%s\0' "$usermod_cmd" --add-subgids "$(subid_to_usermod_range "$subuid_ranges")" "$user"
+    elif [[ "$subuid_ranges" == "$subgid_ranges" ]]; then
+        echo "==> Existing subordinate UID/GID range: ${subuid_ranges//$'\n'/, }" >&2
+    else
+        echo "ERROR: user '${user}' has inconsistent subuid/subgid ranges; refusing to change them automatically." >&2
+        return 1
     fi
-done
+}
+
+export -f parse_subid_line subid_file_is_shadow_writable \
+    require_shadow_writable_subid_files allocate_subuid_range \
+    subid_ranges_for_user subid_to_usermod_range subid_can_copy_range \
+    plan_subid_reconciliation_locked
+
+# Fail before account creation if shadow cannot safely parse either database.
+shadow_lock_plan_exec /etc/.pwd.lock bash -c \
+    'require_shadow_writable_subid_files "$@"' _ /etc/subuid /etc/subgid
 
 # ---------- create maximally restricted user ----------
 
@@ -255,6 +355,8 @@ else
         --no-log-init \
         "$NAME"
 fi
+
+USER_UID=$(id -u "$NAME")
 
 # ---------- user hardening (idempotent — runs every invocation) ----------
 # Hoisted out of the user-creation guard so re-running on a partially set up
@@ -293,33 +395,10 @@ install -d -o root -g root -m 0700 "$SUBID_LOCK_DIR"
 SUBID_LOCK_FILE="${SUBID_LOCK_DIR}/subids.lock"
 (
     flock -x 9
-
-    SUBUID_RANGES=$(subid_ranges_for_user /etc/subuid "$NAME")
-    SUBGID_RANGES=$(subid_ranges_for_user /etc/subgid "$NAME")
-
-    if [[ -z "$SUBUID_RANGES" && -z "$SUBGID_RANGES" ]]; then
-        SUBID_RANGE=$(allocate_subuid_range /etc/subuid /etc/subgid)
-        echo "==> Allocating subordinate UID/GID range: ${SUBID_RANGE}"
-        usermod --add-subuids "$SUBID_RANGE" --add-subgids "$SUBID_RANGE" "$NAME"
-    elif [[ -z "$SUBUID_RANGES" && -n "$SUBGID_RANGES" && "$SUBGID_RANGES" != *$'\n'* ]]; then
-        # Copy the one present range onto the missing side; never allocate a
-        # new interval or UID/GID mappings would diverge.
-        subid_can_copy_range /etc/subuid "$SUBGID_RANGES"
-        echo "==> Completing missing subuid from existing subgid ${SUBGID_RANGES}"
-        usermod --add-subuids "$(subid_to_usermod_range "$SUBGID_RANGES")" "$NAME"
-    elif [[ -z "$SUBGID_RANGES" && -n "$SUBUID_RANGES" && "$SUBUID_RANGES" != *$'\n'* ]]; then
-        subid_can_copy_range /etc/subgid "$SUBUID_RANGES"
-        echo "==> Completing missing subgid from existing subuid ${SUBUID_RANGES}"
-        usermod --add-subgids "$(subid_to_usermod_range "$SUBUID_RANGES")" "$NAME"
-    elif [[ "$SUBUID_RANGES" == "$SUBGID_RANGES" ]]; then
-        echo "==> Existing subordinate UID/GID range: ${SUBUID_RANGES//$'\n'/, }"
-    else
-        echo "ERROR: user '${NAME}' has inconsistent subuid/subgid ranges; refusing to change them automatically." >&2
-        exit 1
-    fi
+    shadow_lock_plan_exec /etc/.pwd.lock bash -c \
+        'plan_subid_reconciliation_locked "$@"' _ \
+        /etc/subuid /etc/subgid "$NAME" "$USER_UID" usermod
 ) 9>>"$SUBID_LOCK_FILE"
-
-USER_UID=$(id -u "$NAME")
 
 # ---------- enable linger (starts user systemd at boot) ----------
 

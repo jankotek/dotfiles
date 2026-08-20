@@ -9,8 +9,50 @@ setup() {
     # Load the production helper functions without executing the privileged
     # setup body. Keep their closing braces at column zero for this extraction.
     eval "$(sed -n \
-        '/^parse_subid_line()/,/^}/p; /^subid_file_is_shadow_writable()/,/^}/p; /^allocate_subuid_range()/,/^}/p; /^subid_ranges_for_user()/,/^}/p; /^subid_to_usermod_range()/,/^}/p; /^subid_can_copy_range()/,/^}/p' \
+        '/^parse_subid_line()/,/^}/p; /^subid_file_is_shadow_writable()/,/^}/p; /^require_shadow_writable_subid_files()/,/^}/p; /^shadow_lock_plan_exec()/,/^}/p; /^allocate_subuid_range()/,/^}/p; /^subid_ranges_for_user()/,/^}/p; /^subid_to_usermod_range()/,/^}/p; /^subid_can_copy_range()/,/^}/p; /^plan_subid_reconciliation_locked()/,/^}/p' \
         "$SCRIPT")"
+    export -f parse_subid_line subid_file_is_shadow_writable \
+        require_shadow_writable_subid_files allocate_subuid_range \
+        subid_ranges_for_user subid_to_usermod_range subid_can_copy_range \
+        plan_subid_reconciliation_locked
+}
+
+run_controller() {
+    local lock_file="$BATS_TEST_TMPDIR/.pwd.lock"
+    shadow_lock_plan_exec "$lock_file" bash -c \
+        'plan_subid_reconciliation_locked "$@"' _ "$@"
+}
+
+make_usermod_mock() {
+    USERMOD_MOCK="$BATS_TEST_TMPDIR/usermod-mock"
+    MOCK_LOG="$BATS_TEST_TMPDIR/usermod.log"
+    MOCK_SUBUID="$BATS_TEST_TMPDIR/subuid"
+    MOCK_SUBGID="$BATS_TEST_TMPDIR/subgid"
+    export MOCK_LOG MOCK_SUBUID MOCK_SUBGID
+
+    cat > "$USERMOD_MOCK" <<'MOCK'
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf '%q ' "$@" >> "$MOCK_LOG"
+printf '\n' >> "$MOCK_LOG"
+
+user="${!#}"
+while (( $# > 1 )); do
+    option="$1"
+    range="$2"
+    shift 2
+    start="${range%-*}"
+    last="${range#*-}"
+    count=$((10#$last - 10#$start + 1))
+    case "$option" in
+        --add-subuids) printf '%s:%s:%s\n' "$user" "$start" "$count" >> "$MOCK_SUBUID" ;;
+        --add-subgids) printf '%s:%s:%s\n' "$user" "$start" "$count" >> "$MOCK_SUBGID" ;;
+        *) exit 64 ;;
+    esac
+done
+MOCK
+    chmod +x "$USERMOD_MOCK"
 }
 
 @test "pod security test never edits live subid databases directly" {
@@ -74,7 +116,7 @@ setup() {
         'pod:200000:65536' \
         'pod:300000:65536' > "$subuid"
 
-    run subid_ranges_for_user "$subuid" pod
+    run subid_ranges_for_user "$subuid" pod 4242
 
     [[ "$status" -eq 0 ]]
     [[ "$output" == $'200000:65536\n300000:65536' ]]
@@ -150,21 +192,35 @@ setup() {
 @test "allocator refuses a range that leaves no 32-bit block" {
     local subuid="$BATS_TEST_TMPDIR/subuid"
     local subgid="$BATS_TEST_TMPDIR/subgid"
-    printf '%s\n' 'alice:4294901760:65536' > "$subuid"
+    printf '%s\n' 'alice:4294836224:65536' > "$subuid"
     : > "$subgid"
 
     run allocate_subuid_range "$subuid" "$subgid"
 
     [[ "$status" -ne 0 ]]
-    [[ "$output" == *'no 32-bit subordinate-ID range remaining'* ]]
+    [[ "$output" == *'no usable 32-bit subordinate-ID range remaining'* ]]
     [[ "$output" != *'4294967296-'* ]]
+}
+
+@test "parser rejects a range containing the unmapped ID sentinel" {
+    run parse_subid_line 'alice:4294901760:65536' fixture
+
+    [[ "$status" -ne 0 ]]
+    [[ "$output" == *'exceeds usable 32-bit ID space'* ]]
+}
+
+@test "parser accepts the maximum usable exclusive end" {
+    local range_end=0
+    parse_subid_line 'alice:0:4294967295' fixture
+
+    [[ "$range_end" -eq 4294967295 ]]
 }
 
 @test "lookup rejects arithmetic tokens in count" {
     local subuid="$BATS_TEST_TMPDIR/subuid"
     printf '%s\n' 'pod:196608:1+65535' > "$subuid"
 
-    run subid_ranges_for_user "$subuid" pod
+    run subid_ranges_for_user "$subuid" pod 4242
 
     [[ "$status" -ne 0 ]]
     [[ "$output" == *'invalid subordinate-ID entry'* ]]
@@ -192,6 +248,102 @@ setup() {
     printf '%s\n' 'alice:100000:65536' > "$dest"
 
     run subid_can_copy_range "$dest" '196608:65536'
+
+    [[ "$status" -eq 0 ]]
+}
+
+@test "lookup treats the account name and numeric UID as the same owner" {
+    local subuid="$BATS_TEST_TMPDIR/subuid"
+    printf '%s\n' \
+        'pod:196608:65536' \
+        '4242:262144:65536' \
+        '4243:327680:65536' > "$subuid"
+
+    run subid_ranges_for_user "$subuid" pod 4242
+
+    [[ "$status" -eq 0 ]]
+    [[ "$output" == $'196608:65536\n262144:65536' ]]
+}
+
+@test "controller allocates both databases and is idempotent on rerun" {
+    make_usermod_mock
+    printf '%s\n' 'alice:100000:65536' > "$MOCK_SUBUID"
+    printf '%s\n' 'alice:100000:65536' > "$MOCK_SUBGID"
+
+    run run_controller \
+        "$MOCK_SUBUID" "$MOCK_SUBGID" pod 4242 "$USERMOD_MOCK"
+
+    [[ "$status" -eq 0 ]]
+    grep -qxF 'pod:196608:65536' "$MOCK_SUBUID"
+    grep -qxF 'pod:196608:65536' "$MOCK_SUBGID"
+    grep -q -- '--add-subuids 196608-262143 --add-subgids 196608-262143 pod' "$MOCK_LOG"
+
+    : > "$MOCK_LOG"
+    run run_controller \
+        "$MOCK_SUBUID" "$MOCK_SUBGID" pod 4242 "$USERMOD_MOCK"
+
+    [[ "$status" -eq 0 ]]
+    [[ "$output" == *'Existing subordinate UID/GID range: 196608:65536'* ]]
+    [[ ! -s "$MOCK_LOG" ]]
+}
+
+@test "controller repairs one-sided numeric-owner state" {
+    make_usermod_mock
+    printf '%s\n' '4242:196608:65536' > "$MOCK_SUBUID"
+    : > "$MOCK_SUBGID"
+
+    run run_controller \
+        "$MOCK_SUBUID" "$MOCK_SUBGID" pod 4242 "$USERMOD_MOCK"
+
+    [[ "$status" -eq 0 ]]
+    grep -qxF 'pod:196608:65536' "$MOCK_SUBGID"
+    grep -q -- '--add-subgids 196608-262143 pod' "$MOCK_LOG"
+    [[ "$(subid_ranges_for_user "$MOCK_SUBUID" pod 4242)" == \
+        "$(subid_ranges_for_user "$MOCK_SUBGID" pod 4242)" ]]
+}
+
+@test "controller refuses multiple or divergent effective ranges" {
+    make_usermod_mock
+    printf '%s\n' \
+        'pod:196608:65536' \
+        '4242:262144:65536' > "$MOCK_SUBUID"
+    printf '%s\n' 'pod:196608:65536' > "$MOCK_SUBGID"
+
+    run run_controller \
+        "$MOCK_SUBUID" "$MOCK_SUBGID" pod 4242 "$USERMOD_MOCK"
+
+    [[ "$status" -ne 0 ]]
+    [[ "$output" == *'inconsistent subuid/subgid ranges'* ]]
+    [[ ! -e "$MOCK_LOG" ]]
+}
+
+@test "shadow lock remains held by the execed controller" {
+    local lock_file="$BATS_TEST_TMPDIR/.pwd.lock"
+    local checker="$BATS_TEST_TMPDIR/check-lock.py"
+    cat > "$checker" <<'PY'
+#!/usr/bin/env python3
+import errno
+import fcntl
+import os
+import sys
+
+pid = os.fork()
+if pid == 0:
+    fd = os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT, 0o600)
+    try:
+        fcntl.lockf(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as exc:
+        if exc.errno in (errno.EACCES, errno.EAGAIN):
+            raise SystemExit(0)
+        raise
+    raise SystemExit("lock was not inherited across exec")
+_, status = os.waitpid(pid, 0)
+raise SystemExit(os.waitstatus_to_exitcode(status))
+PY
+    chmod +x "$checker"
+
+    run shadow_lock_plan_exec "$lock_file" bash -c \
+        'printf "%s\0" "$1" "$2"' _ "$checker" "$lock_file"
 
     [[ "$status" -eq 0 ]]
 }
