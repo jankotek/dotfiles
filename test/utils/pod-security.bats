@@ -24,9 +24,17 @@ setup_file() {
         skip "jan-pod-setup not found"
     fi
 
-    POD_NAME="test-$(date +%y%m%d-%H%M%S)"
+    local suffix
+    suffix=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
+    POD_NAME="test-${suffix}"
     echo "$POD_NAME" > "$(_pod_name_file)"
     POD_HOME="/var/pod/${POD_NAME}"
+
+    # Never adopt or clean up an account/home created by another invocation.
+    if id "$POD_NAME" &>/dev/null || [[ -e "$POD_HOME" ]]; then
+        echo "ERROR: generated pod test identity already exists: ${POD_NAME}" >&2
+        return 1
+    fi
 
     # Preserve unrelated mappings so the test catches accidental truncation
     # of either global subordinate-ID database.

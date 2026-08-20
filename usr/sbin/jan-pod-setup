@@ -106,43 +106,132 @@ fi
 
 # ---------- allocate non-overlapping subuid/subgid range ----------
 
+# One parser for allocate, lookup, and one-sided repair so recovery cannot
+# bypass validation. Sets owner, range_start, range_count, range_end (exclusive).
+parse_subid_line() {
+    local line="$1"
+    local src="${2:-}"
+    local extra
+
+    if [[ "$line" == *:*:*:* ]]; then
+        echo "ERROR: invalid subordinate-ID entry in ${src:-unknown}: ${line}" >&2
+        return 1
+    fi
+    IFS=: read -r owner range_start range_count extra <<<"$line"
+    if [[ -z "$owner" || -n "$extra" \
+            || ! ( "$range_start" =~ ^[1-9][0-9]*$ || "$range_start" == 0 ) \
+            || ! "$range_count" =~ ^[1-9][0-9]*$ \
+            || ${#range_start} -gt 10 || ${#range_count} -gt 10 ]]; then
+        echo "ERROR: invalid subordinate-ID entry in ${src:-unknown}: ${line}" >&2
+        return 1
+    fi
+    if (( 10#$range_start > 4294967296 - 10#$range_count )); then
+        echo "ERROR: subordinate-ID range exceeds 32-bit UID space in ${src:-unknown}: ${line}" >&2
+        return 1
+    fi
+    range_end=$((10#$range_start + 10#$range_count))
+}
+
+# The parser deliberately recognizes a final record without a newline so it
+# can never overlook an occupied range. Shadow's usermod on supported
+# Tumbleweed releases refuses to update such a database, however, so reject it
+# before creating or modifying the pod account instead of failing halfway.
+subid_file_is_shadow_writable() {
+    local subid_file="$1"
+    local last_byte
+
+    [[ ! -s "$subid_file" ]] && return 0
+    last_byte=$(tail -c1 "$subid_file" | od -An -tuC | tr -d '[:space:]')
+    [[ "$last_byte" == 10 ]]
+}
+
 allocate_subuid_range() {
     local subuid_file="${1:-/etc/subuid}"
     local subgid_file="${2:-/etc/subgid}"
     local size=65536
     local start=100000
-    local subid_file owner range_start range_count extra range_end
+    local subid_file line owner range_start range_count range_end
 
-    # Find the highest allocated range end across both databases. The same
-    # numeric range is assigned for subordinate UIDs and GIDs, so consulting
-    # only one file can overlap an allocation that exists only in the other.
+    # Highest exclusive end across both databases. The same numeric range is
+    # assigned for UIDs and GIDs, so consulting only one file can overlap
+    # an allocation that exists only in the other.
     for subid_file in "$subuid_file" "$subgid_file"; do
         [[ -e "$subid_file" ]] || continue
-        while IFS=: read -r owner range_start range_count extra; do
-            [[ -z "$owner" ]] && continue
-            if [[ -n "$extra" || ! "$range_start" =~ ^[0-9]+$ || ! "$range_count" =~ ^[0-9]+$ || "$range_count" == 0 ]]; then
-                echo "ERROR: invalid subordinate-ID entry in ${subid_file}: ${owner}:${range_start}:${range_count}${extra:+:${extra}}" >&2
-                return 1
-            fi
-            range_end=$(( range_start + range_count ))
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            [[ -z "$line" ]] && continue
+            parse_subid_line "$line" "$subid_file" || return 1
             if (( range_end > start )); then
                 start=$range_end
             fi
         done < "$subid_file"
     done
 
-    # Align to 65536 boundary for clean mapping.
     start=$(( ((start + size - 1) / size) * size ))
+    if (( start > 4294967295 - size + 1 )); then
+        echo "ERROR: no 32-bit subordinate-ID range remaining" >&2
+        return 1
+    fi
     echo "${start}-$(( start + size - 1 ))"
 }
 
 subid_ranges_for_user() {
     local subid_file="$1"
     local user="$2"
+    local line owner range_start range_count range_end
+    local -a ranges=()
 
     [[ -e "$subid_file" ]] || return 0
-    awk -F: -v user="$user" '$1 == user { print $2 ":" $3 }' "$subid_file" | LC_ALL=C sort -u
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ -z "$line" ]] && continue
+        parse_subid_line "$line" "$subid_file" || return 1
+        if [[ "$owner" == "$user" ]]; then
+            ranges+=("${range_start}:${range_count}")
+        fi
+    done < "$subid_file"
+
+    if (( ${#ranges[@]} > 0 )); then
+        printf '%s\n' "${ranges[@]}" | LC_ALL=C sort -u
+    fi
 }
+
+# Convert a validated "START:COUNT" record to usermod FIRST-LAST.
+subid_to_usermod_range() {
+    local start="${1%%:*}"
+    local count="${1##*:}"
+    echo "${start}-$((10#$start + 10#$count - 1))"
+}
+
+# True if dest has no interval intersecting [start, start+count).
+subid_can_copy_range() {
+    local dest_file="$1"
+    local spec="$2"
+    local cand_start cand_count cand_end
+    local line owner range_start range_count range_end
+
+    parse_subid_line "x:${spec}" "range" || return 1
+    cand_start=$range_start
+    cand_count=$range_count
+    cand_end=$range_end
+
+    [[ -e "$dest_file" ]] || return 0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ -z "$line" ]] && continue
+        parse_subid_line "$line" "$dest_file" || return 1
+        if (( 10#$range_start < cand_end && 10#$cand_start < range_end )); then
+            echo "ERROR: subordinate-ID range ${cand_start}:${cand_count} overlaps ${owner}:${range_start}:${range_count} in ${dest_file}" >&2
+            return 1
+        fi
+    done < "$dest_file"
+    return 0
+}
+
+for subid_file in /etc/subuid /etc/subgid; do
+    if ! subid_file_is_shadow_writable "$subid_file"; then
+        echo "ERROR: ${subid_file} has an unterminated final record; shadow usermod cannot safely update it." >&2
+        echo "       Repair the database's final newline before running jan-pod-setup." >&2
+        exit 1
+    fi
+done
 
 # ---------- create maximally restricted user ----------
 
@@ -212,14 +301,21 @@ SUBID_LOCK_FILE="${SUBID_LOCK_DIR}/subids.lock"
         SUBID_RANGE=$(allocate_subuid_range /etc/subuid /etc/subgid)
         echo "==> Allocating subordinate UID/GID range: ${SUBID_RANGE}"
         usermod --add-subuids "$SUBID_RANGE" --add-subgids "$SUBID_RANGE" "$NAME"
-    elif [[ -z "$SUBUID_RANGES" || -z "$SUBGID_RANGES" ]]; then
-        echo "ERROR: user '${NAME}' has only one of subuid/subgid configured; refusing an inconsistent allocation." >&2
-        exit 1
-    elif [[ "$SUBUID_RANGES" != "$SUBGID_RANGES" ]]; then
-        echo "ERROR: user '${NAME}' has different subuid and subgid ranges; refusing to change them automatically." >&2
-        exit 1
-    else
+    elif [[ -z "$SUBUID_RANGES" && -n "$SUBGID_RANGES" && "$SUBGID_RANGES" != *$'\n'* ]]; then
+        # Copy the one present range onto the missing side; never allocate a
+        # new interval or UID/GID mappings would diverge.
+        subid_can_copy_range /etc/subuid "$SUBGID_RANGES"
+        echo "==> Completing missing subuid from existing subgid ${SUBGID_RANGES}"
+        usermod --add-subuids "$(subid_to_usermod_range "$SUBGID_RANGES")" "$NAME"
+    elif [[ -z "$SUBGID_RANGES" && -n "$SUBUID_RANGES" && "$SUBUID_RANGES" != *$'\n'* ]]; then
+        subid_can_copy_range /etc/subgid "$SUBUID_RANGES"
+        echo "==> Completing missing subgid from existing subuid ${SUBUID_RANGES}"
+        usermod --add-subgids "$(subid_to_usermod_range "$SUBUID_RANGES")" "$NAME"
+    elif [[ "$SUBUID_RANGES" == "$SUBGID_RANGES" ]]; then
         echo "==> Existing subordinate UID/GID range: ${SUBUID_RANGES//$'\n'/, }"
+    else
+        echo "ERROR: user '${NAME}' has inconsistent subuid/subgid ranges; refusing to change them automatically." >&2
+        exit 1
     fi
 ) 9>>"$SUBID_LOCK_FILE"
 
