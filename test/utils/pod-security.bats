@@ -15,6 +15,8 @@ load ../helpers
 # would not match what the tests look for. We persist POD_NAME via
 # BATS_FILE_TMPDIR (unique per `bats` invocation, cleaned up automatically).
 _pod_name_file() { echo "${BATS_FILE_TMPDIR:-/tmp}/pod-security.pod-name"; }
+_acl_dirs() { printf '%s\n' /home /root /tmp /var/tmp /var/log /var/spool /var/mail /etc/ssh; }
+_acl_snapshot_file() { echo "${BATS_FILE_TMPDIR}/acl${1//\//_}.before"; }
 
 setup_file() {
     if [[ "$EUID" -ne 0 ]]; then
@@ -22,6 +24,9 @@ setup_file() {
     fi
     if ! command -v jan-pod-setup &>/dev/null && ! [[ -x "$OPT_JAN/usr/sbin/jan-pod-setup" ]]; then
         skip "jan-pod-setup not found"
+    fi
+    if ! command -v getfacl &>/dev/null || ! command -v setfacl &>/dev/null; then
+        skip "requires getfacl and setfacl for safe ACL restoration"
     fi
 
     local suffix
@@ -36,10 +41,22 @@ setup_file() {
     fi
     echo "$POD_NAME" > "$(_pod_name_file)"
 
-    # Preserve unrelated mappings so the test catches accidental truncation
-    # of either global subordinate-ID database.
-    awk -F: -v user="$POD_NAME" '$1 != user' /etc/subuid > "${BATS_FILE_TMPDIR}/subuid.before"
-    awk -F: -v user="$POD_NAME" '$1 != user' /etc/subgid > "${BATS_FILE_TMPDIR}/subgid.before"
+    # Preserve raw databases; the account's numeric UID is known only after
+    # setup, when the test can filter both supported owner representations.
+    cp -- /etc/subuid "${BATS_FILE_TMPDIR}/subuid.before"
+    cp -- /etc/subgid "${BATS_FILE_TMPDIR}/subgid.before"
+
+    local dir
+    while IFS= read -r dir; do
+        [[ -e "$dir" ]] || continue
+        getfacl -cpn "$dir" > "$(_acl_snapshot_file "$dir")"
+    done < <(_acl_dirs)
+
+    # Record pre-existing UID-scoped delegate files. Teardown must not remove
+    # administrator configuration merely because useradd later reuses its UID.
+    find /etc/systemd/system \
+        -path '/etc/systemd/system/user@*.service.d/delegate.conf' \
+        -print > "${BATS_FILE_TMPDIR}/delegate-files.before"
 
     if [[ -x "$OPT_JAN/usr/sbin/jan-pod-setup" ]]; then
         "$OPT_JAN/usr/sbin/jan-pod-setup" "$POD_NAME" >/dev/null 2>&1
@@ -72,6 +89,43 @@ teardown_file() {
 
     loginctl disable-linger "$POD_NAME" 2>/dev/null || true
     systemctl stop "user@${uid}.service" 2>/dev/null || true
+
+    # Restore this numeric UID's exact pre-test ACL entry while the name still
+    # resolves. Usually that means removal, but UID reuse can expose an
+    # administrator-owned entry which must be preserved.
+    local cleanup_status=0 dir acl snapshot prior_perms current_perms
+    while IFS= read -r dir; do
+        [[ -e "$dir" ]] || continue
+        snapshot=$(_acl_snapshot_file "$dir")
+        if [[ ! -r "$snapshot" ]]; then
+            echo "ERROR: missing pre-test ACL snapshot for ${dir}" >&2
+            cleanup_status=1
+            continue
+        fi
+        prior_perms=$(awk -F: -v uid="$uid" '$1 == "user" && $2 == uid { print $3; exit }' "$snapshot")
+        if [[ -n "$prior_perms" ]]; then
+            if ! setfacl -m "u:${uid}:${prior_perms}" "$dir" 2>/dev/null; then
+                echo "ERROR: setfacl could not restore UID ${uid} on ${dir}" >&2
+                cleanup_status=1
+                continue
+            fi
+        elif ! setfacl -x "u:${uid}" "$dir" 2>/dev/null; then
+            echo "ERROR: setfacl could not remove UID ${uid} from ${dir}" >&2
+            cleanup_status=1
+            continue
+        fi
+        if ! acl=$(getfacl -cpn "$dir" 2>/dev/null); then
+            echo "ERROR: getfacl could not verify ${dir}" >&2
+            cleanup_status=1
+            continue
+        fi
+        current_perms=$(awk -F: -v uid="$uid" '$1 == "user" && $2 == uid { print $3; exit }' <<<"$acl")
+        if [[ "$current_perms" != "$prior_perms" ]]; then
+            echo "ERROR: failed to restore ACL for UID ${uid} on ${dir}" >&2
+            cleanup_status=1
+        fi
+    done < <(_acl_dirs)
+
     userdel -r "$POD_NAME" 2>/dev/null || true
     rm -rf "$POD_HOME"
 
@@ -80,17 +134,18 @@ teardown_file() {
     rm -f "/etc/sysctl.d/90-podman-${POD_NAME}.conf"
     rm -f "/etc/tmpfiles.d/podman-${POD_NAME}.conf"
     rm -f "/etc/apparmor.d/podman-${POD_NAME}"
-    rm -f "/etc/systemd/system/user@${uid}.service.d/delegate.conf"
-    rmdir "/etc/systemd/system/user@${uid}.service.d" 2>/dev/null || true
+    local delegate_file="/etc/systemd/system/user@${uid}.service.d/delegate.conf"
+    if [[ -r "${BATS_FILE_TMPDIR}/delegate-files.before" ]] \
+            && ! grep -qxF "$delegate_file" "${BATS_FILE_TMPDIR}/delegate-files.before"; then
+        rm -f "$delegate_file"
+        rmdir "/etc/systemd/system/user@${uid}.service.d" 2>/dev/null || true
+    fi
 
     # Remove from deny lists
     sed -i "/^${POD_NAME}$/d" /etc/cron.deny 2>/dev/null || true
     sed -i "/^${POD_NAME}$/d" /etc/at.deny 2>/dev/null || true
 
-    # Remove ACLs
-    for dir in /home /root /tmp /var/tmp /var/log /var/spool /var/mail /etc/ssh; do
-        setfacl -x "u:${POD_NAME}" "$dir" 2>/dev/null || true
-    done
+    return "$cleanup_status"
 }
 
 run_as_pod() {
@@ -128,16 +183,27 @@ run_as_pod() {
 # --- Subordinate IDs ---
 
 @test "unrelated subuid and subgid mappings are preserved" {
-    awk -F: -v user="$POD_NAME" '$1 != user' /etc/subuid > "$BATS_TEST_TMPDIR/subuid.after"
-    awk -F: -v user="$POD_NAME" '$1 != user' /etc/subgid > "$BATS_TEST_TMPDIR/subgid.after"
-    cmp "${BATS_FILE_TMPDIR}/subuid.before" "$BATS_TEST_TMPDIR/subuid.after"
-    cmp "${BATS_FILE_TMPDIR}/subgid.before" "$BATS_TEST_TMPDIR/subgid.after"
+    local uid
+    uid=$(id -u "$POD_NAME")
+    awk -F: -v user="$POD_NAME" -v uid="$uid" \
+        '$1 != user && $1 != uid' "${BATS_FILE_TMPDIR}/subuid.before" > "$BATS_TEST_TMPDIR/subuid.before.filtered"
+    awk -F: -v user="$POD_NAME" -v uid="$uid" \
+        '$1 != user && $1 != uid' "${BATS_FILE_TMPDIR}/subgid.before" > "$BATS_TEST_TMPDIR/subgid.before.filtered"
+    awk -F: -v user="$POD_NAME" -v uid="$uid" \
+        '$1 != user && $1 != uid' /etc/subuid > "$BATS_TEST_TMPDIR/subuid.after"
+    awk -F: -v user="$POD_NAME" -v uid="$uid" \
+        '$1 != user && $1 != uid' /etc/subgid > "$BATS_TEST_TMPDIR/subgid.after"
+    cmp "$BATS_TEST_TMPDIR/subuid.before.filtered" "$BATS_TEST_TMPDIR/subuid.after"
+    cmp "$BATS_TEST_TMPDIR/subgid.before.filtered" "$BATS_TEST_TMPDIR/subgid.after"
 }
 
 @test "pod user has matching subuid and subgid ranges" {
-    local subuid_ranges subgid_ranges
-    subuid_ranges=$(awk -F: -v user="$POD_NAME" '$1 == user { print $2 ":" $3 }' /etc/subuid | sort -u)
-    subgid_ranges=$(awk -F: -v user="$POD_NAME" '$1 == user { print $2 ":" $3 }' /etc/subgid | sort -u)
+    local uid subuid_ranges subgid_ranges
+    uid=$(id -u "$POD_NAME")
+    subuid_ranges=$(awk -F: -v user="$POD_NAME" -v uid="$uid" \
+        '$1 == user || $1 == uid { print $2 ":" $3 }' /etc/subuid | sort -u)
+    subgid_ranges=$(awk -F: -v user="$POD_NAME" -v uid="$uid" \
+        '$1 == user || $1 == uid { print $2 ":" $3 }' /etc/subgid | sort -u)
     [[ -n "$subuid_ranges" ]]
     [[ "$subuid_ranges" == "$subgid_ranges" ]]
 }

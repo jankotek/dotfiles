@@ -19,8 +19,24 @@ setup() {
 
 run_controller() {
     local lock_file="$BATS_TEST_TMPDIR/.pwd.lock"
-    shadow_lock_plan_exec "$lock_file" bash -c \
-        'plan_subid_reconciliation_locked "$@"' _ "$@"
+    local id_dir="$BATS_TEST_TMPDIR/mock-bin"
+    local subuid_file="$1" subgid_file="$2" user="$3"
+    local user_uid="$4" usermod_cmd="$5"
+    mkdir -p "$id_dir"
+    cat > "$id_dir/id" <<'MOCK'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%q ' "$@" >> "$MOCK_ID_LOG"
+printf '\n' >> "$MOCK_ID_LOG"
+[[ "$1" == -u && "$2" == -- && -n "$3" ]]
+printf '%s\n' "$MOCK_ID_UID"
+MOCK
+    chmod +x "$id_dir/id"
+    MOCK_ID_UID="$user_uid" MOCK_ID_LOG="$BATS_TEST_TMPDIR/id.log" \
+        PATH="$id_dir:$PATH" \
+        shadow_lock_plan_exec "$lock_file" bash -c \
+        'plan_subid_reconciliation_locked "$@"' _ \
+        "$subuid_file" "$subgid_file" "$user" "$usermod_cmd"
 }
 
 make_usermod_mock() {
@@ -298,6 +314,7 @@ MOCK
     [[ "$status" -eq 0 ]]
     grep -qxF 'pod:196608:65536' "$MOCK_SUBGID"
     grep -q -- '--add-subgids 196608-262143 pod' "$MOCK_LOG"
+    grep -q -- '-u -- pod' "$BATS_TEST_TMPDIR/id.log"
     [[ "$(subid_ranges_for_user "$MOCK_SUBUID" pod 4242)" == \
         "$(subid_ranges_for_user "$MOCK_SUBGID" pod 4242)" ]]
 }

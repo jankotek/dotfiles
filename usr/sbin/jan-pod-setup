@@ -296,11 +296,15 @@ plan_subid_reconciliation_locked() {
     local subuid_file="$1"
     local subgid_file="$2"
     local user="$3"
-    local user_uid="$4"
-    local usermod_cmd="$5"
+    local usermod_cmd="$4"
+    local user_uid
     local subuid_ranges subgid_ranges subid_range
 
     require_shadow_writable_subid_files "$subuid_file" "$subgid_file"
+    if ! user_uid=$(command id -u -- "$user"); then
+        echo "ERROR: user '${user}' disappeared while reconciling subordinate IDs." >&2
+        return 1
+    fi
     subuid_ranges=$(subid_ranges_for_user "$subuid_file" "$user" "$user_uid")
     subgid_ranges=$(subid_ranges_for_user "$subgid_file" "$user" "$user_uid")
 
@@ -356,8 +360,6 @@ else
         "$NAME"
 fi
 
-USER_UID=$(id -u "$NAME")
-
 # ---------- user hardening (idempotent — runs every invocation) ----------
 # Hoisted out of the user-creation guard so re-running on a partially set up
 # pod completes the hardening rather than silently skipping it.
@@ -397,8 +399,10 @@ SUBID_LOCK_FILE="${SUBID_LOCK_DIR}/subids.lock"
     flock -x 9
     shadow_lock_plan_exec /etc/.pwd.lock bash -c \
         'plan_subid_reconciliation_locked "$@"' _ \
-        /etc/subuid /etc/subgid "$NAME" "$USER_UID" usermod
+        /etc/subuid /etc/subgid "$NAME" usermod
 ) 9>>"$SUBID_LOCK_FILE"
+
+USER_UID=$(id -u -- "$NAME")
 
 # ---------- enable linger (starts user systemd at boot) ----------
 
