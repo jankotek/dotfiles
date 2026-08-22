@@ -17,11 +17,6 @@ sleep 2
 # this script is executed when XFCE starts
 # use async suffix '&' for desktop programs !!!
 
-# auto-resize display when spice window is resized
-if systemd-detect-virt -q -v 2>/dev/null; then
-    jan-vm-resize-display-loop &
-fi
-
 # KDE/Plasma on a VM: plasmashell often starts before the virtio-gpu output
 # is sized (the SPICE display only gets a real geometry once a viewer attaches)
 # and strands the panel/taskbar on a nonexistent screen (-1). Self-heal: watch

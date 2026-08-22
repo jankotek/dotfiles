@@ -3,6 +3,16 @@
 # Watch for SPICE/virt-viewer XRandR output changes and ask the one-shot
 # jan-vm-resize-display command to normalize all monitor modes and positions.
 
+# XFCE's dedicated XDG autostart entry and the legacy delayed session fallback
+# can race at login. Keep exactly one monitor per logind user session.
+runtime_dir=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+if [[ ! -d "$runtime_dir" || ! -w "$runtime_dir" ]]; then
+    echo "ERROR: no writable runtime directory at $runtime_dir" >&2
+    exit 1
+fi
+exec {lock_fd}> "$runtime_dir/jan-vm-resize-display-loop.lock"
+flock -n "$lock_fd" || exit 0
+
 # Kill any spawned xev when we get a signal — without this, a SIGTERM to
 # the script leaves xev running as an orphan.
 trap 'pkill -P $$ xev 2>/dev/null; exit 0' INT TERM EXIT

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=VM display resize monitor
+Comment=Match XRandR outputs to SPICE client display changes
+Exec=sh -c "systemd-detect-virt -q -v 2>/dev/null && exec /usr/local/bin/jan-vm-resize-display-loop"
+TryExec=/usr/local/bin/jan-vm-resize-display-loop
+StartupNotify=false
+Terminal=false
