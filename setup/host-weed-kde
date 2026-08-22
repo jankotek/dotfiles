@@ -9,7 +9,7 @@
 #   - installs KDE apps, virt stack, and CLI tools via zypper
 #   - locks packages we never want pulled in (X server, vim, PackageKit, ...)
 #   - masks services we replace or don't use (sddm, fwupd, ollama, ...)
-#   - sets up greetd+tuigreet logins on tty3-9 (sddm stays masked)
+#   - sets up greetd+tuigreet logins on tty3-10 (sddm stays masked)
 #   - runs the cross-distro jan-* helpers
 #   - syncs repo home dotfiles WITHOUT --delete (user data survives re-runs)
 #
@@ -99,14 +99,14 @@ for unit in sddm.service fwupd.service ollama.service forgejo-runner.service; do
 done
 
 # ---------- Cross-distro jan-* helpers ----------
-# Each helper detects distro internally. greetd setup masks getty@tty3-9 and
-# enables greetd-tty3-9. tty11-root is intentionally omitted (see header).
+# Each helper detects distro internally. greetd setup masks getty@tty3-10 and
+# enables greetd-tty3-10. tty11-root is intentionally omitted (see header).
 
 echo "==> Running jan-* setup helpers"
 jan-console-font            || echo "WARNING: console font setup failed (non-fatal)"
 jan-setup-pkg-safety        || echo "WARNING: pkg safety setup failed (non-fatal)"
 jan-setup-kernel-tweaks     || echo "WARNING: kernel tweaks setup failed (non-fatal)"
-jan-setup-greetd            || echo "WARNING: greetd setup failed (non-fatal)"
+jan-setup-greetd
 jan-systemd-tty12-menu      || echo "WARNING: tty12 menu setup failed (non-fatal)"
 # Patch virt-manager/remote-viewer to run under XWayland (fractional scaling fix).
 jan-fix-virtman-scaling     || echo "WARNING: virt-manager scaling fix failed (non-fatal)"
@@ -236,4 +236,4 @@ configure-user-dirs "$HOME_USER" "$HOME_GROUP" "$HOME_DIR"
 systemctl daemon-reload
 
 echo "=========== DONE ==========="
-echo "Reboot to activate greetd logins (tty3-9) and the graphical target."
+echo "Reboot to activate greetd logins (tty3-10) and the graphical target."

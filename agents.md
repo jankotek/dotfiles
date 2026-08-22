@@ -46,7 +46,7 @@ Tests use [bats-core](https://github.com/bats-core/bats-core). Three test scenar
 | Directory | Runs on | What it verifies |
 |-----------|---------|-----------------|
 | `test/basic/` | everywhere | `/opt/jan` structure, CLI tools (fish, htop, ncdu, yq, java, maven, go, ...), JetBrains Mono font |
-| `test/host/` | host only | Plasma/Wayland, KDE apps (kdenlive, krita, kdiff3, ...), virt tools, greetd+tuigreet on tty3-9, GDK_BACKEND=x11 patches |
+| `test/host/` | host only | Plasma/Wayland, KDE apps (kdenlive, krita, kdiff3, ...), virt tools, greetd+tuigreet on tty3-10, GDK_BACKEND=x11 patches |
 | `test/vm/` | VM only | Deployed dotfiles (.bashrc, fish, git, user-dirs), XFCE/X11, terminator, rofi, autologin (xfce4-panel + xfdesktop running as jan), spice/qemu agents (installed + running), display resize loop, symlinks into /usr/local, purged packages (snapd, xfce4-terminal), systemd services |
 | `test/utils/` | manual only | Destructive integration tests (e.g. pod-security: creates a pod user, verifies ACLs/hardening, then deletes it). NOT run by test-host.sh or test-vm.sh. Run individually: `sudo bats test/utils/pod-security.bats` |
 

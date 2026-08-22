@@ -1,0 +1,229 @@
+#!/bin/bash
+# Serialize graphical sessions per user. For X11, also start Xorg and publish
+# DISPLAY/XAUTHORITY to the user's D-Bus and systemd activation environments.
+
+set -Eeuo pipefail
+
+readonly INSIDE_X_FLAG=--jan-inside-x
+readonly EXPECTED_RUNTIME_DIR="/run/user/$EUID"
+
+die() {
+    echo "ERROR: $*" >&2
+    exit 1
+}
+
+clear_activation_environment() {
+    local rc=0
+    # dbus-daemon has no unset operation. Empty values are unambiguous and do
+    # not point newly activated programs at a display from an ended session.
+    DISPLAY='' XAUTHORITY='' XDG_SESSION_TYPE='' \
+        /usr/bin/dbus-update-activation-environment \
+        DISPLAY XAUTHORITY XDG_SESSION_TYPE || rc=1
+    # Some dbus-update-activation-environment builds also update systemd.
+    # Unset there last, where a real removal operation is available.
+    /usr/bin/systemctl --user unset-environment \
+        DISPLAY XAUTHORITY XDG_SESSION_TYPE || rc=1
+    return "$rc"
+}
+
+clear_activation_environment_on_exit() {
+    local rc=$?
+    trap - EXIT
+    if ! clear_activation_environment; then
+        echo "WARNING: could not clear the graphical activation environment" >&2
+    fi
+    exit "$rc"
+}
+
+publish_wayland_environment() {
+    export XDG_SESSION_TYPE=wayland
+    unset DISPLAY XAUTHORITY
+    /usr/bin/systemctl --user import-environment XDG_SESSION_TYPE
+    DISPLAY='' XAUTHORITY='' \
+        /usr/bin/dbus-update-activation-environment \
+        DISPLAY XAUTHORITY XDG_SESSION_TYPE
+    /usr/bin/systemctl --user unset-environment DISPLAY XAUTHORITY
+}
+
+process_state_and_start() {
+    local pid=$1 stat rest
+    local -a fields
+    [[ -r /proc/$pid/stat ]] || return 1
+    stat=$(< "/proc/$pid/stat")
+    rest=${stat##*) }
+    read -r -a fields <<< "$rest"
+    (( ${#fields[@]} > 19 )) || return 1
+    printf '%s %s\n' "${fields[0]}" "${fields[19]}"
+}
+
+snapshot_process_tree() {
+    local pid=$1 details state start child
+    local -a children=()
+    details=$(process_state_and_start "$pid") || return 0
+    read -r state start <<< "$details"
+    [[ $state != Z && $state != X ]] || return 0
+    termination_pids+=("$pid")
+    termination_starts+=("$start")
+    if [[ -r /proc/$pid/task/$pid/children ]]; then
+        read -r -a children < "/proc/$pid/task/$pid/children" || true
+        for child in "${children[@]}"; do
+            snapshot_process_tree "$child"
+        done
+    fi
+}
+
+snapshot_pid_is_alive() {
+    local index=$1 details state start
+    details=$(process_state_and_start "${termination_pids[index]}") || return 1
+    read -r state start <<< "$details"
+    [[ $state != Z && $state != X && $start == "${termination_starts[index]}" ]]
+}
+
+signal_snapshot() {
+    local signal=$1 index
+    # Signal leaves before parents so a launcher cannot exit and orphan an
+    # unsignalled desktop process between the two operations.
+    for (( index=${#termination_pids[@]}-1; index>=0; index-- )); do
+        if snapshot_pid_is_alive "$index"; then
+            kill -s "$signal" "${termination_pids[index]}" 2>/dev/null || true
+        fi
+    done
+}
+
+snapshot_has_live_processes() {
+    local index
+    for (( index=0; index<${#termination_pids[@]}; index++ )); do
+        snapshot_pid_is_alive "$index" && return 0
+    done
+    return 1
+}
+
+terminate_session_tree() {
+    local signal=$1 status=$2 attempt
+    [[ -z ${termination_status:-} ]] || return 0
+    termination_status=$status
+    trap '' TERM HUP INT
+
+    termination_pids=()
+    termination_starts=()
+    snapshot_process_tree "$session_pid"
+    signal_snapshot "$signal"
+
+    # Retain the per-user lock while the desktop handles the signal. Escalate
+    # after ten seconds so a wedged session cannot outlive greetd indefinitely.
+    for (( attempt=0; attempt<100; attempt++ )); do
+        snapshot_has_live_processes || return 0
+        sleep 0.1
+    done
+    signal_snapshot KILL
+    for (( attempt=0; attempt<20; attempt++ )); do
+        snapshot_has_live_processes || return 0
+        sleep 0.1
+    done
+}
+
+supervise_session() {
+    local session_rc
+    termination_status=
+    termination_pids=()
+    termination_starts=()
+
+    # Non-interactive Bash otherwise redirects an asynchronous command's stdin
+    # from /dev/null. Keep greetd's controlling VT: rootless Xorg needs that
+    # terminal association when it asks logind for the active VT devices.
+    "$@" <&0 &
+    session_pid=$!
+    trap 'terminate_session_tree TERM 143' TERM
+    trap 'terminate_session_tree HUP 129' HUP
+    trap 'terminate_session_tree INT 130' INT
+
+    set +e
+    wait "$session_pid"
+    session_rc=$?
+    if [[ -n $termination_status ]]; then
+        wait "$session_pid" 2>/dev/null || true
+        session_rc=$termination_status
+    fi
+    set -e
+    trap - TERM HUP INT
+    return "$session_rc"
+}
+
+if [[ ${XDG_RUNTIME_DIR:-$EXPECTED_RUNTIME_DIR} != "$EXPECTED_RUNTIME_DIR" \
+    || ! -d $EXPECTED_RUNTIME_DIR \
+    || ! -O $EXPECTED_RUNTIME_DIR ]]; then
+    die "a PAM-owned runtime directory is required: $EXPECTED_RUNTIME_DIR"
+fi
+readonly SESSION_RUNTIME_DIR=$EXPECTED_RUNTIME_DIR
+
+if [[ ${1:-} == "$INSIDE_X_FLAG" ]]; then
+    (( $# == 2 )) || die "invalid internal X11 session invocation"
+    readonly argv_file=$2
+    if [[ $argv_file != "$SESSION_RUNTIME_DIR"/jan-greetd-session.argv.* \
+        || ! -f $argv_file \
+        || -L $argv_file \
+        || ! -O $argv_file ]]; then
+        die "invalid X11 session argument file"
+    fi
+
+    session_argv=()
+    mapfile -d '' -t session_argv < "$argv_file"
+    rm -f -- "$argv_file"
+    (( ${#session_argv[@]} > 0 )) || die "no X11 session command was supplied"
+    [[ -n ${DISPLAY:-} && -n ${XAUTHORITY:-} ]] \
+        || die "startx did not provide DISPLAY and XAUTHORITY"
+
+    export XDG_SESSION_TYPE=x11
+    /usr/bin/systemctl --user import-environment DISPLAY XAUTHORITY XDG_SESSION_TYPE
+    /usr/bin/dbus-update-activation-environment DISPLAY XAUTHORITY XDG_SESSION_TYPE
+    exec "${session_argv[@]}"
+fi
+
+readonly session_type=${1:-}
+case $session_type in
+    wayland|x11)
+        shift
+        ;;
+    *)
+        die "usage: jan-greetd-session {wayland|x11} COMMAND [ARG ...]"
+        ;;
+esac
+(( $# > 0 )) || die "no $session_type session command was supplied"
+
+# systemd and D-Bus activation state is shared by all sessions for one user.
+# Holding this non-blocking lock for the session lifetime prevents a second VT
+# from redirecting newly activated GUI processes to a different display.
+umask 077
+readonly session_lock="$SESSION_RUNTIME_DIR/jan-greetd-session.lock"
+exec {session_lock_fd}> "$session_lock"
+if ! /usr/bin/flock -n "$session_lock_fd"; then
+    die "another graphical session is already active for user $(id -un)"
+fi
+
+# Reconcile persistent user-manager and D-Bus activation state while holding
+# the same lock that prevents another VT from publishing a competing display.
+clear_activation_environment
+trap clear_activation_environment_on_exit EXIT
+
+if [[ $session_type == wayland ]]; then
+    publish_wayland_environment
+    set +e
+    supervise_session "$@"
+    session_rc=$?
+    exit "$session_rc"
+fi
+
+[[ -x /usr/bin/startx ]] || die "/usr/bin/startx is required for X11 sessions"
+
+# openSUSE's startx flattens its client arguments into shell words. Preserve
+# the desktop entry's exact argv (including embedded whitespace) in a private,
+# NUL-delimited runtime file and pass only its whitespace-free name to xinit.
+argv_file=$(mktemp "$SESSION_RUNTIME_DIR/jan-greetd-session.argv.XXXXXX")
+readonly argv_file
+printf '%s\0' "$@" > "$argv_file"
+set +e
+supervise_session /usr/bin/startx "$0" "$INSIDE_X_FLAG" "$argv_file"
+session_rc=$?
+set -e
+rm -f -- "$argv_file"
+exit "$session_rc"
