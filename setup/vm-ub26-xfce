@@ -1,0 +1,162 @@
+#!/bin/bash
+# Bootstrap the dotfiles Xfce environment from a plain Ubuntu 26.04 cloud VM.
+#
+# This deliberately installs individual Xorg/Xfce components instead of the
+# xorg, xfce4, xubuntu-core, or xubuntu-desktop metapackages. The virtio GPU is
+# driven by Xorg's built-in modesetting driver; only the libinput DDX is added.
+
+set -Eeuo pipefail
+
+error_trap() {
+    local rc=$?
+    echo >&2 "${BASH_SOURCE[1]}:${BASH_LINENO[0]}: Command \`$BASH_COMMAND\` failed with exit code $rc"
+    exit "$rc"
+}
+trap error_trap ERR
+
+guest_agent_owner_token=
+
+cleanup_guest_agent_guard() {
+    local rc=$?
+    trap - EXIT
+    if [[ -n "$guest_agent_owner_token" ]]; then
+        if ! /usr/local/sbin/jan-qga-guard release "$guest_agent_owner_token"; then
+            echo "WARNING: failed to release the QEMU guest-agent guard; watchdog will retry" >&2
+        fi
+    fi
+    exit "$rc"
+}
+trap cleanup_guest_agent_guard EXIT
+
+acquire_guest_agent_guard() {
+    guest_agent_owner_token=$(/usr/local/sbin/jan-qga-guard acquire "$$")
+    export JAN_QGA_GUARD_TOKEN=$guest_agent_owner_token
+}
+
+release_guest_agent_guard() {
+    /usr/local/sbin/jan-qga-guard release "$guest_agent_owner_token"
+    guest_agent_owner_token=
+    unset JAN_QGA_GUARD_TOKEN
+}
+
+if (( EUID != 0 )); then
+    echo "ERROR: vm-ub26-xfce must run as root" >&2
+    exit 1
+fi
+
+if ! systemd-detect-virt -q -v; then
+    echo "ERROR: This script must run inside a virtual machine" >&2
+    exit 1
+fi
+
+# shellcheck source=/dev/null
+source /etc/os-release
+if [[ "${ID:-}" != ubuntu || "${VERSION_ID:-}" != 26.04 ]]; then
+    echo "ERROR: Ubuntu 26.04 is required (found ${ID:-unknown} ${VERSION_ID:-unknown})" >&2
+    exit 1
+fi
+
+if [[ ! -d /opt/jan/usr || ! -x /opt/jan/setup/vm-xub26 ]]; then
+    echo "ERROR: the dotfiles checkout must be available at /opt/jan" >&2
+    exit 1
+fi
+
+export DEBIAN_FRONTEND=noninteractive
+
+# Make repository helpers available before invoking either setup script.
+cp -f -s -r /opt/jan/usr/* /usr/local
+
+/opt/jan/usr/sbin/jan-create-user
+
+# Package operations may otherwise restart qemu-guest-agent and sever the
+# vm-exec connection carrying this setup process. vm-xub26 applies the same
+# guard. Clear masks left by older setup versions, then make this one
+# runtime-only so either the EXIT trap or a reboot restores VM access.
+acquire_guest_agent_guard
+
+apt-get update
+apt-get install -y --no-install-recommends \
+    dbus-x11 \
+    greetd \
+    libgl1-mesa-dri \
+    rsync \
+    thunar \
+    xfce-polkit \
+    xfce4-notifyd \
+    xfce4-panel \
+    xfce4-power-manager \
+    xfce4-session \
+    xfce4-settings \
+    xfconf \
+    xfdesktop4 \
+    xfwm4 \
+    xinit \
+    xserver-xorg-core \
+    xserver-xorg-input-libinput
+
+# Apply the existing Xubuntu 26.04 package pruning, dotfiles, user directories,
+# VM agents, and system services now that its formerly implicit prerequisites
+# exist.
+/opt/jan/setup/vm-xub26
+
+command -v greetd >/dev/null
+agreety_bin=$(command -v agreety)
+if id _greetd >/dev/null 2>&1; then
+    greeter_user=_greetd
+elif id greeter >/dev/null 2>&1; then
+    greeter_user=greeter
+else
+    echo "ERROR: greetd package did not create a greeter account" >&2
+    exit 1
+fi
+
+# startxfce4 starts Xorg itself when DISPLAY is unset. greetd owns the VT and
+# opens its packaged PAM/logind session before executing this wrapper. The
+# session is therefore tracked on seat0 even though logind describes a
+# startx-based graphical session on a physical VT as type "tty".
+cat > /usr/local/bin/jan-start-xfce <<'EOF'
+#!/bin/sh
+export DESKTOP_SESSION=xfce
+export XDG_CURRENT_DESKTOP=XFCE
+export XDG_SESSION_DESKTOP=xfce
+export XDG_SESSION_TYPE=x11
+exec /usr/bin/startxfce4
+EOF
+chmod 0755 /usr/local/bin/jan-start-xfce
+
+install -d -m 0755 /etc/greetd
+cat > /etc/greetd/config.toml <<EOF
+[terminal]
+vt = 7
+switch = true
+
+[general]
+source_profile = true
+runfile = "/run/greetd.run"
+service = "greetd"
+
+[default_session]
+command = "$agreety_bin --cmd /usr/local/bin/jan-start-xfce"
+user = "$greeter_user"
+
+[initial_session]
+command = "/usr/local/bin/jan-start-xfce"
+user = "jan"
+EOF
+chmod 0644 /etc/greetd/config.toml
+
+# Keep greetd in the standard display-manager role. Its packaged unit conflicts
+# with the getty on its VT and receives an orderly stop during shutdown.
+systemctl disable lightdm.service gdm.service gdm3.service sddm.service 2>/dev/null || true
+systemctl enable greetd.service
+systemctl set-default graphical.target
+
+# Ensure the VM control channel survives interrupted runs and the next boot.
+release_guest_agent_guard
+systemctl enable qemu-guest-agent.service
+systemctl start qemu-guest-agent.service
+systemctl is-enabled --quiet qemu-guest-agent.service
+systemctl is-active --quiet qemu-guest-agent.service
+
+echo "=========== UBUNTU 26.04 XFCE BOOTSTRAP DONE ==========="
+echo "Reboot to start the passwordless jan Xfce session through greetd."

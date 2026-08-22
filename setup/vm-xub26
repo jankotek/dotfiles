@@ -12,8 +12,39 @@ if ! systemd-detect-virt -q -v; then
 fi
 
 # fail on any errors
-set -euo pipefail
-trap 'echo >&2 "${BASH_SOURCE[0]}:${BASH_LINENO[0]}: Command \`$BASH_COMMAND\` failed with exit code $?"; exit $?' ERR
+set -Eeuo pipefail
+
+error_trap() {
+    local rc=$?
+    echo >&2 "${BASH_SOURCE[1]}:${BASH_LINENO[0]}: Command \`$BASH_COMMAND\` failed with exit code $rc"
+    exit "$rc"
+}
+trap error_trap ERR
+
+guest_agent_owner_token=
+
+cleanup_guest_agent_guard() {
+    local rc=$?
+    trap - EXIT
+    if [[ -n "$guest_agent_owner_token" ]]; then
+        if ! /usr/local/sbin/jan-qga-guard release "$guest_agent_owner_token"; then
+            echo "WARNING: failed to release the QEMU guest-agent guard; watchdog will retry" >&2
+        fi
+    fi
+    exit "$rc"
+}
+trap cleanup_guest_agent_guard EXIT
+
+acquire_guest_agent_guard() {
+    guest_agent_owner_token=$(/usr/local/sbin/jan-qga-guard acquire "$$")
+    export JAN_QGA_GUARD_TOKEN=$guest_agent_owner_token
+}
+
+release_guest_agent_guard() {
+    /usr/local/sbin/jan-qga-guard release "$guest_agent_owner_token"
+    guest_agent_owner_token=
+    unset JAN_QGA_GUARD_TOKEN
+}
 
 
 cp -f -s -r /opt/jan/usr/* /usr/local
@@ -27,13 +58,20 @@ export DEBIAN_FRONTEND=noninteractive
 
 # Prevent qemu-guest-agent from restarting during package operations.
 # A restart kills the vm-exec connection we're running through.
-systemctl mask qemu-guest-agent.service 2>/dev/null || true
+# Clear a persistent mask left by an older interrupted setup, then use only a
+# runtime mask. The EXIT trap removes it on ordinary failures, and reboot
+# inherently removes it after power loss or a killed process.
+if [[ -n "${JAN_QGA_GUARD_TOKEN:-}" ]]; then
+    /usr/local/sbin/jan-qga-guard verify "$JAN_QGA_GUARD_TOKEN"
+else
+    acquire_guest_agent_guard
+fi
 
 apt-get update
 apt-get install -y \
   terminator rofi mousepad arandr dconf-cli zim \
   xfce4-fsguard-plugin xfce4-systemload-plugin xfce4-taskmanager \
-  links mc htop git curl powertop fish iftop iotop sshpass ncdu nano mosh ripgrep \
+  links mc htop git curl powertop fish iftop iotop sshpass ncdu nano mosh ripgrep starship \
   fonts-jetbrains-mono fonts-terminus console-setup \
   pwgen telnet jdupes just bats xdotool
 
@@ -101,8 +139,25 @@ VIDEOS=media/video
 EOF
 
 
-cp /home/jan /home/jan-backup-$(date +%Y-%m-%d-%H%M) -R
-chmod 0700 /home/jan-backup-* 2>/dev/null || true
+# Preserve the original pre-provisioning home once. A fixed staging destination
+# keeps repeated and interrupted runs bounded; an interrupted copy is rebuilt.
+jan_home_backup=/var/backups/jan-home-before-vm-xub26
+jan_home_backup_stage=${jan_home_backup}.partial
+jan_home_backup_payload=$jan_home_backup/home/jan
+jan_home_backup_marker=$jan_home_backup/.complete
+if [[ ! -e "$jan_home_backup_marker" ]]; then
+    rm -rf -- "$jan_home_backup_stage"
+    install -d -o root -g root -m 0700 "$jan_home_backup_stage/home/jan"
+    rsync -aHAXSx --numeric-ids --delete /home/jan/ "$jan_home_backup_stage/home/jan/"
+    chown root:root "$jan_home_backup_stage" "$jan_home_backup_stage/home"
+    chmod 0700 "$jan_home_backup_stage" "$jan_home_backup_stage/home"
+    touch "$jan_home_backup_stage/.complete"
+    rm -rf -- "$jan_home_backup"
+    mv "$jan_home_backup_stage" "$jan_home_backup"
+elif [[ ! -d "$jan_home_backup_payload" ]]; then
+    echo "ERROR: home-backup marker exists but $jan_home_backup_payload is missing" >&2
+    exit 1
+fi
 
 # Sync repo dotfiles into /home/jan and /root.
 #
@@ -143,25 +198,22 @@ EOF
 
 configure-user-dirs jan users /home/jan
 
-# Unmask and re-enable guest agent — it will start properly on reboot
-systemctl unmask qemu-guest-agent.service 2>/dev/null || true
-systemctl enable qemu-guest-agent.service 2>/dev/null || true
+# Re-enable the guest agent when this standalone script owns the guard. When
+# called by vm-ub26-xfce, the wrapper retains the lease and performs the final
+# enable/start verification after releasing it.
+if [[ -n "$guest_agent_owner_token" ]]; then
+    release_guest_agent_guard
+    systemctl enable qemu-guest-agent.service
+    systemctl start qemu-guest-agent.service
+    systemctl is-enabled --quiet qemu-guest-agent.service
+    systemctl is-active --quiet qemu-guest-agent.service
+fi
 
-# Create a boot service that ensures guest agents are always unmasked.
-# Prevents stale masks if the setup script is interrupted.
-cat > /etc/systemd/system/jan-unmask-guest-agents.service <<UNIT
-[Unit]
-Description=Ensure VM guest agents are unmasked and running
-After=multi-user.target
-
-[Service]
-Type=oneshot
-ExecStart=/bin/sh -c 'systemctl unmask qemu-guest-agent.service spice-vdagentd.service 2>/dev/null; systemctl start qemu-guest-agent.service spice-vdagentd.service 2>/dev/null; true'
-
-[Install]
-WantedBy=multi-user.target
-UNIT
+# Runtime masks and the EXIT cleanup supersede the older boot-time recovery
+# helper. Remove copies created by previous versions; the helper also had a
+# multi-user.target ordering cycle.
+systemctl disable jan-unmask-guest-agents.service 2>/dev/null || true
+rm -f /etc/systemd/system/jan-unmask-guest-agents.service
 systemctl daemon-reload
-systemctl enable jan-unmask-guest-agents.service
 
 echo =========== DONE ===========

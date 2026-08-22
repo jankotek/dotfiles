@@ -1,0 +1,44 @@
+#!/bin/bash
+# Create the regular jan account expected by the dotfiles setup scripts.
+#
+# The account is created with a locked password. Passwordless graphical login
+# is configured by the display manager, not by weakening the account itself.
+
+set -euo pipefail
+
+if (( EUID != 0 )); then
+    echo "ERROR: jan-create-user must run as root" >&2
+    exit 1
+fi
+
+readonly USER_NAME=jan
+readonly USER_GROUP=users
+readonly USER_HOME=/home/jan
+readonly USER_SHELL=/bin/bash
+
+if ! getent group "$USER_GROUP" >/dev/null; then
+    groupadd --system "$USER_GROUP"
+fi
+
+if getent passwd "$USER_NAME" >/dev/null; then
+    current_home=$(getent passwd "$USER_NAME" | cut -d: -f6)
+    if [[ "$current_home" != "$USER_HOME" ]]; then
+        echo "ERROR: existing $USER_NAME account uses $current_home, expected $USER_HOME" >&2
+        exit 1
+    fi
+
+    # Converge the account attributes needed by the rest of this repository.
+    # Do not modify an existing password or supplementary group membership.
+    usermod --gid "$USER_GROUP" --shell "$USER_SHELL" "$USER_NAME"
+else
+    useradd \
+        --create-home \
+        --home-dir "$USER_HOME" \
+        --gid "$USER_GROUP" \
+        --shell "$USER_SHELL" \
+        "$USER_NAME"
+fi
+
+install -d -m 0700 -o "$USER_NAME" -g "$USER_GROUP" "$USER_HOME"
+
+echo "Account $USER_NAME is ready at $USER_HOME"

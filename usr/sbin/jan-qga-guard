@@ -1,0 +1,206 @@
+#!/bin/bash
+# Serialize temporary QEMU guest-agent masks used during VM provisioning.
+
+set -Eeuo pipefail
+
+readonly GUARD_DIR=/run/jan-qga-guard
+readonly LOCK_FILE=$GUARD_DIR/lock
+readonly OWNER_FILE=$GUARD_DIR/owner
+
+if (( EUID != 0 )); then
+    echo "ERROR: jan-qga-guard must run as root" >&2
+    exit 1
+fi
+
+proc_starttime() {
+    local pid=$1 stat rest
+    local -a fields
+
+    [[ -r "/proc/$pid/stat" ]] || return 1
+    IFS= read -r stat < "/proc/$pid/stat"
+    rest=${stat##*) }
+    read -r -a fields <<< "$rest"
+    (( ${#fields[@]} >= 20 )) || return 1
+    printf '%s\n' "${fields[19]}"
+}
+
+owner_is_alive() {
+    local pid=$1 start=$2 stat rest
+    local -a fields
+
+    [[ -r "/proc/$pid/stat" ]] || return 1
+    IFS= read -r stat < "/proc/$pid/stat"
+    rest=${stat##*) }
+    read -r -a fields <<< "$rest"
+    (( ${#fields[@]} >= 20 )) || return 1
+    [[ "${fields[0]}" != Z && "${fields[0]}" != X && "${fields[19]}" == "$start" ]]
+}
+
+valid_token() {
+    [[ "$1" =~ ^[1-9][0-9]*-[0-9]+$ ]]
+}
+
+watchdog_unit_for() {
+    printf 'jan-qga-guard-%s.service\n' "$1"
+}
+
+acquire_guard() (
+    local owner_pid=$1 owner_start owner_token owner_tmp
+    local existing existing_pid existing_start watchdog_unit
+    local published=false
+
+    [[ "$owner_pid" =~ ^[1-9][0-9]*$ ]] || {
+        echo "ERROR: invalid QGA guard owner PID" >&2
+        return 2
+    }
+    owner_start=$(proc_starttime "$owner_pid") || {
+        echo "ERROR: QGA guard owner PID $owner_pid is not alive" >&2
+        return 1
+    }
+    owner_token="$owner_pid-$owner_start"
+    watchdog_unit=$(watchdog_unit_for "$owner_token")
+
+    install -d -m 0700 "$GUARD_DIR"
+    exec {lock_fd}> "$LOCK_FILE"
+
+    rollback_acquire() {
+        local rc=$?
+        trap - EXIT
+        if (( rc != 0 )) && [[ "$published" == true ]]; then
+            systemctl unmask --runtime qemu-guest-agent.service >/dev/null 2>&1 || true
+            if [[ -r "$OWNER_FILE" ]] && [[ $(< "$OWNER_FILE") == "$owner_token" ]]; then
+                rm -f "$OWNER_FILE"
+            fi
+            systemctl stop "$watchdog_unit" >/dev/null 2>&1 || true
+        fi
+        exit "$rc"
+    }
+    trap rollback_acquire EXIT
+
+    while true; do
+        flock "$lock_fd"
+        if [[ ! -r "$OWNER_FILE" ]]; then
+            break
+        fi
+
+        existing=$(< "$OWNER_FILE")
+        if valid_token "$existing"; then
+            existing_pid=${existing%%-*}
+            existing_start=${existing#*-}
+            if owner_is_alive "$existing_pid" "$existing_start"; then
+                flock -u "$lock_fd"
+                sleep 1
+                continue
+            fi
+        fi
+
+        # Recover state left by a dead owner before publishing our lease.
+        systemctl unmask --runtime qemu-guest-agent.service >/dev/null
+        rm -f "$OWNER_FILE"
+        break
+    done
+
+    # Clear persistent masks left by setup versions predating the runtime guard.
+    systemctl unmask qemu-guest-agent.service >/dev/null
+    owner_tmp="$GUARD_DIR/owner.tmp.$$"
+    printf '%s\n' "$owner_token" > "$owner_tmp"
+    mv -f "$owner_tmp" "$OWNER_FILE"
+    published=true
+
+    systemd-run --quiet --collect \
+        --unit "$watchdog_unit" \
+        --property Type=exec \
+        --property Restart=on-failure \
+        --property RestartSec=5s \
+        /usr/local/sbin/jan-qga-guard watchdog "$owner_pid" "$owner_start" "$owner_token"
+    systemctl mask --runtime qemu-guest-agent.service >/dev/null
+    printf '%s\n' "$owner_token"
+)
+
+release_guard() {
+    local owner_token=$1 watchdog_unit
+
+    valid_token "$owner_token" || {
+        echo "ERROR: invalid QGA guard owner token" >&2
+        return 2
+    }
+    watchdog_unit=$(watchdog_unit_for "$owner_token")
+
+    install -d -m 0700 "$GUARD_DIR"
+    exec {lock_fd}> "$LOCK_FILE"
+    flock "$lock_fd"
+    if [[ ! -r "$OWNER_FILE" ]] || [[ $(< "$OWNER_FILE") != "$owner_token" ]]; then
+        echo "ERROR: QGA guard lease is no longer owned by $owner_token" >&2
+        return 1
+    fi
+
+    systemctl unmask --runtime qemu-guest-agent.service >/dev/null
+    rm -f "$OWNER_FILE"
+    flock -u "$lock_fd"
+    systemctl stop "$watchdog_unit" >/dev/null 2>&1 || true
+}
+
+verify_guard() {
+    local owner_token=$1 owner_pid owner_start
+
+    valid_token "$owner_token" || return 2
+    owner_pid=${owner_token%%-*}
+    owner_start=${owner_token#*-}
+
+    install -d -m 0700 "$GUARD_DIR"
+    exec {lock_fd}> "$LOCK_FILE"
+    flock "$lock_fd"
+    [[ -r "$OWNER_FILE" ]] || return 1
+    [[ $(< "$OWNER_FILE") == "$owner_token" ]] || return 1
+    owner_is_alive "$owner_pid" "$owner_start"
+}
+
+watch_guard() {
+    local owner_pid=$1 owner_start=$2 owner_token=$3
+
+    [[ "$owner_pid" =~ ^[1-9][0-9]*$ ]] || return 2
+    [[ "$owner_start" =~ ^[0-9]+$ ]] || return 2
+    valid_token "$owner_token" || return 2
+    [[ "$owner_token" == "$owner_pid-$owner_start" ]] || return 2
+
+    # Unexpected signals must count as failures so Restart=on-failure restores
+    # the watchdog. A manager-requested stop still suppresses restart.
+    trap 'exit 1' HUP INT TERM PIPE
+
+    while owner_is_alive "$owner_pid" "$owner_start"; do
+        sleep 1
+    done
+
+    install -d -m 0700 "$GUARD_DIR"
+    exec {lock_fd}> "$LOCK_FILE"
+    flock "$lock_fd"
+    if [[ ! -r "$OWNER_FILE" ]] || [[ $(< "$OWNER_FILE") != "$owner_token" ]]; then
+        exit 0
+    fi
+
+    systemctl unmask --runtime qemu-guest-agent.service >/dev/null
+    rm -f "$OWNER_FILE"
+}
+
+case "${1:-}" in
+    acquire)
+        (( $# == 2 )) || { echo "Usage: jan-qga-guard acquire OWNER_PID" >&2; exit 2; }
+        acquire_guard "$2"
+        ;;
+    release)
+        (( $# == 2 )) || { echo "Usage: jan-qga-guard release OWNER_TOKEN" >&2; exit 2; }
+        release_guard "$2"
+        ;;
+    verify)
+        (( $# == 2 )) || { echo "Usage: jan-qga-guard verify OWNER_TOKEN" >&2; exit 2; }
+        verify_guard "$2"
+        ;;
+    watchdog)
+        (( $# == 4 )) || { echo "Usage: jan-qga-guard watchdog PID START TOKEN" >&2; exit 2; }
+        watch_guard "$2" "$3" "$4"
+        ;;
+    *)
+        echo "Usage: jan-qga-guard {acquire OWNER_PID|release OWNER_TOKEN|verify OWNER_TOKEN|watchdog PID START TOKEN}" >&2
+        exit 2
+        ;;
+esac
