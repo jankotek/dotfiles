@@ -31,9 +31,17 @@ load ../helpers
     assert_file_contains "$JAN_HOME/.config/fish/config.fish" 'starship init fish'
 }
 
-@test "profile sets GTK_THEME" {
+@test "profile does not force a GTK theme in Plasma" {
     assert_file "$JAN_HOME/.profile"
-    assert_file_contains "$JAN_HOME/.profile" 'GTK_THEME=Sweet-Dark-v40'
+    if grep -q '^[[:space:]]*export GTK_THEME=' "$JAN_HOME/.profile"; then
+        return 1
+    fi
+}
+
+@test "XFCE selects the intended GTK theme through xsettings" {
+    assert_file_contains \
+        "$JAN_HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml" \
+        'name="ThemeName" type="string" value="Sweet-Dark-v40"'
 }
 
 @test "git config has correct user name" {
@@ -59,11 +67,11 @@ load ../helpers
     assert_file_contains "$JAN_HOME/.config/user-dirs.dirs" 'XDG_MUSIC_DIR="\$HOME/media/music"'
     assert_file_contains "$JAN_HOME/.config/user-dirs.dirs" 'XDG_PICTURES_DIR="\$HOME/media/pic"'
     assert_file_contains "$JAN_HOME/.config/user-dirs.dirs" 'XDG_VIDEOS_DIR="\$HOME/media/video"'
-    ! [ -e "$JAN_HOME/Documents" ]
-    ! [ -e "$JAN_HOME/Downloads" ]
-    ! [ -e "$JAN_HOME/Music" ]
-    ! [ -e "$JAN_HOME/Pictures" ]
-    ! [ -e "$JAN_HOME/Public" ]
-    ! [ -e "$JAN_HOME/Templates" ]
-    ! [ -e "$JAN_HOME/Videos" ]
+    [[ ! -e "$JAN_HOME/Documents" ]]
+    [[ ! -e "$JAN_HOME/Downloads" ]]
+    [[ ! -e "$JAN_HOME/Music" ]]
+    [[ ! -e "$JAN_HOME/Pictures" ]]
+    [[ ! -e "$JAN_HOME/Public" ]]
+    [[ ! -e "$JAN_HOME/Templates" ]]
+    [[ ! -e "$JAN_HOME/Videos" ]]
 }

@@ -3,8 +3,9 @@
 #
 # On openSUSE, useradd merges /usr/etc/skel (vendor files) with /etc/skel
 # (administrator overrides). On Ubuntu, /etc/skel is the normal skeleton.
-# Copying without --delete preserves files owned by either the distribution or
-# the administrator that this repository does not manage.
+# Copying without --delete preserves paths that this repository does not
+# manage. A same-path file is an intentional administrator override and is
+# replaced by the repository version.
 
 set -Eeuo pipefail
 
@@ -29,10 +30,10 @@ fi
 
 install -d -o root -g root -m 0755 "$DESTINATION"
 
-# Deliberately omit owner/group preservation: a checkout normally belongs to
-# the administrator, while skeleton files must be root-owned. Keep modes so
-# ~/.local/bin helpers and desktop launchers remain executable.
-rsync -rlptD "$SOURCE_DIR/" "$DESTINATION/"
+# A checkout normally belongs to the administrator, while skeleton files must
+# be root-owned. --chown also repairs pre-existing managed paths with unsafe
+# ownership; archive mode keeps executable helpers and desktop launchers.
+rsync -a --chown=root:root "$SOURCE_DIR/" "$DESTINATION/"
 
 # Git cannot retain empty directories. These become part of every new home and
 # agree with .config/user-dirs.dirs and /etc/xdg/user-dirs.defaults.

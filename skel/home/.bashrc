@@ -1,4 +1,13 @@
+# shellcheck shell=bash
 # based on Derek Taylor (DistroTube)
+
+# Bash may read ~/.bashrc for a noninteractive command started by sshd. Keep
+# aliases, prompt hooks, shopt changes, and application initialization out of
+# provisioning and file-transfer commands.
+case $- in
+    *i*) ;;
+    *) return ;;
+esac
 
 export TERM="xterm-256color"
 export EDITOR="mcedit"
@@ -41,7 +50,7 @@ shopt -s checkwinsize # checks term size when bash regains control
 
 cdown () {
     N=$1
-  while [[ $((--N)) >  0 ]]
+  while (( --N > 0 ))
     do
         echo "$N" |  figlet -c | lolcat &&  sleep 1
     done
