@@ -58,6 +58,16 @@ load ../helpers
         '<property name="primary" type="bool" value="true"/>'
 }
 
+@test "VM cleanup removes packaged wallpapers and backdrops" {
+    local directory
+    for directory in \
+        /usr/share/wallpapers \
+        /usr/share/backgrounds \
+        /usr/share/xfce4/backdrops; do
+        [[ ! -d $directory || -z $(find "$directory" -mindepth 1 -print -quit) ]]
+    done
+}
+
 @test "xfce4 panel plugins are installed" {
     dpkg -s xfce4-systemload-plugin
     assert_file /usr/lib/x86_64-linux-gnu/xfce4/panel/plugins/libsystemload.so

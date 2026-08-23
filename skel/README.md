@@ -16,6 +16,9 @@ The skeleton does not force `GTK_THEME`, so GTK applications in Plasma retain
 the distribution's KDE/GTK integration. XFCE obtains packaged themes, icons,
 backdrops, and desktop data under `/usr/share`; its per-user panel, power, and
 appearance choices in this skeleton intentionally override `/etc/xdg/xfce4`.
+The skeleton does not contain per-monitor XFCE wallpaper state. VM provisioning
+installs `vm-cleanup.service`, which removes packaged wallpapers and backdrops
+during setup and on every boot.
 
 On openSUSE Tumbleweed, `useradd` combines vendor files from `/usr/etc/skel`
 with administrator overrides in `/etc/skel`. On Ubuntu, `/etc/skel` itself
