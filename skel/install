@@ -1,0 +1,54 @@
+#!/bin/bash
+# Install the repository's curated new-user home skeleton.
+#
+# On openSUSE, useradd merges /usr/etc/skel (vendor files) with /etc/skel
+# (administrator overrides). On Ubuntu, /etc/skel is the normal skeleton.
+# Copying without --delete preserves files owned by either the distribution or
+# the administrator that this repository does not manage.
+
+set -Eeuo pipefail
+
+if (( EUID != 0 )); then
+    echo "ERROR: skel/install must run as root" >&2
+    exit 1
+fi
+
+SKEL_DIR=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+readonly SKEL_DIR
+readonly SOURCE_DIR=$SKEL_DIR/home
+readonly DESTINATION=${1:-/etc/skel}
+
+if [[ ! -d $SOURCE_DIR ]]; then
+    echo "ERROR: skeleton payload is missing: $SOURCE_DIR" >&2
+    exit 1
+fi
+if ! command -v rsync >/dev/null; then
+    echo "ERROR: rsync is required to install the user skeleton" >&2
+    exit 1
+fi
+
+install -d -o root -g root -m 0755 "$DESTINATION"
+
+# Deliberately omit owner/group preservation: a checkout normally belongs to
+# the administrator, while skeleton files must be root-owned. Keep modes so
+# ~/.local/bin helpers and desktop launchers remain executable.
+rsync -rlptD "$SOURCE_DIR/" "$DESTINATION/"
+
+# Git cannot retain empty directories. These become part of every new home and
+# agree with .config/user-dirs.dirs and /etc/xdg/user-dirs.defaults.
+while IFS= read -r relative_dir; do
+    [[ -n $relative_dir && $relative_dir != \#* ]] || continue
+    install -d -o root -g root -m 0755 "$DESTINATION/$relative_dir"
+done <<'EOF'
+desk
+down
+doc
+doc/templates
+media
+media/share
+media/music
+media/pic
+media/video
+EOF
+
+echo "Installed the new-user skeleton in $DESTINATION"

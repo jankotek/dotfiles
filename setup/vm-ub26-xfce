@@ -66,8 +66,6 @@ export DEBIAN_FRONTEND=noninteractive
 # Make repository helpers available before invoking either setup script.
 cp -f -s -r /opt/jan/usr/* /usr/local
 
-/opt/jan/usr/sbin/jan-create-user
-
 # Package operations may otherwise restart qemu-guest-agent and sever the
 # vm-exec connection carrying this setup process. vm-xub26 applies the same
 # guard. Clear masks left by older setup versions, then make this one
@@ -93,6 +91,11 @@ apt-get install -y --no-install-recommends \
     xinit \
     xserver-xorg-core \
     xserver-xorg-input-libinput
+
+# Install the curated skeleton before creating jan so this path exercises the
+# same defaults that all future VM accounts receive.
+/opt/jan/skel/install
+/opt/jan/usr/sbin/jan-create-user
 
 # Apply the existing Xubuntu 26.04 package pruning, dotfiles, user directories,
 # VM agents, and system services now that its formerly implicit prerequisites

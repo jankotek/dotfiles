@@ -37,9 +37,13 @@ zypper -n --no-gpg-checks refresh
 # system services.
 zypper -n install --no-recommends \
     terminator rofi mousepad arandr \
-    mc htop git curl powertop fish iftop iotop ncdu nano mosh ripgrep \
+    xfce4-fsguard-plugin xfce4-systemload-plugin xfce4-taskmanager \
+    mc htop git curl powertop fish iftop iotop ncdu nano mosh ripgrep rsync \
     pwgen telnet jdupes just bats zim \
     jetbrains-mono-fonts terminus-bitmap-fonts
+
+# Seed future XFCE VM accounts while preserving /usr/etc/skel vendor files.
+/opt/jan/skel/install
 
 # ---------- Cross-distro jan-* helpers ----------
 # Each helper detects distro internally; only kernel-tweaks has a real

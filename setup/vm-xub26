@@ -71,9 +71,13 @@ apt-get update
 apt-get install -y \
   terminator rofi mousepad arandr dconf-cli zim \
   xfce4-fsguard-plugin xfce4-systemload-plugin xfce4-taskmanager \
-  links mc htop git curl powertop fish iftop iotop sshpass ncdu nano mosh ripgrep starship \
+  links mc htop git curl powertop fish iftop iotop sshpass ncdu nano mosh ripgrep rsync starship \
   fonts-jetbrains-mono fonts-terminus console-setup \
   pwgen telnet jdupes just bats xdotool
+
+# Seed future VM accounts. The XFCE files are ignored by Plasma, and VM-only
+# display handling is a separate XFCE autostart entry.
+/opt/jan/skel/install
 
 # Guest agents — install but don't restart (masked above)
 apt-get install -y spice-vdagent qemu-guest-agent

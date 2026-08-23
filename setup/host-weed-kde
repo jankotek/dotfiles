@@ -69,6 +69,11 @@ zypper -n install --no-recommends \
     NetworkManager-tui jetbrains-mono-fonts \
     java-17-openjdk-devel maven
 
+# Seed future accounts (including lab users) with the curated common,
+# Plasma-safe, and XFCE-safe defaults. openSUSE continues to merge its vendor
+# files from /usr/etc/skel; this installs only administrator overrides.
+"${REPO_DIR}/skel/install"
+
 # Dev toolchains — best-effort (package names drift on a rolling distro;
 # portable tools live in /opt via jan-update-opt instead).
 echo "==> Installing dev toolchains (best-effort)"
