@@ -1,0 +1,266 @@
+#!/bin/bash
+# Create lab1 through lab10 as graphical, non-administrative accounts.
+#
+# The accounts may run private qemu:///session VMs. They are deliberately not
+# members of libvirt/kvm, and PolicyKit denies qemu:///system, NetworkManager,
+# and Bluetooth administration. BlueZ D-Bus access and su are denied as well.
+# This blocks normal desktop Bluetooth use, but is not an LSM sandbox against
+# a hostile program opening raw AF_BLUETOOTH sockets directly.
+
+set -Eeuo pipefail
+
+readonly LAB_GROUP=lab
+readonly REGULAR_GROUP=users
+readonly PASSWORD_HELPER=/usr/local/sbin/jan-randomize-user-passwords
+readonly PAM_MARKER='# Managed by jan-create-lab-users.'
+readonly POLKIT_RULE=/etc/polkit-1/rules.d/00-jan-lab-restrictions.rules
+readonly DBUS_RULE=/etc/dbus-1/system.d/90-jan-lab-restrictions.conf
+readonly SUDO_RULE=/etc/sudoers.d/99-jan-lab-deny
+readonly -a LAB_USERS=(lab{1..10})
+
+error_trap() {
+    local rc=$?
+    echo >&2 "${BASH_SOURCE[1]}:${BASH_LINENO[0]}: Command \`$BASH_COMMAND\` failed with exit code $rc"
+    exit "$rc"
+}
+trap error_trap ERR
+
+if (( EUID != 0 )); then
+    echo "ERROR: jan-create-lab-users must run as root" >&2
+    exit 1
+fi
+
+exec 8>/run/lock/jan-create-lab-users.lock
+if ! flock -n 8; then
+    echo "ERROR: another jan-create-lab-users instance is already running" >&2
+    exit 1
+fi
+
+# shellcheck source=/dev/null
+source /etc/os-release
+if [[ ${ID:-} != opensuse-tumbleweed ]]; then
+    echo "ERROR: jan-create-lab-users currently targets openSUSE Tumbleweed" >&2
+    exit 1
+fi
+
+if [[ ! -x $PASSWORD_HELPER ]]; then
+    echo "ERROR: missing executable $PASSWORD_HELPER" >&2
+    echo "       deploy the repository's usr/ tree to /usr/local first" >&2
+    exit 1
+fi
+
+echo "==> Installing password and per-user virtualization tools" >&2
+zypper -n install --no-recommends \
+    pwgen \
+    libvirt-client \
+    libvirt-daemon-qemu \
+    qemu-x86 \
+    qemu-tools >&2
+
+for required_command in chage pgrep useradd usermod pwgen virsh visudo; do
+    if ! command -v "$required_command" >/dev/null; then
+        echo "ERROR: required command is missing: $required_command" >&2
+        exit 1
+    fi
+done
+
+getent group "$REGULAR_GROUP" >/dev/null || groupadd "$REGULAR_GROUP"
+if getent group "$LAB_GROUP" >/dev/null; then
+    lab_gid=$(getent group "$LAB_GROUP" | cut -d: -f3)
+    IFS=, read -r -a existing_lab_members <<< \
+        "$(getent group "$LAB_GROUP" | cut -d: -f4)"
+    for member in "${existing_lab_members[@]}"; do
+        [[ -z $member || $member =~ ^lab([1-9]|10)$ ]] || {
+            echo "ERROR: existing group $LAB_GROUP contains non-lab user $member" >&2
+            exit 1
+        }
+    done
+    while IFS=: read -r primary_user _ _ primary_gid _; do
+        if [[ $primary_gid == "$lab_gid" \
+            && ! $primary_user =~ ^lab([1-9]|10)$ ]]; then
+            echo "ERROR: existing group $LAB_GROUP is primary for $primary_user" >&2
+            exit 1
+        fi
+    done < <(getent passwd)
+else
+    groupadd --system "$LAB_GROUP"
+fi
+
+# Group changes affect only future processes. Refuse to claim that an existing
+# account has been restricted while a desktop, shell, user manager, VM, or
+# cached privileged process still holds its old supplementary groups or open
+# descriptors. Freshly created accounts have no processes and pass naturally.
+for user in "${LAB_USERS[@]}"; do
+    if getent passwd "$user" >/dev/null && pgrep -u "$user" >/dev/null; then
+        echo "ERROR: $user has running processes; log it out before convergence" >&2
+        exit 1
+    fi
+done
+
+echo "==> Creating restricted lab accounts" >&2
+for user in "${LAB_USERS[@]}"; do
+    home_dir="/home/$user"
+    if getent passwd "$user" >/dev/null; then
+        current_home=$(getent passwd "$user" | cut -d: -f6)
+        if [[ $current_home != "$home_dir" ]]; then
+            echo "ERROR: existing $user uses $current_home, expected $home_dir" >&2
+            exit 1
+        fi
+        usermod \
+            --gid "$REGULAR_GROUP" \
+            --groups "$LAB_GROUP" \
+            --shell /bin/bash \
+            "$user"
+    else
+        useradd \
+            --create-home \
+            --home-dir "$home_dir" \
+            --gid "$REGULAR_GROUP" \
+            --groups "$LAB_GROUP" \
+            --shell /bin/bash \
+            "$user"
+    fi
+    # Current Tumbleweed chage supports these short forms (and intentionally
+    # has no minimum-days setter). Clear account/password inactivity and make
+    # the newly assigned password usable for the normal long-lived interval.
+    chage -E -1 -I -1 -M 99999 -W 7 "$user"
+    install -d -m 0700 -o "$user" -g "$REGULAR_GROUP" "$home_dir"
+done
+
+echo "==> Denying su for lab accounts" >&2
+install_pam_override() {
+    local service=$1
+    local destination="/etc/pam.d/$service"
+    local vendor=
+
+    for candidate in "/usr/etc/pam.d/$service" "/usr/lib/pam.d/$service"; do
+        if [[ -r $candidate ]]; then
+            vendor=$candidate
+            break
+        fi
+    done
+    if [[ -z $vendor ]]; then
+        echo "ERROR: vendor PAM service is missing: $service" >&2
+        return 1
+    fi
+    if [[ -e $destination ]] && [[ $(head -n 1 "$destination") != "$PAM_MARKER" ]]; then
+        echo "ERROR: refusing to replace administrator-managed $destination" >&2
+        return 1
+    fi
+
+    {
+        printf '%s\n' "$PAM_MARKER"
+        # pam_wheel checks the invoking account's groups. With `deny`, members
+        # of lab are rejected for every su target before password entry.
+        echo 'auth requisite pam_wheel.so deny group=lab'
+        cat "$vendor"
+    } > "$destination.new"
+    chmod 0644 "$destination.new"
+    mv -f "$destination.new" "$destination"
+}
+install_pam_override su
+install_pam_override su-l
+
+echo "==> Installing PolicyKit, D-Bus, and sudo restrictions" >&2
+install -d -m 0755 /etc/polkit-1/rules.d /etc/dbus-1/system.d /etc/sudoers.d
+
+assert_managed_or_absent() {
+    local destination=$1 marker=$2
+    if [[ -e $destination ]] && [[ $(head -n 1 "$destination") != "$marker" ]]; then
+        echo "ERROR: refusing to replace administrator-managed $destination" >&2
+        return 1
+    fi
+}
+
+readonly POLKIT_MARKER='// Managed by jan-create-lab-users.'
+readonly DBUS_MARKER='<!-- Managed by jan-create-lab-users. -->'
+readonly SUDO_MARKER='# Managed by jan-create-lab-users.'
+assert_managed_or_absent "$POLKIT_RULE" "$POLKIT_MARKER"
+assert_managed_or_absent "$DBUS_RULE" "$DBUS_MARKER"
+assert_managed_or_absent "$SUDO_RULE" "$SUDO_MARKER"
+
+polkit_stage=$(mktemp "${POLKIT_RULE}.new.XXXXXX")
+dbus_stage=$(mktemp "${DBUS_RULE}.new.XXXXXX")
+sudo_stage=$(mktemp "${SUDO_RULE}.new.XXXXXX")
+cleanup_policy_stages() {
+    local stage
+    for stage in "${polkit_stage:-}" "${dbus_stage:-}" "${sudo_stage:-}"; do
+        [[ -z $stage ]] || rm -f -- "$stage"
+    done
+}
+trap cleanup_policy_stages EXIT
+
+cat > "$polkit_stage" <<'EOF'
+// Managed by jan-create-lab-users.
+polkit.addRule(function(action, subject) {
+    if (!subject.isInGroup("lab")) {
+        return polkit.Result.NOT_HANDLED;
+    }
+
+    if (action.id.indexOf("org.freedesktop.NetworkManager.") === 0 ||
+        action.id.indexOf("org.bluez.") === 0 ||
+        action.id.indexOf("org.blueman.") === 0 ||
+        action.id.indexOf("org.libvirt.") === 0) {
+        return polkit.Result.NO;
+    }
+
+    return polkit.Result.NOT_HANDLED;
+});
+EOF
+chmod 0644 "$polkit_stage"
+
+cat > "$dbus_stage" <<'EOF'
+<!-- Managed by jan-create-lab-users. -->
+<!DOCTYPE busconfig PUBLIC
+ "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<busconfig>
+  <policy group="lab">
+    <deny send_destination="org.bluez"/>
+    <deny receive_sender="org.bluez"/>
+  </policy>
+</busconfig>
+EOF
+chmod 0644 "$dbus_stage"
+
+cat > "$sudo_stage" <<'EOF'
+# Managed by jan-create-lab-users.
+%lab ALL=(ALL:ALL) !ALL
+EOF
+chmod 0440 "$sudo_stage"
+# Tumbleweed keeps its vendor policy at /usr/etc/sudoers and searches it only
+# when /etc/sudoers is absent. Validate our standalone drop-in explicitly;
+# `visudo -c -f /etc/sudoers` would incorrectly require an admin override.
+visudo -c -f "$sudo_stage" >&2
+
+# Activate only complete files. The whole setup lock prevents another script
+# instance from racing these same-directory atomic renames.
+mv -f -- "$polkit_stage" "$POLKIT_RULE"
+polkit_stage=
+mv -f -- "$dbus_stage" "$DBUS_RULE"
+dbus_stage=
+mv -f -- "$sudo_stage" "$SUDO_RULE"
+sudo_stage=
+
+# Ask the running system bus to reread the BlueZ policy without interrupting
+# current desktop sessions. If a live bus cannot reload, fail instead of
+# assigning usable passwords under an inactive restriction. An offline image
+# naturally reads the file when its system bus first starts.
+if [[ -S /run/dbus/system_bus_socket ]]; then
+    busctl call org.freedesktop.DBus /org/freedesktop/DBus \
+        org.freedesktop.DBus ReloadConfig >/dev/null
+fi
+
+# None of these accounts may inherit privileged supplementary groups. The
+# exact set is asserted rather than merely deleting today's known group names.
+for user in "${LAB_USERS[@]}"; do
+    if [[ $(id -Gn "$user") != "$REGULAR_GROUP $LAB_GROUP" \
+        && $(id -Gn "$user") != "$LAB_GROUP $REGULAR_GROUP" ]]; then
+        echo "ERROR: unexpected groups remain on $user: $(id -Gn "$user")" >&2
+        exit 1
+    fi
+done
+
+echo "==> Assigning fresh lab passwords" >&2
+trap - EXIT
+exec "$PASSWORD_HELPER" "${LAB_USERS[@]}"
