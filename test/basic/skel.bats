@@ -83,7 +83,7 @@ load ../helpers
     assert_file_contains "$layout" \
         'preferred://filemanager,applications:org.kde.konsole.desktop'
     assert_file_contains "$layout" \
-        'clock.writeConfig("customDateFormat", "mm-dd ddd")'
+        'clock.writeConfig("customDateFormat", "MM-dd ddd")'
     assert_file_contains "$layout" \
         'clock.writeConfig("use24hFormat", 2)'
 }

@@ -22,7 +22,7 @@ panel.addWidget("org.kde.plasma.systemtray")
 
 var clock = panel.addWidget("org.kde.plasma.digitalclock")
 clock.currentConfigGroup = ["Appearance"]
-clock.writeConfig("customDateFormat", "mm-dd ddd")
+clock.writeConfig("customDateFormat", "MM-dd ddd")
 clock.writeConfig("dateFormat", "custom")
 clock.writeConfig("fontWeight", 400)
 clock.writeConfig("use24hFormat", 2)
