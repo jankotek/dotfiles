@@ -2,7 +2,7 @@
 [keybindings]
 [profiles]
   [[default]]
-    font = JetBrains Mono Light 10
+    font = JetBrains Mono 10
     foreground_color = "#ffffff"
     show_titlebar = False
     scrollbar_position = hidden

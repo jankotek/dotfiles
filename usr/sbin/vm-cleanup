@@ -1,6 +1,35 @@
 #!/bin/bash
 
+set -euo pipefail
+
 rm -rf /usr/share/wallpapers/* /usr/share/backgrounds/* /usr/share/xfce4/backdrops/*
+
+# Plasma look-and-feel packages commonly force the image wallpaper provider in
+# their first-login layout script. Once packaged images are removed that leaves
+# a broken provider instead of a wallpaper-free desktop. Change the system
+# first-run default for every Plasma look-and-feel to a solid black color. This
+# is applied before graphical.target and does not enforce settings after the
+# user changes them.
+while IFS= read -r -d '' plasma_layout; do
+    if grep -Fq "wallpaperPlugin = 'org.kde.image';" "$plasma_layout"; then
+        sed -i \
+            -e "s/wallpaperPlugin = 'org\.kde\.image';/wallpaperPlugin = 'org.kde.color';/" \
+            -e "/wallpaperPlugin = 'org.kde.color';/a\\
+    desktopsArray[j].currentConfigGroup = ['Wallpaper', 'org.kde.color', 'General'];\\
+    desktopsArray[j].writeConfig('Color', '#000000');" \
+            "$plasma_layout"
+    fi
+done < <(find /usr/share/plasma/look-and-feel -type f \
+    -path '*/contents/layouts/org.kde.plasma.desktop-layout.js' -print0 \
+    2>/dev/null)
+
+# Distribution Konsole profiles are read-only in the profile editor and add
+# unwanted entries alongside the curated profiles in /usr/local/share. Keep
+# Konsole's built-in color schemes: dark.profile and white.profile reference
+# its exact WhiteOnBlack and BlackOnWhite palettes.
+if [[ -d /usr/share/konsole ]]; then
+    find /usr/share/konsole -maxdepth 1 -type f -name '*.profile' -delete
+fi
 rm  -f /usr/bin/xfce4-display-settings /usr/bin/tumblerd /usr/lib64/tumbler-1/tumblerd
 
 rm -f /cleanup-zeros /home/cleanup-zeroes /home/jan/cleanup-zeroes
@@ -9,10 +38,13 @@ rm -rf /lib/firmware/* /usr/lib/firmware/*
 
 rm -rf /usr/share/doc/*
 
-jan-ubuntu-remove-older-kernel
-
-apt autoremove -y
-apt clean
+if command -v apt-get >/dev/null; then
+    jan-ubuntu-remove-older-kernel
+    apt-get autoremove -y
+    apt-get clean
+elif command -v zypper >/dev/null; then
+    zypper --non-interactive clean --all
+fi
 
 # needed for systemd, otherwise it will show as failed
 exit 0

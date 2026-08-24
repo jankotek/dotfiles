@@ -24,6 +24,30 @@ load ../helpers
     assert_command konsole
 }
 
+@test "Sweet palette is the referenced KDE system default" {
+    [[ -L /usr/local/etc/xdg/kdeglobals ]]
+    [[ $(readlink /usr/local/etc/xdg/kdeglobals) == \
+        /usr/local/share/color-schemes/Sweet-dark.colors ]]
+    assert_file /usr/local/share/color-schemes/Sweet-dark.colors
+    [[ -L /etc/profile.d/jan-xdg-local-first.sh ]]
+    local configured_dirs
+    configured_dirs=$(XDG_CONFIG_DIRS=/etc/xdg:/usr/local/etc/xdg:/usr/etc/xdg \
+        sh -c '. /etc/profile.d/jan-xdg-local-first.sh; printf "%s" "$XDG_CONFIG_DIRS"')
+    [[ $configured_dirs == \
+        /usr/local/etc/xdg:/etc/xdg:/usr/etc/xdg ]]
+}
+
+@test "system monospace defaults to JetBrains Mono" {
+    [[ $(fc-match --format '%{family}\n' monospace | head -1) == \
+        "JetBrains Mono" ]]
+    assert_file_contains \
+        /usr/local/etc/xdg/katerc \
+        '^Text Font=JetBrains Mono,10,'
+    assert_file_contains \
+        /usr/local/etc/xdg/kwriterc \
+        '^Text Font=JetBrains Mono,10,'
+}
+
 @test "dolphin is installed" {
     assert_command dolphin
 }

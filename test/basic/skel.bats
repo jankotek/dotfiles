@@ -27,6 +27,67 @@ load ../helpers
     '
 }
 
+@test "Plasma defaults match the XFCE Sweet appearance" {
+    local kdeglobals="$OPT_JAN/skel/home/.config/kdeglobals"
+    assert_file_contains "$kdeglobals" '^ColorScheme=Sweet-dark$'
+    assert_file_contains "$kdeglobals" '^Theme=Sweet-Purple$'
+    if grep -q '^\[Colors:' "$kdeglobals"; then
+        return 1
+    fi
+}
+
+@test "Konsole defaults to the pure black dark profile" {
+    assert_file_contains \
+        "$OPT_JAN/skel/home/.config/konsolerc" \
+        '^DefaultProfile=dark.profile$'
+    assert_file_contains \
+        "$OPT_JAN/usr/share/konsole/dark.profile" \
+        '^ColorScheme=WhiteOnBlack$'
+    assert_file_contains \
+        "$OPT_JAN/usr/share/konsole/white.profile" \
+        '^ColorScheme=BlackOnWhite$'
+    assert_file_contains \
+        "$OPT_JAN/usr/share/konsole/dark.profile" \
+        '^Font=JetBrains Mono,10,'
+    assert_file_contains \
+        "$OPT_JAN/usr/share/konsole/dark.profile" \
+        '^WordModeAscii=true$'
+}
+
+@test "monospace defaults use JetBrains Mono 10" {
+    assert_file_contains \
+        "$OPT_JAN/usr/share/color-schemes/Sweet-dark.colors" \
+        '^fixed=JetBrains Mono,10,'
+    assert_file_contains \
+        "$OPT_JAN/usr/etc/xdg/katerc" \
+        '^Text Font Features=liga=1,calt=1$'
+    assert_file_contains \
+        "$OPT_JAN/usr/etc/xdg/kwriterc" \
+        '^Text Font Features=liga=1,calt=1$'
+    assert_file_contains \
+        "$OPT_JAN/skel/home/.config/dconf-import.ini" \
+        "monospace-font-name='JetBrains Mono 10'"
+    assert_file \
+        "$OPT_JAN/usr/share/fontconfig/conf.avail/60-jan-jetbrains-mono.conf"
+}
+
+@test "Plasma panel defaults reproduce the curated VM layout" {
+    local layout="$OPT_JAN/skel/home/.local/share/plasma/layout-templates/org.opensuse.desktop.defaultPanel/contents/layout.js"
+    local metadata="$OPT_JAN/skel/home/.local/share/plasma/layout-templates/org.opensuse.desktop.defaultPanel/metadata.json"
+    assert_file "$layout"
+    assert_file "$metadata"
+    assert_file_contains "$layout" '^panel.location = "top"$'
+    assert_file_contains "$layout" '^panel.height = 32$'
+    assert_file_contains "$layout" \
+        'addWidget("org.kde.plasma.taskmanager")'
+    assert_file_contains "$layout" \
+        'preferred://filemanager,applications:org.kde.konsole.desktop'
+    assert_file_contains "$layout" \
+        'clock.writeConfig("customDateFormat", "mm-dd ddd")'
+    assert_file_contains "$layout" \
+        'clock.writeConfig("use24hFormat", 2)'
+}
+
 @test "skeleton has no account-specific path or generated desktop state" {
     if grep -R -F /home/jan "$OPT_JAN/skel/home"; then
         return 1

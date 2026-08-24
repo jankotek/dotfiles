@@ -68,6 +68,28 @@ load ../helpers
     done
 }
 
+@test "VM cleanup gives Plasma a monitor-independent black background" {
+    local layout
+    while IFS= read -r -d '' layout; do
+        ! grep -Fq "wallpaperPlugin = 'org.kde.image';" "$layout"
+        assert_file_contains "$layout" \
+            "wallpaperPlugin = 'org.kde.color';"
+        assert_file_contains "$layout" \
+            "writeConfig('Color', '#000000');"
+    done < <(find /usr/share/plasma/look-and-feel -type f \
+        -path '*/contents/layouts/org.kde.plasma.desktop-layout.js' -print0 \
+        2>/dev/null)
+}
+
+@test "VM cleanup removes distro Konsole profiles" {
+    if [[ -d /usr/share/konsole ]]; then
+        [[ -z $(find /usr/share/konsole -maxdepth 1 -type f \
+            -name '*.profile' -print -quit) ]]
+    fi
+    assert_file /usr/local/share/konsole/dark.profile
+    assert_file /usr/local/share/konsole/white.profile
+}
+
 @test "xfce4 panel plugins are installed" {
     dpkg -s xfce4-systemload-plugin
     assert_file /usr/lib/x86_64-linux-gnu/xfce4/panel/plugins/libsystemload.so

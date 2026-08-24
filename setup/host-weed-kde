@@ -46,6 +46,19 @@ REPO_DIR="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 echo "==> Symlinking ${REPO_DIR}/usr -> /usr/local"
 cp -f -s -r "${REPO_DIR}/usr/"* /usr/local
 
+# Keep the Sweet palette in one installed color-scheme file. KConfig needs the
+# palette groups in its global cascade as well as the ColorScheme name in each
+# user's kdeglobals, so expose the same file there rather than copying it into
+# every home directory.
+install -d -o root -g root -m 0755 /usr/local/etc /usr/local/etc/xdg
+ln -sfn /usr/local/share/color-schemes/Sweet-dark.colors \
+    /usr/local/etc/xdg/kdeglobals
+ln -sfn /usr/local/share/jan-xdg-local-first.sh \
+    /etc/profile.d/jan-xdg-local-first.sh
+ln -sfn /usr/local/share/fontconfig/conf.avail/60-jan-jetbrains-mono.conf \
+    /etc/fonts/conf.d/60-jan-jetbrains-mono.conf
+fc-cache -f
+
 # The jan-* helpers now live in /usr/local/{sbin,bin}. Make sure they're on
 # PATH for the rest of this script regardless of how it was invoked (a
 # locked-down sudo secure_path or a guest-agent exec may omit /usr/local).

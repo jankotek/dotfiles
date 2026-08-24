@@ -8,7 +8,7 @@
   <property name="Gtk" type="empty">
     <property name="CursorThemeName" type="string" value="DMZhaloG"/>
     <property name="CursorThemeSize" type="int" value="48"/>
-    <property name="MonospaceFontName" type="string" value="JetBrains Mono Light 11"/>
+    <property name="MonospaceFontName" type="string" value="JetBrains Mono 10"/>
   </property>
   <property name="Xfce" type="empty">
     <property name="LastCustomDPI" type="int" value="120"/>
