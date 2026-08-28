@@ -5,10 +5,7 @@ set -o pipefail
 # GitHub API token (optional, increases rate limit from 60 to 5000 requests/hour)
 GITHUB_API_TOKEN="${GITHUB_API_TOKEN:-}"
 
-# Determine base directory from JAN_OPT or default to /opt
 BASE_DIR="${JAN_OPT:-/opt}"
-
-# Check if target location is writeable
 if [ ! -w "$BASE_DIR" ]; then
     echo "✗ Error: $BASE_DIR is not writeable by current user"
     echo "  Set JAN_OPT to a writeable directory or run with appropriate permissions"
@@ -17,6 +14,7 @@ fi
 
 DESKTOP_DIR="$BASE_DIR/applications"
 mkdir -p "$DESKTOP_DIR"
+chmod 0755 "$BASE_DIR" "$DESKTOP_DIR"
 
 # Helper function for GitHub API calls with optional authentication
 github_api() {
@@ -25,6 +23,26 @@ github_api() {
     else
         curl -sL "$@"
     fi
+}
+
+# GitHub may return either pretty-printed or compact JSON depending on the
+# client/CDN path. Normalize both forms before extracting release metadata;
+# target systems should not need jq just to run this downloader.
+github_release_tag() {
+    tr -d '\n\r' <<<"$1" \
+        | grep -oP '"tag_name"\s*:\s*"\K[^"]+' \
+        | head -1
+}
+
+# github_asset_sha256 <release-json> <asset-filename>
+# GitHub calculates a SHA-256 digest for every release asset. Match the exact
+# asset name and take the first digest that follows it (the nested uploader
+# object between those fields is why a line-oriented parser is insufficient).
+github_asset_sha256() {
+    local release=$1 file=$2
+    tr -d '\n\r' <<<"$release" \
+        | grep -oP "\"name\"\\s*:\\s*\"\\Q${file}\\E\".*?\"digest\"\\s*:\\s*\"sha256:\\K[0-9a-f]{64}" \
+        | head -1
 }
 
 # ---------- checksum verification ----------
@@ -50,7 +68,10 @@ fetch_checksum() {
         }
         {
             for (i = 1; i <= NF; i++)
-                if ($i ~ ("^[0-9a-fA-F]{" len "}$")) { print tolower($i); exit }
+                if (length($i) == len && $i ~ /^[0-9a-fA-F]+$/) {
+                    print tolower($i)
+                    exit
+                }
         }'
 }
 
@@ -77,46 +98,137 @@ verify_file() {
     echo "  ✓ $algo verified"
 }
 
-# 6th arg: expected checksum for the archive ("<sha256>" or "sha512:<hex>").
-# Empty means the publisher ships no checksum — install proceeds with a
-# loud warning (currently only Obsidian).
-download_and_extract() {
-    local name=$1 dir=$2 url=$3 version=$4 strip=${5:-1} expected=${6:-}
-    local version_file="$BASE_DIR/$dir/.version"
-    local current_version=""
+installed_binary_matches() {
+    local file=$1 digest_file=$2 expected actual
+    [ -f "$file" ] && [ ! -L "$file" ] && [ -x "$file" ] && [ -s "$file" ] || return 1
+    [ -s "$digest_file" ] || return 1
+    expected=$(<"$digest_file")
+    [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || return 1
+    actual=$(sha256sum "$file" | awk '{print $1}')
+    [ "$actual" = "$expected" ]
+}
 
-    if [ -z "$version" ]; then
-        echo "✗ Failed to fetch version for $name"
+make_shared_directory() {
+    mkdir -p "$1"
+    chmod 0755 "$1"
+}
+
+acquire_tool_lock() {
+    local key=$1 fd_var=$2 lock_dir="$BASE_DIR/.jan-update-locks" fd
+    make_shared_directory "$lock_dir"
+    exec {fd}>"$lock_dir/${key//\//_}.lock"
+    flock "$fd"
+    printf -v "$fd_var" '%s' "$fd"
+}
+
+activate_staged_directory() {
+    local staged=$1 final=$2 key=$3
+    local backup="$BASE_DIR/.jan-update-${key//\//_}.backup.$$.$RANDOM"
+
+    make_shared_directory "$(dirname "$final")"
+    if [ -e "$final" ] || [ -L "$final" ]; then
+        mv -T "$final" "$backup"
+    else
+        backup=
+    fi
+    if ! mv -T "$staged" "$final"; then
+        [ -n "$backup" ] && mv -T "$backup" "$final"
         return 1
     fi
+    [ -z "$backup" ] || rm -rf "$backup"
+}
 
-    [ -f "$version_file" ] && current_version=$(cat "$version_file")
+# expected is an archive checksum; executable is the required path after
+# extraction. The lock intentionally covers the whole small transaction.
+download_and_extract() (
+    set -e
+    set -o pipefail
+    local name=$1 dir=$2 url=$3 version=$4 strip=${5:-1}
+    local expected=${6:-} executable=${7:-}
+    local final="$BASE_DIR/$dir" version_file="$BASE_DIR/$dir/.version"
+    local digest_file="$BASE_DIR/$dir/.installed-sha256"
+    local current_version="" lock_fd temp_dir
 
-    if [ "$current_version" = "$version" ]; then
+    [ -n "$version" ] || { echo "✗ Failed to fetch version for $name"; return 1; }
+    acquire_tool_lock "$dir" lock_fd
+    : "$lock_fd"
+    [ -f "$version_file" ] && current_version=$(<"$version_file")
+    if [ "$current_version" = "$version" ]         && installed_binary_matches "$final/$executable" "$digest_file"; then
         echo "✓ $name already at version $version"
         return 0
     fi
+    [ "$current_version" != "$version" ]         || echo "→ Repairing incomplete $name $version installation"
 
     echo "→ Downloading $name $version..."
-    local temp_dir="$BASE_DIR/${dir}_temp"
-    rm -rf "$temp_dir"
-    mkdir -p "$temp_dir"
-
-    # Download to file first, verify, then extract
+    temp_dir=$(mktemp -d "$BASE_DIR/.jan-update-${dir//\//_}.staging.XXXXXX")
+    trap 'rm -rf "$temp_dir"' EXIT
     curl -fLsS "$url" -o "$temp_dir/archive.tar.gz"
     if [ -n "$expected" ]; then
-        verify_file "$temp_dir/archive.tar.gz" "$expected" || { rm -rf "$temp_dir"; return 1; }
+        verify_file "$temp_dir/archive.tar.gz" "$expected"
     else
         echo "  ⚠ $name: publisher provides no checksum — installing unverified"
     fi
-    tar xzf "$temp_dir/archive.tar.gz" -C "$temp_dir" --strip-components=$strip
+    tar xzf "$temp_dir/archive.tar.gz" -C "$temp_dir"         --strip-components="$strip" --no-same-owner
     rm "$temp_dir/archive.tar.gz"
+    rm -rf -- "$temp_dir/.version" "$temp_dir/.installed-sha256"
 
-    rm -rf "$BASE_DIR/$dir"
-    mv "$temp_dir" "$BASE_DIR/$dir"
-    echo "$version" > "$version_file"
+    if [ -z "$executable" ] || [ ! -f "$temp_dir/$executable" ]         || [ -L "$temp_dir/$executable" ] || [ ! -s "$temp_dir/$executable" ]; then
+        echo "✗ $name archive does not contain expected executable: $executable"
+        return 1
+    fi
+    chmod -R a-s,a-t,u+rwX,go+rX,go-w "$temp_dir"
+    chmod 0755 "$temp_dir" "$temp_dir/$executable"
+    sha256sum "$temp_dir/$executable" | awk '{print $1}' > "$temp_dir/.installed-sha256"
+    printf '%s\n' "$version" > "$temp_dir/.version"
+    chmod 0644 "$temp_dir/.version" "$temp_dir/.installed-sha256"
+
+    activate_staged_directory "$temp_dir" "$final" "$dir"
+    temp_dir=
+    trap - EXIT
     echo "✓ $name $version installed"
-}
+)
+
+download_zstd_binary_to_dir() (
+    set -e
+    set -o pipefail
+    local name=$1 dir=$2 binary=$3 url=$4 version=$5
+    local archive_expected=$6 binary_expected=$7 expected_size=${8:-}
+    local final="$BASE_DIR/$dir" version_file="$BASE_DIR/$dir/.version"
+    local current_version="" lock_fd temp_dir
+
+    [ -n "$version" ] || { echo "✗ Failed to fetch version for $name"; return 1; }
+    command -v zstd >/dev/null         || { echo "✗ zstd is required to install the native $name archive"; return 1; }
+    acquire_tool_lock "$dir" lock_fd
+    : "$lock_fd"
+    [ -f "$version_file" ] && current_version=$(<"$version_file")
+    if [ "$current_version" = "$version" ]         && [ -f "$final/$binary" ] && [ ! -L "$final/$binary" ]         && [ -x "$final/$binary" ]         && [ "$(sha256sum "$final/$binary" | awk '{print $1}')" = "$binary_expected" ]; then
+        echo "✓ $name already at version $version"
+        return 0
+    fi
+    [ "$current_version" != "$version" ]         || echo "→ Repairing incomplete $name $version installation"
+
+    echo "→ Downloading $name $version..."
+    temp_dir=$(mktemp -d "$BASE_DIR/.jan-update-${dir//\//_}.staging.XXXXXX")
+    trap 'rm -rf "$temp_dir"' EXIT
+    curl -fLsS "$url" -o "$temp_dir/$binary.zst"
+    verify_file "$temp_dir/$binary.zst" "$archive_expected"
+    zstd -q -d -c "$temp_dir/$binary.zst" > "$temp_dir/$binary"
+    rm "$temp_dir/$binary.zst"
+    if [ -n "$expected_size" ]         && [ "$(stat -c %s "$temp_dir/$binary")" != "$expected_size" ]; then
+        echo "✗ Size mismatch for decompressed $name executable"
+        return 1
+    fi
+    verify_file "$temp_dir/$binary" "$binary_expected"
+    chmod 0755 "$temp_dir" "$temp_dir/$binary"
+    printf '%s\n' "$version" > "$temp_dir/.version"
+    chmod 0644 "$temp_dir/.version"
+
+    activate_staged_directory "$temp_dir" "$final" "$dir"
+    temp_dir=
+    trap - EXIT
+    echo "✓ $name $version installed"
+)
+
 
 create_desktop_file() {
     local filename=$1 name=$2 exec=$3 icon=$4 comment=$5
@@ -131,7 +243,7 @@ Icon=$icon
 Terminal=false
 Categories=Development;
 EOF
-    chmod +x "$DESKTOP_DIR/$filename.desktop"
+    chmod 0755 "$DESKTOP_DIR/$filename.desktop"
 }
 
 install_idea() {
@@ -146,7 +258,7 @@ install_idea() {
         echo "✗ Failed to fetch download/checksum info for IntelliJ IDEA"
         return 1
     fi
-    download_and_extract "IntelliJ IDEA" "idea" "$url" "$version" 1 "$sum"
+    download_and_extract "IntelliJ IDEA" "idea" "$url" "$version" 1 "$sum" "bin/idea.sh"
     create_desktop_file "intellij-idea" "IntelliJ IDEA" "$BASE_DIR/idea/bin/idea.sh" "$BASE_DIR/idea/bin/idea.svg" "IntelliJ IDEA"
 }
 
@@ -156,7 +268,7 @@ install_nushell() {
     local url="https://github.com/nushell/nushell/releases/download/${version}/${file}"
     local sum=$(fetch_checksum "https://github.com/nushell/nushell/releases/download/${version}/SHA256SUMS" "$file")
     [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for Nushell"; return 1; }
-    download_and_extract "Nushell" "nushell" "$url" "$version" 1 "$sum"
+    download_and_extract "Nushell" "nushell" "$url" "$version" 1 "$sum" "nu"
 }
 
 install_starship() {
@@ -164,13 +276,13 @@ install_starship() {
     local url="https://github.com/starship/starship/releases/download/${version}/starship-x86_64-unknown-linux-musl.tar.gz"
     local sum=$(fetch_checksum "${url}.sha256")
     [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for Starship"; return 1; }
-    download_and_extract "Starship" "starship" "$url" "$version" 0 "$sum"
+    download_and_extract "Starship" "starship" "$url" "$version" 0 "$sum" "starship"
 }
 
 install_herdr() {
     local release version arch file url sum
     release=$(github_api https://api.github.com/repos/ogulcancelik/herdr/releases/latest)
-    version=$(grep -oP '"tag_name": "\K[^"]+' <<<"$release" | head -1)
+    version=$(github_release_tag "$release" || true)
 
     case "$(uname -m)" in
         x86_64|amd64) arch=x86_64 ;;
@@ -185,21 +297,117 @@ install_herdr() {
     url="https://github.com/ogulcancelik/herdr/releases/download/${version}/${file}"
     # GitHub calculates and publishes a SHA-256 digest for every release
     # asset, even though Herdr does not ship a separate checksum file.
-    sum=$(awk -v file="$file" '
-        index($0, "\"name\": \"" file "\"") { found = 1 }
-        found && /"digest": "sha256:[0-9a-f]+"/ {
-            sub(/^.*"digest": "sha256:/, "")
-            sub(/".*$/, "")
-            print
-            exit
-        }
-    ' <<<"$release")
+    sum=$(github_asset_sha256 "$release" "$file" || true)
     [[ "$sum" =~ ^[0-9a-f]{64}$ ]] || {
         echo "✗ Failed to fetch checksum for Herdr"
         return 1
     }
 
     download_single_binary "Herdr" "herdr" "$url" "$version" "$sum"
+}
+
+install_codex() {
+    local release tag version arch file url sum
+    release=$(github_api https://api.github.com/repos/openai/codex/releases/latest)
+    tag=$(github_release_tag "$release" || true)
+    version=${tag#rust-v}
+
+    case "$(uname -m)" in
+        x86_64|amd64) arch=x86_64 ;;
+        aarch64|arm64) arch=aarch64 ;;
+        *)
+            echo "✗ Codex does not publish a Linux binary for architecture $(uname -m)"
+            return 1
+            ;;
+    esac
+
+    file="codex-${arch}-unknown-linux-musl.tar.gz"
+    url="https://github.com/openai/codex/releases/download/${tag}/${file}"
+    sum=$(github_asset_sha256 "$release" "$file" || true)
+    [[ "$tag" == rust-v* && "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+ && "$sum" =~ ^[0-9a-f]{64}$ ]] || {
+        echo "✗ Failed to fetch release/checksum info for Codex"
+        return 1
+    }
+
+    download_and_extract "Codex CLI" "codex" "$url" "$version" 0 "$sum" \
+        "codex-${arch}-unknown-linux-musl"
+}
+
+install_pi() {
+    local release version arch file url sum
+    release=$(github_api https://api.github.com/repos/earendil-works/pi/releases/latest)
+    version=$(github_release_tag "$release" || true)
+    version=${version#v}
+
+    case "$(uname -m)" in
+        x86_64|amd64) arch=x64 ;;
+        aarch64|arm64) arch=arm64 ;;
+        *)
+            echo "✗ Pi does not publish a Linux binary for architecture $(uname -m)"
+            return 1
+            ;;
+    esac
+
+    file="pi-linux-${arch}.tar.gz"
+    url="https://github.com/earendil-works/pi/releases/download/v${version}/${file}"
+    sum=$(fetch_checksum "https://github.com/earendil-works/pi/releases/download/v${version}/SHA256SUMS" "$file")
+    [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+ && "$sum" =~ ^[0-9a-f]{64}$ ]] || {
+        echo "✗ Failed to fetch release/checksum info for Pi"
+        return 1
+    }
+
+    # The archive has one top-level pi/ directory containing the Bun-compiled
+    # executable plus the runtime assets used by extensions and exports.
+    download_and_extract "Pi agent harness" "pi" "$url" "$version" 1 "$sum" "pi"
+}
+
+json_platform_value() {
+    local json=$1 platform=$2 key=$3
+    tr -d '\n\r\t' <<<"$json" \
+        | grep -oP "\"${platform}\"\\s*:\\s*\\{[^}]*\"${key}\"\\s*:\\s*\"?\\K[0-9a-f]+" \
+        | head -1
+}
+
+install_claude() {
+    local base version arch platform manifest zst_manifest
+    local archive_sum binary_sum binary_size url
+    base="https://downloads.claude.ai/claude-code-releases"
+    version=$(curl -fLsS --max-time 30 "$base/latest" 2>/dev/null \
+        | tr -d '\r' | head -n1 | tr -d '[:space:]')
+
+    case "$(uname -m)" in
+        x86_64|amd64) arch=x64 ;;
+        aarch64|arm64) arch=arm64 ;;
+        *)
+            echo "✗ Claude Code does not publish a Linux binary for architecture $(uname -m)"
+            return 1
+            ;;
+    esac
+    if [ -f /lib/libc.musl-x86_64.so.1 ] || [ -f /lib/libc.musl-aarch64.so.1 ] \
+        || ldd /bin/ls 2>&1 | grep -q musl; then
+        platform="linux-${arch}-musl"
+    else
+        platform="linux-${arch}"
+    fi
+
+    [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9._]+)?$ ]] || {
+        echo "✗ Failed to fetch version for Claude Code"
+        return 1
+    }
+    manifest=$(curl -fLsS --max-time 30 "$base/$version/manifest.json")
+    zst_manifest=$(curl -fLsS --max-time 30 "$base/$version/manifest.zst.json")
+    binary_sum=$(json_platform_value "$manifest" "$platform" checksum || true)
+    binary_size=$(json_platform_value "$manifest" "$platform" size || true)
+    archive_sum=$(json_platform_value "$zst_manifest" "$platform" checksum || true)
+    [[ "$binary_sum" =~ ^[0-9a-f]{64}$ && "$archive_sum" =~ ^[0-9a-f]{64}$ \
+        && "$binary_size" =~ ^[1-9][0-9]*$ ]] || {
+        echo "✗ Failed to fetch archive/checksum info for Claude Code ($platform)"
+        return 1
+    }
+
+    url="$base/$version/$platform/claude.zst"
+    download_zstd_binary_to_dir "Claude Code" "claude" "claude" \
+        "$url" "$version" "$archive_sum" "$binary_sum" "$binary_size"
 }
 
 install_grok() {
@@ -211,10 +419,10 @@ install_grok() {
     local base_fallback="https://storage.googleapis.com/grok-build-public-artifacts/cli"
 
     version=$(curl -fLsS --max-time 30 "${base_primary}/stable" 2>/dev/null \
-        | tr -d '\r' | head -n1 | tr -d '[:space:]')
-    if [ -z "$version" ]; then
+        | tr -d '\r' | head -n1 | tr -d '[:space:]') || version=
+    if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9._]+)?$ ]]; then
         version=$(curl -fLsS --max-time 30 "${base_fallback}/stable" 2>/dev/null \
-            | tr -d '\r' | head -n1 | tr -d '[:space:]')
+            | tr -d '\r' | head -n1 | tr -d '[:space:]') || version=
     fi
     [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9._]+)?$ ]] || {
         echo "✗ Failed to fetch version for Grok"
@@ -248,14 +456,15 @@ install_grok() {
         return 1
     }
 
-    download_single_binary "Grok" "grok" "$url" "$version" "md5:${md5_hex}"
+    download_single_binary "Grok" "grok" "$url" "$version" "md5:${md5_hex}" \
+        "${base_fallback}/grok-${version}-${platform}"
 }
 
 install_obsidian() {
     # Obsidian publishes no checksums in its release assets — unverified.
     local version=$(github_api https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest | grep -oP '"tag_name": "\K[^"]+' | sed 's/^v//')
     local url="https://github.com/obsidianmd/obsidian-releases/releases/download/v${version}/obsidian-${version}.tar.gz"
-    download_and_extract "Obsidian" "obsidian" "$url" "$version" 1
+    download_and_extract "Obsidian" "obsidian" "$url" "$version" 1 "" "obsidian"
     create_desktop_file "obsidian" "Obsidian" "$BASE_DIR/obsidian/obsidian --no-sandbox" "$BASE_DIR/obsidian/resources/icon.png" "Obsidian Notes"
 }
 
@@ -267,7 +476,8 @@ install_corretto() {
     local sum=$(fetch_checksum "https://corretto.aws/downloads/latest_sha256/amazon-corretto-${jdk_version}-x64-linux-jdk.tar.gz")
     [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for Corretto JDK ${jdk_version}"; return 1; }
 
-    download_and_extract "Amazon Corretto JDK ${jdk_version}" "jdk/${jdk_version}" "$url" "$version" 1 "$sum"
+    download_and_extract "Amazon Corretto JDK ${jdk_version}" "jdk/${jdk_version}" \
+        "$url" "$version" 1 "$sum" "bin/java"
 }
 
 install_corretto_all() {
@@ -289,7 +499,7 @@ install_gradle() {
     local version_file="$BASE_DIR/gradle/.version"
     local current_version=""
 
-    [ -f "$version_file" ] && current_version=$(cat "$version_file")
+    [ -f "$version_file" ] && current_version=$(<"$version_file")
 
     if [ "$current_version" = "$version" ]; then
         echo "✓ Gradle already at version $version"
@@ -327,7 +537,7 @@ install_maven() {
     local version_file="$BASE_DIR/maven/.version"
     local current_version=""
 
-    [ -f "$version_file" ] && current_version=$(cat "$version_file")
+    [ -f "$version_file" ] && current_version=$(<"$version_file")
 
     if [ "$current_version" = "$version" ]; then
         echo "✓ Maven already at version $version"
@@ -401,39 +611,56 @@ EOF
     create_desktop_file "pgadmin4" "pgAdmin 4" "$BASE_DIR/pgadmin/pgadmin4" "$BASE_DIR/pgadmin/pgadmin4/static/img/logo-256.png" "PostgreSQL Tools"
 }
 
-# 5th arg: expected sha256 of the binary — same convention as
-# download_and_extract.
-download_single_binary() {
+# expected is the publisher checksum. fallback_url is used for Grok's mirror.
+download_single_binary() (
+    set -e
+    set -o pipefail
     local name=$1 binary=$2 url=$3 version=$4 expected=${5:-}
+    local fallback_url=${6:-} used_fallback=0
     local version_file="$BASE_DIR/.versions/$binary"
-    local current_version=""
+    local digest_file="$BASE_DIR/.versions/$binary.sha256"
+    local current_version="" lock_fd temp_file
 
-    if [ -z "$version" ]; then
-        echo "✗ Failed to fetch version for $name"
-        return 1
-    fi
-
-    [ -f "$version_file" ] && current_version=$(cat "$version_file")
-
-    if [ "$current_version" = "$version" ]; then
+    [ -n "$version" ] || { echo "✗ Failed to fetch version for $name"; return 1; }
+    acquire_tool_lock "bin-$binary" lock_fd
+    : "$lock_fd"
+    [ -f "$version_file" ] && current_version=$(<"$version_file")
+    if [ "$current_version" = "$version" ]         && installed_binary_matches "$BASE_DIR/bin/$binary" "$digest_file"; then
         echo "✓ $name already at version $version"
         return 0
     fi
+    [ "$current_version" != "$version" ]         || echo "→ Repairing incomplete $name $version installation"
 
     echo "→ Downloading $name $version..."
-    mkdir -p "$BASE_DIR/bin"
-    mkdir -p "$BASE_DIR/.versions"
-    curl -fLsS "$url" -o "$BASE_DIR/bin/$binary.tmp"
-    if [ -n "$expected" ]; then
-        verify_file "$BASE_DIR/bin/$binary.tmp" "$expected" || { rm -f "$BASE_DIR/bin/$binary.tmp"; return 1; }
-    else
+    make_shared_directory "$BASE_DIR/bin"
+    make_shared_directory "$BASE_DIR/.versions"
+    temp_file=$(mktemp "$BASE_DIR/bin/.${binary}.staging.XXXXXX")
+    trap 'rm -f "$temp_file"' EXIT
+    if ! curl -fLsS "$url" -o "$temp_file"; then
+        [ -n "$fallback_url" ] || return 1
+        echo "→ Primary download failed; trying publisher fallback"
+        curl -fLsS "$fallback_url" -o "$temp_file"
+        used_fallback=1
+    fi
+    if [ -n "$expected" ] && ! verify_file "$temp_file" "$expected"; then
+        [ -n "$fallback_url" ] && [ "$used_fallback" -eq 0 ] || return 1
+        echo "→ Primary checksum failed; trying publisher fallback"
+        curl -fLsS "$fallback_url" -o "$temp_file"
+        verify_file "$temp_file" "$expected"
+    elif [ -z "$expected" ]; then
         echo "  ⚠ $name: publisher provides no checksum — installing unverified"
     fi
-    mv "$BASE_DIR/bin/$binary.tmp" "$BASE_DIR/bin/$binary"
-    chmod +x "$BASE_DIR/bin/$binary"
-    echo "$version" > "$version_file"
+    [ -s "$temp_file" ] || { echo "✗ Downloaded $name executable is empty"; return 1; }
+    chmod 0755 "$temp_file"
+    mv -fT "$temp_file" "$BASE_DIR/bin/$binary"
+    temp_file=
+    printf '%s\n' "$version" > "$version_file"
+    sha256sum "$BASE_DIR/bin/$binary" | awk '{print $1}' > "$digest_file"
+    chmod 0644 "$version_file" "$digest_file"
+    trap - EXIT
     echo "✓ $name $version installed"
-}
+)
+
 
 install_kubectl() {
     local version=$(curl -sL https://dl.k8s.io/release/stable.txt)
@@ -456,7 +683,7 @@ install_k9s() {
     local url="https://github.com/derailed/k9s/releases/download/${version}/k9s_Linux_amd64.tar.gz"
     local sum=$(fetch_checksum "https://github.com/derailed/k9s/releases/download/${version}/checksums.sha256" "k9s_Linux_amd64.tar.gz")
     [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for k9s"; return 1; }
-    download_and_extract "k9s" "k9s" "$url" "$version" 0 "$sum"
+    download_and_extract "k9s" "k9s" "$url" "$version" 0 "$sum" "k9s"
 }
 
 install_helm() {
@@ -464,7 +691,7 @@ install_helm() {
     local url="https://get.helm.sh/helm-${version}-linux-amd64.tar.gz"
     local sum=$(fetch_checksum "${url}.sha256")
     [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for Helm"; return 1; }
-    download_and_extract "Helm" "helm" "$url" "$version" 1 "$sum"
+    download_and_extract "Helm" "helm" "$url" "$version" 1 "$sum" "helm"
 }
 
 install_stern() {
@@ -473,7 +700,7 @@ install_stern() {
     local url="https://github.com/stern/stern/releases/download/${version}/${file}"
     local sum=$(fetch_checksum "https://github.com/stern/stern/releases/download/${version}/checksums.txt" "$file")
     [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for Stern"; return 1; }
-    download_and_extract "Stern" "stern" "$url" "$version" 0 "$sum"
+    download_and_extract "Stern" "stern" "$url" "$version" 0 "$sum" "stern"
 }
 
 install_skaffold() {
@@ -583,11 +810,9 @@ install_ffmpeg() {
     echo "✓ FFmpeg $version installed"
 }
 
-# Default install set; pass tool names as arguments to install a subset,
-# e.g.:  jan-update-opt jq yq kubectl
-ALL_TOOLS=(idea nushell starship herdr grok obsidian gradle maven kubectl kind k9s helm
-           stern skaffold jq yq ollama ffmpeg corretto_all)
-#          pgadmin disabled
+# Default install set; pass tool names as arguments to install a subset.
+ALL_TOOLS=(idea nushell starship herdr codex grok pi claude obsidian gradle maven
+           kubectl kind k9s helm stern skaffold jq yq ollama ffmpeg corretto_all)
 
 if [ $# -gt 0 ]; then
     TOOLS=("$@")
@@ -603,13 +828,12 @@ for tool in "${TOOLS[@]}"; do
 done
 
 echo "Starting software installation in $BASE_DIR..."
-
 for tool in "${TOOLS[@]}"; do
     "install_${tool}"
 done
 
-# Create symlinks in bin directory for all tools
 mkdir -p "$BASE_DIR/bin"
+chmod 0755 "$BASE_DIR/bin"
 [ -f "$BASE_DIR/gradle/bin/gradle" ] && ln -sf "$BASE_DIR/gradle/bin/gradle" "$BASE_DIR/bin/gradle"
 [ -f "$BASE_DIR/maven/bin/mvn" ] && ln -sf "$BASE_DIR/maven/bin/mvn" "$BASE_DIR/bin/mvn"
 [ -f "$BASE_DIR/nushell/nu" ] && ln -sf "$BASE_DIR/nushell/nu" "$BASE_DIR/bin/nu"
@@ -623,14 +847,16 @@ mkdir -p "$BASE_DIR/bin"
 [ -f "$BASE_DIR/ffmpeg/bin/ffmpeg" ] && ln -sf "$BASE_DIR/ffmpeg/bin/ffmpeg" "$BASE_DIR/bin/ffmpeg"
 [ -f "$BASE_DIR/ffmpeg/bin/ffplay" ] && ln -sf "$BASE_DIR/ffmpeg/bin/ffplay" "$BASE_DIR/bin/ffplay"
 [ -f "$BASE_DIR/ffmpeg/bin/ffprobe" ] && ln -sf "$BASE_DIR/ffmpeg/bin/ffprobe" "$BASE_DIR/bin/ffprobe"
+[ -f "$BASE_DIR/codex/codex-x86_64-unknown-linux-musl" ] && ln -sf "$BASE_DIR/codex/codex-x86_64-unknown-linux-musl" "$BASE_DIR/bin/codex"
+[ -f "$BASE_DIR/codex/codex-aarch64-unknown-linux-musl" ] && ln -sf "$BASE_DIR/codex/codex-aarch64-unknown-linux-musl" "$BASE_DIR/bin/codex"
+[ -f "$BASE_DIR/pi/pi" ] && ln -sf "$BASE_DIR/pi/pi" "$BASE_DIR/bin/pi"
+[ -f "$BASE_DIR/claude/claude" ] && ln -sf "$BASE_DIR/claude/claude" "$BASE_DIR/bin/claude"
 
 cat > "$BASE_DIR/env.sh" <<EOF
-# Generated by install-software.sh
-# Source this file from your shell config (.bashrc, .zshrc, etc.)
-# Example: echo 'source $BASE_DIR/env.sh' >> ~/.bashrc
-
+# Generated by jan-update-opt
 export PATH="\$PATH:$BASE_DIR/bin"
 EOF
+chmod 0644 "$BASE_DIR/env.sh"
 
 echo ""
 echo "All software installed successfully!"
