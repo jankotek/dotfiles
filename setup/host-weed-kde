@@ -11,7 +11,7 @@
 #   - masks services we replace or don't use (sddm, fwupd, ollama, ...)
 #   - leaves tty1 stock; sets up agetty on tty2-10 and CLI-started Plasma
 #   - runs the cross-distro jan-* helpers
-#   - syncs repo home dotfiles WITHOUT --delete (user data survives re-runs)
+#   - applies the curated skeleton WITHOUT --delete (user data survives re-runs)
 #
 # Idempotent: safe to re-run. Run as root from a checkout, e.g.
 #   sudo /opt/jan/setup/host-weed-kde
@@ -172,30 +172,37 @@ PICTURES=media/pic
 VIDEOS=media/video
 EOF
 
-# ---------- Sync repo home (NO --delete) ----------
-# Detect the primary unprivileged user — the same probe vm-baseweed uses.
+# ---------- Apply curated user skeleton (NO --delete) ----------
+# Detect the primary unprivileged user. openSUSE's installer-created account
+# is commonly adam on these hosts, so prefer it before legacy repo defaults.
 
 HOME_USER=""
-for u in jan playai opensuse tumbleweed; do
+for u in adam jan playai opensuse tumbleweed; do
     if id "$u" &>/dev/null; then
         HOME_USER="$u"
         break
     fi
 done
 if [[ -z "$HOME_USER" ]]; then
-    echo "ERROR: no candidate user found (tried: jan playai opensuse tumbleweed)" >&2
+    echo "ERROR: no candidate user found (tried: adam jan playai opensuse tumbleweed)" >&2
     exit 1
 fi
 HOME_GROUP=$(id -gn "$HOME_USER")
 HOME_DIR=$(getent passwd "$HOME_USER" | cut -d: -f6)
-echo "==> Syncing repo home to ${HOME_DIR} (user=${HOME_USER})"
+echo "==> Applying curated user defaults to ${HOME_DIR} (user=${HOME_USER})"
 
-# Backup before sync (timestamped, kept until manually removed).
-cp -a "$HOME_DIR" "${HOME_DIR}-backup-$(date +%Y-%m-%d-%H%M)" 2>/dev/null || true
-chmod 0700 "${HOME_DIR}-backup-"* 2>/dev/null || true
+# Back up the complete existing home before replacing any managed template.
+# Fail before deployment if the backup cannot be made.
+HOME_BACKUP="${HOME_DIR}-backup-$(date +%Y-%m-%d-%H%M%S)-$$"
+echo "==> Backing up ${HOME_DIR} to ${HOME_BACKUP}"
+cp -a -- "$HOME_DIR" "$HOME_BACKUP"
+chmod 0700 "$HOME_BACKUP"
 
-# Sync without --delete: dotfiles deploy, user data survives.
-rsync -r "${REPO_DIR}/home/" "${HOME_DIR}/"
+# Apply the same curated payload installed into /etc/skel. It is a superset of
+# the legacy home/ tree and adds the Plasma/Konsole defaults an account created
+# by the OS installer could not have received. No --delete: personal files
+# outside the managed paths survive.
+rsync -a --chown="${HOME_USER}:${HOME_GROUP}" "${REPO_DIR}/skel/home/" "${HOME_DIR}/"
 [[ -d "${REPO_DIR}/home-root" ]] && rsync -r "${REPO_DIR}/home-root/" /root/
 
 # Fix ownership BEFORE the su below, otherwise the freshly-synced (root-owned)

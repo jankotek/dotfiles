@@ -52,6 +52,12 @@ load ../helpers
     assert_file_contains \
         "$OPT_JAN/usr/share/konsole/dark.profile" \
         '^WordModeAscii=true$'
+    cmp \
+        "$OPT_JAN/usr/share/konsole/dark.profile" \
+        "$OPT_JAN/skel/home/.local/share/konsole/dark.profile"
+    cmp \
+        "$OPT_JAN/usr/share/konsole/white.profile" \
+        "$OPT_JAN/skel/home/.local/share/konsole/white.profile"
 }
 
 @test "MC desktop shortcuts use the packaged icon name" {

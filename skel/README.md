@@ -18,8 +18,9 @@ provided by this repository under `/usr/local/share` after provisioning. KDE's
 global KConfig path references that same standalone color-scheme file, so its
 palette is not duplicated in each user's `kdeglobals`.
 Konsole discovers the repository's separate `dark` and `white` profiles from
-the same data directory; the skeleton only selects `dark.profile` by default.
-Both profiles use JetBrains Mono 10 and Konsole's ASCII word mode for
+the system data directory. The skeleton installs user-owned copies under
+`.local/share/konsole`, so they remain editable, and selects `dark.profile` by
+default. Both profiles use JetBrains Mono 10 and Konsole's ASCII word mode for
 programming ligatures. The same font is the KDE fixed-width default, the
 Kate/KWrite editor default, and the system fontconfig `monospace` preference.
 The user-local openSUSE Plasma layout template supplies a top, non-floating

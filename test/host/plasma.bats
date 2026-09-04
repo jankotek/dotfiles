@@ -24,6 +24,16 @@ load ../helpers
     assert_command konsole
 }
 
+@test "installer-created user received curated Plasma and Konsole defaults" {
+    assert_file "$JAN_HOME/.config/kdeglobals"
+    assert_file "$JAN_HOME/.config/konsolerc"
+    assert_file_contains "$JAN_HOME/.config/konsolerc" '^DefaultProfile=dark.profile$'
+    assert_file "$JAN_HOME/.local/share/konsole/dark.profile"
+    assert_file "$JAN_HOME/.local/share/konsole/white.profile"
+    [[ $(stat -c %U "$JAN_HOME/.local/share/konsole/dark.profile") == \
+        $(stat -c %U "$JAN_HOME") ]]
+}
+
 @test "Sweet palette is the referenced KDE system default" {
     [[ -L /usr/local/etc/xdg/kdeglobals ]]
     [[ $(readlink /usr/local/etc/xdg/kdeglobals) == \
