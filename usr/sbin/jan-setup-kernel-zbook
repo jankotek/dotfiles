@@ -1,0 +1,544 @@
+#!/usr/bin/env bash
+# Build and optionally install a standalone openSUSE Tumbleweed kernel for ZBook.
+#
+# Kernel settings: enables AMD ISP4 capture as a module, its platform-media
+# dependencies, Zstd module compression, and ephemeral module signing; assigns
+# the release suffix "-zbook" and packages it as "kernel-zbook".
+# Build settings: uses /var/tmp/zbook-kernel-build and all CPUs by default;
+# BUILD_ROOT and JOBS override these values. Requires 40 GiB in the build
+# filesystem, 512 MiB in /boot, and 256 MiB in /boot/efi (the boot-space limits
+# are configurable with MIN_BOOT_FREE_MIB and MIN_EFI_FREE_MIB).
+# Safety: requires the newest official kernel-default to be running, refuses
+# Secure Boot, asks before RPM installation, and preserves kernel-default.
+
+set -Eeuo pipefail
+
+readonly CAMERA_OPTION='VIDEO_AMD_ISP4_CAPTURE'
+readonly CUSTOM_PACKAGE_NAME='kernel-zbook'
+readonly BUILD_ROOT="${BUILD_ROOT:-/var/tmp/zbook-kernel-build}"
+readonly JOBS="${JOBS:-$(nproc)}"
+readonly LOCK_FILE='/run/lock/build-zbook-kernel.lock'
+readonly MIN_BOOT_FREE_MIB="${MIN_BOOT_FREE_MIB:-512}"
+readonly MIN_EFI_FREE_MIB="${MIN_EFI_FREE_MIB:-256}"
+force_rebuild=false
+repair_install=false
+
+log() {
+    printf '\n==> %s\n' "$*"
+}
+
+die() {
+    printf 'ERROR: %s\n' "$*" >&2
+    exit 1
+}
+
+available_mib() {
+    df -PB1 "$1" | awk 'NR == 2 { printf "%d", $4 / 1048576 }'
+}
+
+require_free_space() {
+    local path=$1
+    local required_mib=$2
+    local purpose=$3
+    local free_mib
+
+    [[ -d $path ]] || die "$purpose path does not exist: $path"
+    free_mib=$(available_mib "$path")
+    [[ $free_mib =~ ^[0-9]+$ ]] || die "Could not determine free space on $path"
+    printf '%-24s %6s MiB free; %s MiB required\n' "$purpose:" "$free_mib" "$required_mib"
+    ((free_mib >= required_mib)) || \
+        die "$purpose has only $free_mib MiB free at $path; require at least $required_mib MiB. Free space before installing. No package changes were made by this run."
+}
+
+if [[ ${1:-} == '--help' ]]; then
+    cat <<'EOF'
+Usage: jan-setup-kernel-zbook [--force]
+
+Options:
+  --force         Rebuild and reinstall even when this exact custom kernel
+                  release is already installed
+
+Environment variables:
+  JOBS=N          Parallel compiler jobs (default: number of CPUs)
+  BUILD_ROOT=DIR  Persistent build directory
+  MIN_BOOT_FREE_MIB=N  Required free space on /boot (default: 512)
+  MIN_EFI_FREE_MIB=N   Required free space on the EFI partition (default: 256)
+
+The script refreshes repositories and installs build prerequisites. It aborts
+unless the newest installed kernel-default is currently running and its version
+matches the newest available kernel-source package. It never removes an
+existing kernel-default package and asks before installing the generated RPM.
+EOF
+    exit 0
+fi
+
+if [[ ${1:-} == '--force' ]]; then
+    force_rebuild=true
+    shift
+fi
+[[ $# -eq 0 ]] || die 'Unknown argument. Use --help.'
+
+if [[ ${EUID} -ne 0 ]]; then
+    die 'Run this script as root.'
+fi
+
+[[ $JOBS =~ ^[1-9][0-9]*$ ]] || die 'JOBS must be a positive integer.'
+[[ $MIN_BOOT_FREE_MIB =~ ^[1-9][0-9]*$ ]] || die 'MIN_BOOT_FREE_MIB must be a positive integer.'
+[[ $MIN_EFI_FREE_MIB =~ ^[1-9][0-9]*$ ]] || die 'MIN_EFI_FREE_MIB must be a positive integer.'
+
+exec 9>"$LOCK_FILE"
+flock -n 9 || die "Another build is holding $LOCK_FILE"
+
+for command_name in zypper rpm find sort grep sed awk make nproc flock; do
+    command -v "$command_name" >/dev/null || die "Required command not found: $command_name"
+done
+
+[[ $(uname -m) == x86_64 ]] || die 'This script is intended for x86_64 only.'
+[[ $(uname -r) == *-default ]] || die 'Boot an official kernel-default before building.'
+
+log 'Recording the official kernels that must remain installed'
+mapfile -t official_kernels_before < <(
+    rpm -qa --qf '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n' 'kernel-default' | sort -V
+)
+((${#official_kernels_before[@]} > 0)) || die 'No kernel-default package is installed.'
+printf '  %s\n' "${official_kernels_before[@]}"
+
+log 'Refreshing Tumbleweed repositories'
+zypper --non-interactive refresh
+
+log 'Installing/updating the kernel source and local build prerequisites'
+zypper --non-interactive install --no-recommends \
+    kernel-source \
+    gcc make bc bison flex \
+    libopenssl-devel libelf-devel libdw-devel dwarves \
+    rpm-build perl python3 rsync cpio dracut mokutil
+
+for command_name in rpmbuild rpm2cpio cpio zstd readelf kernel-install \
+    depmod modinfo dracut lsinitrd mountpoint mokutil stat cmp; do
+    command -v "$command_name" >/dev/null || die "Required command not found after dependency installation: $command_name"
+done
+
+source_link='/usr/src/linux'
+[[ -e $source_link ]] || die 'kernel-source did not create /usr/src/linux.'
+source_dir=$(readlink -f "$source_link")
+[[ -f $source_dir/Makefile ]] || die "Kernel Makefile not found below $source_dir"
+[[ -x $source_dir/scripts/config ]] || die "Kernel config helper not found below $source_dir"
+[[ ! -L $BUILD_ROOT ]] || die "BUILD_ROOT must not be a symlink: $BUILD_ROOT"
+mkdir -p "$BUILD_ROOT"
+build_root_uid=$(stat -c '%u' "$BUILD_ROOT")
+build_root_mode=$(stat -c '%a' "$BUILD_ROOT")
+[[ $build_root_uid == 0 ]] || die "BUILD_ROOT must be owned by root: $BUILD_ROOT"
+(( (8#$build_root_mode & 8#022) == 0 )) || \
+    die "BUILD_ROOT must not be group/world writable: $BUILD_ROOT"
+
+make_value() {
+    local key=$1
+    awk -F ' = ' -v key="$key" '$1 == key { print $2; exit }' "$source_dir/Makefile"
+}
+
+kernel_base="$(make_value VERSION).$(make_value PATCHLEVEL).$(make_value SUBLEVEL)"
+[[ $kernel_base =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || \
+    die "Could not determine the source version from $source_dir/Makefile"
+
+running_release=$(uname -r)
+running_base=${running_release%%-*}
+[[ $running_base == "$kernel_base" ]] || die "Newest kernel-source is $kernel_base, but the running kernel is $running_release. Complete the Tumbleweed upgrade, reboot its newest kernel-default, and run this script again."
+source_release=${source_dir##*/linux-}
+running_source_release=${running_release%-default}
+[[ $source_release == "$running_source_release" ]] || \
+    die "kernel-source is $source_release, but the running official kernel ABI is $running_source_release. Complete the Tumbleweed upgrade and reboot before building."
+
+mapfile -t installed_default_module_trees < <(
+    find /lib/modules -mindepth 1 -maxdepth 1 -type d -name '*-default' -printf '%f\n' | sort -V
+)
+((${#installed_default_module_trees[@]} > 0)) || die 'No kernel-default module tree was found.'
+newest_installed_default=${installed_default_module_trees[-1]}
+[[ $running_release == "$newest_installed_default" ]] || die "The newest installed kernel-default is $newest_installed_default, but $running_release is running. Reboot into the newest official kernel and retry."
+
+official_suffix=${running_release#"$kernel_base-"}
+official_suffix=${official_suffix%-default}
+[[ -n $official_suffix && $official_suffix != "$running_release" ]] || \
+    die "Could not derive the openSUSE ABI release from $running_release"
+
+local_version="-${official_suffix}-zbook"
+custom_release="${kernel_base}${local_version}"
+build_dir="$BUILD_ROOT/$custom_release"
+require_free_space "$BUILD_ROOT" 40960 'Kernel build filesystem'
+
+entry_token=$(tr -d '\n' </etc/kernel/entry-token 2>/dev/null || true)
+[[ -n $entry_token ]] || die 'Cannot determine the kernel entry token from /etc/kernel/entry-token.'
+efi_entry_dir="/boot/efi/$entry_token/$custom_release"
+efi_kernel="$efi_entry_dir/linux"
+# 90-loaderentry.install preserves the basename of an explicitly supplied
+# initrd. We pass /boot/initrd-$custom_release to kernel-install below.
+efi_initrd="$efi_entry_dir/initrd-$custom_release"
+bls_entry="/boot/efi/loader/entries/$entry_token-$custom_release.conf"
+
+installation_is_complete() {
+    local camera_base="/usr/lib/modules/$custom_release/kernel/drivers/media/platform/amd/isp4/amd_isp4_capture.ko"
+    local provider_name
+
+    provider_name=$(rpm -q --whatprovides --qf '%{NAME}' "kernel-$custom_release" 2>/dev/null) || return 1
+    [[ $provider_name == "$CUSTOM_PACKAGE_NAME" ]] || return 1
+    [[ -s /boot/vmlinuz-$custom_release && -s /boot/initrd-$custom_release ]] || return 1
+    [[ -s $camera_base || -s $camera_base.zst ]] || return 1
+    [[ -s /usr/lib/modules/$custom_release/modules.dep ]] || return 1
+    grep -q 'amd_isp4_capture' "/usr/lib/modules/$custom_release/modules.dep" || return 1
+    command -v lsinitrd >/dev/null && lsinitrd "/boot/initrd-$custom_release" >/dev/null || return 1
+    if mountpoint -q /boot/efi; then
+        [[ -s $efi_kernel && -s $efi_initrd && -s $bls_entry ]] || return 1
+        cmp -s "/usr/lib/modules/$custom_release/vmlinuz" "$efi_kernel" || return 1
+        cmp -s "/boot/initrd-$custom_release" "$efi_initrd" || return 1
+        lsinitrd "$efi_initrd" >/dev/null || return 1
+        grep -qF "$custom_release" "$bls_entry" || return 1
+        grep -Eq "^version[[:space:]]+$custom_release([[:space:]]|$)" "$bls_entry" || return 1
+        grep -Eq "^linux[[:space:]]+/$entry_token/$custom_release/linux([[:space:]]|$)" "$bls_entry" || return 1
+        grep -Eq "^initrd[[:space:]]+/$entry_token/$custom_release/initrd-$custom_release([[:space:]]|$)" "$bls_entry" || return 1
+    else
+        return 1
+    fi
+}
+
+if [[ $force_rebuild == false && ( -e /boot/vmlinuz-$custom_release || -d /lib/modules/$custom_release ) ]]; then
+    if installation_is_complete; then
+        printf '\n%s\n' '============================================================'
+        printf '%s\n' ' SUCCESS: EXISTING ZBOOK KERNEL INSTALLATION VERIFIED'
+        printf '%s\n' '============================================================'
+        printf 'Custom kernel: %s\n' "$custom_release"
+        printf 'EFI kernel:    %s\n' "$efi_kernel"
+        printf 'EFI initrd:    %s\n' "$efi_initrd"
+        printf 'BLS entry:     %s\n' "$bls_entry"
+        printf 'Use --force only if you intentionally want to rebuild and reinstall this exact release.\n'
+        exit 0
+    fi
+    repair_install=true
+    log "The existing $custom_release installation is incomplete; rebuilding its package and repairing it"
+fi
+
+if [[ $force_rebuild == true ]]; then
+    log "Forced rebuild requested for $custom_release"
+fi
+
+grep -RqsE "^[[:space:]]*config[[:space:]]+$CAMERA_OPTION([[:space:]]|$)" \
+    "$source_dir/drivers" || die "Kernel source $kernel_base does not define CONFIG_$CAMERA_OPTION. Wait for a newer kernel-source package."
+
+[[ -x $(command -v mokutil) ]] || die 'mokutil is required to determine Secure Boot state.'
+secure_boot_state=$(mokutil --sb-state 2>&1) || die "Could not determine Secure Boot state: $secure_boot_state"
+if grep -qi 'enabled' <<<"$secure_boot_state"; then
+    die 'Secure Boot is enabled. This locally built kernel will not be trusted automatically. Disable Secure Boot or extend this script with your own enrolled signing key before installing it.'
+fi
+
+log "Preparing $build_dir from the running official configuration"
+mkdir -p "$build_dir"
+if [[ $force_rebuild == true && -f $build_dir/Makefile ]]; then
+    log 'Cleaning the existing object tree for the forced rebuild'
+    make -C "$source_dir" O="$build_dir" clean
+fi
+zcat /proc/config.gz > "$build_dir/.config"
+
+config_tool=("$source_dir/scripts/config" --file "$build_dir/.config")
+# openSUSE filters out the entire platform-media Kconfig subtree. Both bools
+# must be enabled before olddefconfig can see and retain the ISP4 tristate.
+"${config_tool[@]}" --enable MEDIA_PLATFORM_SUPPORT
+"${config_tool[@]}" --enable MEDIA_PLATFORM_DRIVERS
+"${config_tool[@]}" --module "$CAMERA_OPTION"
+"${config_tool[@]}" --enable MODULE_COMPRESS_ALL
+"${config_tool[@]}" --enable MODULE_COMPRESS_ZSTD
+"${config_tool[@]}" --set-str LOCALVERSION "$local_version"
+"${config_tool[@]}" --disable LOCALVERSION_AUTO
+
+# Distribution configs refer to OBS signing material that is unavailable to a
+# local build. Let kbuild generate an ephemeral key for module signing instead.
+"${config_tool[@]}" --enable MODULE_SIG
+"${config_tool[@]}" --enable MODULE_SIG_ALL
+"${config_tool[@]}" --set-str MODULE_SIG_KEY 'certs/signing_key.pem'
+"${config_tool[@]}" --set-str SYSTEM_TRUSTED_KEYS ''
+"${config_tool[@]}" --set-str SYSTEM_REVOCATION_KEYS ''
+
+make -C "$source_dir" O="$build_dir" olddefconfig
+
+for required_setting in \
+    'CONFIG_MEDIA_PLATFORM_SUPPORT=y' \
+    'CONFIG_MEDIA_PLATFORM_DRIVERS=y' \
+    'CONFIG_MODULE_COMPRESS_ALL=y' \
+    'CONFIG_MODULE_COMPRESS_ZSTD=y' \
+    "CONFIG_${CAMERA_OPTION}=m"; do
+    grep -qx "$required_setting" "$build_dir/.config" || \
+        die "$required_setting did not survive olddefconfig; inspect $build_dir/.config"
+done
+
+resolved_release=$(make -s -C "$source_dir" O="$build_dir" kernelrelease)
+[[ $resolved_release == "$custom_release" ]] || \
+    die "Expected kernel release $custom_release, but kbuild resolved $resolved_release"
+
+log "Building $custom_release with $JOBS jobs"
+printf 'Build directory: %s\n' "$build_dir"
+make -C "$source_dir" O="$build_dir" -j"$JOBS"
+
+log 'Generating an openSUSE-compatible local RPM specification'
+make -C "$source_dir" O="$build_dir" rpmbuild/SPECS/kernel.spec
+generated_spec="$build_dir/rpmbuild/SPECS/kernel.spec"
+[[ -f $generated_spec ]] || die "Generated RPM spec not found: $generated_spec"
+
+# Tumbleweed is usr-merged. Its RPM tooling records module payload paths below
+# /usr/lib/modules, while the upstream kernel's generated spec may list
+# /lib/modules. Normalize first so retries cannot turn /usr/lib into
+# /usr/usr/lib. Patch only the generated artifact, never /usr/src/linux.
+perl -0pi -e \
+    's{(?:/usr)+/lib/modules/}{/usr/lib/modules/}g; s{(?<!/usr)/lib/modules/}{/usr/lib/modules/}g' \
+    "$generated_spec"
+grep -q "/usr/lib/modules/%{KERNELRELEASE}" "$generated_spec" || \
+    die 'Failed to adapt the generated RPM spec for openSUSE usrmerge.'
+if grep -qE '(/usr){2,}/lib/modules/' "$generated_spec"; then
+    die 'Generated RPM spec contains a duplicated /usr module path.'
+fi
+
+# openSUSE's RPM dependency generator assumes kernel modules are KMPs and adds
+# thousands of ksym(flavor:symbol) requirements. A complete standalone kernel
+# supplies those symbols to its own modules, so those package dependencies are
+# both unnecessary and unresolvable. Disable automatic dependency generation
+# for the main package only; explicit rpmlib metadata remains intact.
+if ! awk '/^%description/{exit} /^AutoReqProv:[[:space:]]*no$/{found=1} END{exit !found}' "$generated_spec"; then
+    sed -i '/^Name:[[:space:]]*kernel$/a AutoReqProv: no' "$generated_spec"
+fi
+awk '/^%description/{exit} /^AutoReqProv:[[:space:]]*no$/{found=1} END{exit !found}' \
+    "$generated_spec" || die 'Failed to disable automatic RPM dependencies for the custom kernel.'
+
+# Give the custom kernel an explicit identity in RPM/Zypper output. Also update
+# the generated devel subpackage's explicit name so the spec remains coherent.
+sed -i \
+    -e "s/^Name:[[:space:]]*kernel$/Name: $CUSTOM_PACKAGE_NAME/" \
+    -e "s/^%description -n kernel-devel$/%description -n $CUSTOM_PACKAGE_NAME-devel/" \
+    "$generated_spec"
+grep -qE "^Name:[[:space:]]+$CUSTOM_PACKAGE_NAME$" "$generated_spec" || \
+    die 'Failed to rename the generated custom kernel RPM.'
+
+# The distribution build strips module debug data in its RPM pipeline. The
+# upstream binrpm spec defines this only inside a disabled debuginfo branch,
+# leaving an 8+ GiB module tree. Make the definition unconditionally active.
+sed -i '/^%define install_mod_strip 1$/d' "$generated_spec"
+sed -i '1i %define install_mod_strip 1' "$generated_spec"
+
+(
+    cd "$build_dir"
+    rpmbuild -bb "$generated_spec" \
+        --define="_topdir $build_dir/rpmbuild" \
+        --target x86_64-linux \
+        --build-in-place \
+        --noprep \
+        --define='_smp_mflags %{nil}'
+)
+
+log 'Finding the generated bootable kernel RPM'
+mapfile -d '' -t generated_rpms < <(
+    find "$build_dir" -type f -path '*/RPMS/*' -name '*.rpm' -print0
+)
+((${#generated_rpms[@]} > 0)) || die "No RPM was generated below $build_dir"
+
+kernel_rpms=()
+for rpm_file in "${generated_rpms[@]}"; do
+    rpm_candidate_name=$(rpm -qp --qf '%{NAME}' "$rpm_file" 2>/dev/null || true)
+    [[ $rpm_candidate_name == "$CUSTOM_PACKAGE_NAME" ]] || continue
+    # Do not use grep -q here: with pipefail it may close the large RPM file
+    # listing early, making rpm(8) exit with SIGPIPE and the match look false.
+    if rpm -qlp "$rpm_file" | grep -Fx "/usr/lib/modules/$custom_release/vmlinuz" >/dev/null; then
+        kernel_rpms+=("$rpm_file")
+    fi
+done
+((${#kernel_rpms[@]} == 1)) || \
+    die "Expected exactly one RPM containing the $custom_release kernel image; found ${#kernel_rpms[@]}"
+
+kernel_rpm=${kernel_rpms[0]}
+custom_package_name=$(rpm -qp --qf '%{NAME}' "$kernel_rpm")
+[[ $custom_package_name == "$CUSTOM_PACKAGE_NAME" ]] || \
+    die "Generated package is named $custom_package_name instead of $CUSTOM_PACKAGE_NAME."
+[[ $custom_package_name != kernel-default ]] || \
+    die 'Generated package unexpectedly uses the protected kernel-default name.'
+if rpm -qp --obsoletes "$kernel_rpm" | grep -E '^kernel-default([[:space:]]|$)' >/dev/null; then
+    die 'Generated package would obsolete kernel-default; refusing installation.'
+fi
+if rpm -qp --conflicts "$kernel_rpm" | grep -E '^kernel-default([[:space:]]|$)' >/dev/null; then
+    die 'Generated package conflicts with kernel-default; refusing installation.'
+fi
+rpm -qlp "$kernel_rpm" | \
+    grep -E "/amd_isp4_capture[.]ko([.][a-z0-9]+)?$" >/dev/null || \
+    die "The generated kernel RPM does not contain amd_isp4_capture.ko"
+rpm -qlp "$kernel_rpm" | grep -Fx "/usr/lib/modules/$custom_release/kernel/drivers/media/platform/amd/isp4/amd_isp4_capture.ko.zst" >/dev/null || \
+    die 'The camera module is not Zstd-compressed in the generated RPM.'
+module_check_file=$(mktemp "$build_dir/amd_isp4_capture.XXXXXX.ko")
+if ! rpm2cpio "$kernel_rpm" | \
+    cpio -i --quiet --to-stdout "./usr/lib/modules/$custom_release/kernel/drivers/media/platform/amd/isp4/amd_isp4_capture.ko.zst" | \
+    zstd --decompress --quiet --stdout >"$module_check_file"; then
+    rm -f "$module_check_file"
+    die 'Could not extract the camera module for payload validation.'
+fi
+if readelf --sections "$module_check_file" | grep -E '[.]debug_(info|line|str|abbrev)' >/dev/null; then
+    rm -f "$module_check_file"
+    die 'Generated camera module still contains debug sections; refusing an oversized kernel installation.'
+fi
+rm -f "$module_check_file"
+
+printf 'Generated package:\n  %s\n' "$kernel_rpm"
+rpm -qip "$kernel_rpm" | sed -n '1,20p'
+
+log 'Checking boot-filesystem capacity before installation'
+require_free_space /boot "$MIN_BOOT_FREE_MIB" 'Boot filesystem'
+[[ -d /sys/firmware/efi ]] || die 'The running system was not booted in EFI mode; bootability cannot be validated.'
+mountpoint -q /boot/efi || die '/boot/efi is not mounted; refusing to install a kernel without its real EFI system partition.'
+[[ -w /boot/efi ]] || die '/boot/efi is not writable.'
+require_free_space /boot/efi "$MIN_EFI_FREE_MIB" 'EFI system partition'
+kernel_installed_bytes=$(rpm -qp --qf '%{SIZE}' "$kernel_rpm")
+kernel_required_mib=$(( (kernel_installed_bytes + 1048575) / 1048576 + 512 ))
+require_free_space /usr "$kernel_required_mib" 'Kernel module filesystem'
+
+log 'Previewing the installation transaction'
+zypper --no-refresh install --dry-run "$kernel_rpm"
+
+printf '\nInstall this custom kernel RPM? [y/N] '
+read -r answer
+case $answer in
+    y|Y|yes|YES|Yes) ;;
+    *)
+    printf '\nBUILD SUCCEEDED; INSTALLATION SKIPPED.\n'
+    printf 'The RPM remains at:\n  %s\n' "$kernel_rpm"
+    exit 0
+    ;;
+esac
+
+# Versions created by older revisions of this script used the overly generic
+# package name "kernel". Remove only that exact custom provider before the
+# renamed package is installed; kernel-default is never selected here.
+legacy_provider=''
+if queried_provider=$(rpm -q --whatprovides --qf '%{NAME}' "kernel-$custom_release" 2>/dev/null); then
+    legacy_provider=$queried_provider
+fi
+if [[ $legacy_provider == kernel ]]; then
+    log "Migrating legacy custom package kernel to $CUSTOM_PACKAGE_NAME"
+    zypper --no-refresh remove kernel
+    legacy_module_dir="/usr/lib/modules/$custom_release"
+    if [[ -e $legacy_module_dir ]]; then
+        [[ $custom_release == *-zbook ]] || die 'Refusing to clean a module tree without the -zbook suffix.'
+        [[ ! -L $legacy_module_dir ]] || die "Refusing to clean symlinked module tree: $legacy_module_dir"
+        [[ $(readlink -f "$legacy_module_dir") == "$legacy_module_dir" ]] || \
+            die "Unexpected legacy module path: $legacy_module_dir"
+        log "Removing stale files from the legacy custom module tree $legacy_module_dir"
+        find "$legacy_module_dir" -xdev -mindepth 1 -delete
+        rmdir "$legacy_module_dir"
+    fi
+elif [[ -n $legacy_provider && $legacy_provider != "$CUSTOM_PACKAGE_NAME" ]]; then
+    die "Unexpected installed provider for kernel-$custom_release: $legacy_provider"
+fi
+
+log "Installing $custom_release (existing kernel-default packages are protected)"
+if [[ $force_rebuild == true || $repair_install == true ]]; then
+    zypper --no-gpg-checks --no-refresh install --force "$kernel_rpm"
+else
+    zypper --no-gpg-checks --no-refresh install "$kernel_rpm"
+fi
+
+mapfile -t official_kernels_after < <(
+    rpm -qa --qf '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n' 'kernel-default' | sort -V
+)
+for official_package in "${official_kernels_before[@]}"; do
+    printf '%s\n' "${official_kernels_after[@]}" | grep -Fqx "$official_package" || \
+        die "Safety check failed: official package disappeared: $official_package"
+done
+
+[[ -e /boot/vmlinuz-$custom_release ]] || \
+    die "Package installed, but /boot/vmlinuz-$custom_release is absent. Do not reboot into the custom entry."
+camera_module_base="/usr/lib/modules/$custom_release/kernel/drivers/media/platform/amd/isp4/amd_isp4_capture.ko"
+[[ -s $camera_module_base || -s $camera_module_base.zst ]] || \
+    die 'Package installed, but the AMD ISP4 capture module is absent.'
+
+log 'Generating module dependency indexes'
+depmod "$custom_release"
+[[ -s /usr/lib/modules/$custom_release/modules.dep ]] || \
+    die 'depmod did not create modules.dep. CUSTOM KERNEL IS NOT BOOTABLE.'
+
+log 'Regenerating and validating the canonical custom initrd'
+dracut --force --kver "$custom_release" "/boot/initrd-$custom_release"
+lsinitrd "/boot/initrd-$custom_release" >/dev/null || \
+    die 'Generated initrd failed validation. CUSTOM KERNEL IS NOT BOOTABLE.'
+
+log 'Refreshing bootloader entries'
+if command -v update-bootloader >/dev/null 2>&1; then
+    update-bootloader --refresh
+elif command -v grub2-mkconfig >/dev/null 2>&1; then
+    grub2-mkconfig -o /boot/grub2/grub.cfg
+else
+    die 'Kernel installed, but no supported bootloader refresh command was found.'
+fi
+
+# This must be the final boot-artifact mutation. update-bootloader may refresh
+# an initrd or loader entry, so running kernel-install before it can leave the
+# canonical and EFI copies out of sync.
+log 'Installing the final EFI kernel, initrd, and boot-loader entry'
+if ! kernel-install add "$custom_release" \
+    "/usr/lib/modules/$custom_release/vmlinuz" \
+    "/boot/initrd-$custom_release"; then
+    die 'kernel-install failed. CUSTOM KERNEL IS NOT BOOTABLE. Inspect EFI free space and kernel-install diagnostics.'
+fi
+
+log 'Validating the installed kernel before declaring success'
+[[ -s /boot/vmlinuz-$custom_release ]] || \
+    die "POST-INSTALL VALIDATION FAILED: /boot/vmlinuz-$custom_release is absent or empty. CUSTOM KERNEL IS NOT BOOTABLE."
+[[ -s /boot/initrd-$custom_release ]] || \
+    die "The custom initrd /boot/initrd-$custom_release is absent."
+[[ -s /usr/lib/modules/$custom_release/vmlinuz ]] || \
+    die "POST-INSTALL VALIDATION FAILED: packaged kernel image is absent from /usr/lib/modules/$custom_release."
+cmp -s "/usr/lib/modules/$custom_release/vmlinuz" "/boot/vmlinuz-$custom_release" || \
+    die 'POST-INSTALL VALIDATION FAILED: packaged and /boot kernel images differ.'
+[[ -s /usr/lib/modules/$custom_release/modules.dep ]] || \
+    die 'POST-INSTALL VALIDATION FAILED: modules.dep is absent; depmod/kernel-install did not complete.'
+grep -q 'amd_isp4_capture' "/usr/lib/modules/$custom_release/modules.dep" || \
+    die 'POST-INSTALL VALIDATION FAILED: amd_isp4_capture is missing from modules.dep.'
+grep -qx 'CONFIG_VIDEO_AMD_ISP4_CAPTURE=m' "/boot/config-$custom_release" || \
+    die 'POST-INSTALL VALIDATION FAILED: installed kernel config lacks AMD ISP4 capture.'
+if command -v lsinitrd >/dev/null 2>&1; then
+    lsinitrd "/boot/initrd-$custom_release" >/dev/null || \
+        die 'POST-INSTALL VALIDATION FAILED: lsinitrd could not read the custom initrd.'
+fi
+[[ -s $efi_kernel ]] || \
+    die "POST-INSTALL VALIDATION FAILED: $efi_kernel is absent or empty. CUSTOM KERNEL IS NOT BOOTABLE."
+[[ -s $efi_initrd ]] || \
+    die "POST-INSTALL VALIDATION FAILED: $efi_initrd is absent or empty. CUSTOM KERNEL IS NOT BOOTABLE."
+cmp -s "/usr/lib/modules/$custom_release/vmlinuz" "$efi_kernel" || \
+    die 'POST-INSTALL VALIDATION FAILED: EFI and packaged kernel images differ.'
+cmp -s "/boot/initrd-$custom_release" "$efi_initrd" || \
+    die 'POST-INSTALL VALIDATION FAILED: EFI and canonical initrds differ.'
+lsinitrd "$efi_initrd" >/dev/null || \
+    die 'POST-INSTALL VALIDATION FAILED: EFI initrd is unreadable or truncated.'
+[[ -s $bls_entry ]] || \
+    die "POST-INSTALL VALIDATION FAILED: BLS entry is absent: $bls_entry"
+grep -qF "$custom_release" "$bls_entry" || \
+    die 'POST-INSTALL VALIDATION FAILED: BLS entry does not reference the custom release.'
+grep -Eq "^version[[:space:]]+$custom_release([[:space:]]|$)" "$bls_entry" || \
+    die 'POST-INSTALL VALIDATION FAILED: BLS entry has no matching version line.'
+grep -Eq "^linux[[:space:]]+/$entry_token/$custom_release/linux([[:space:]]|$)" "$bls_entry" || \
+    die 'POST-INSTALL VALIDATION FAILED: BLS entry has no matching EFI kernel path.'
+grep -Eq "^initrd[[:space:]]+/$entry_token/$custom_release/initrd-$custom_release([[:space:]]|$)" "$bls_entry" || \
+    die 'POST-INSTALL VALIDATION FAILED: BLS entry has no matching EFI initrd path.'
+expected_nevra=$(rpm -qp --qf '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}' "$kernel_rpm")
+mapfile -t installed_custom_nevras < <(
+    rpm -q --qf '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n' "$custom_package_name" 2>/dev/null || true
+)
+printf '%s\n' "${installed_custom_nevras[@]}" | grep -Fx "$expected_nevra" >/dev/null || \
+    die "POST-INSTALL VALIDATION FAILED: exact package $expected_nevra is not registered as installed."
+modinfo -k "$custom_release" amd_isp4_capture >/dev/null || \
+    die 'POST-INSTALL VALIDATION FAILED: modinfo cannot resolve amd_isp4_capture.'
+if [[ -r /boot/grub2/grub.cfg ]]; then
+    grep -qF "$custom_release" /boot/grub2/grub.cfg || \
+        die 'POST-INSTALL VALIDATION FAILED: no custom-kernel reference exists in grub.cfg.'
+fi
+
+printf '\n'
+printf '%s\n' '============================================================'
+printf '%s\n' ' SUCCESS: CUSTOM ZBOOK KERNEL INSTALLED AND BOOTABLE'
+printf '%s\n' '============================================================'
+printf 'Custom kernel:       %s\n' "$custom_release"
+printf 'Camera module:       installed\n'
+printf 'Kernel image:        /boot/vmlinuz-%s\n' "$custom_release"
+printf 'Initrd:              /boot/initrd-%s\n' "$custom_release"
+printf 'Official kernels retained:\n'
+printf '  %s\n' "${official_kernels_after[@]}"
+printf '\nReboot manually and select the %s entry. This script does not change the default boot entry or reboot the machine.\n' "$custom_release"
