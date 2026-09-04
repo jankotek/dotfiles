@@ -30,7 +30,7 @@ test/test-vm-xub26-deploy.sh       # clone xub26 -> setup/vm-xub26 -> test -> de
 | File | What it checks |
 |------|---------------|
 | `plasma.bats` | plasmashell, kwin_wayland, Wayland session active, not a VM, konsole, dolphin, virt-manager/remote-viewer GDK_BACKEND=x11 patches, no /home/* user auto-suspends on AC power (powerdevilrc AutoSuspendAction) |
-| `greetd.bats` | greetd + tuigreet installed, per-tty configs (tty3-10), PAM/logind-aware services, getty/other DMs masked, tty1-2 preserved |
+| `agetty.bats` | agetty logins on tty1-10, login PAM/logind integration, exec-based Plasma launcher, old greetd cleanup, persistent Full HD framebuffer |
 | `packages.bats` | KDE apps (kdenlive, kdiff3, kfind, krename, krita, kstars, ksystemlog, ktorrent, kwrite, filelight, partitionmanager), virt tools (virt-manager, virt-install, virt-viewer, podman, lima), dev tools (go, maven, node, tsc, java, yq) |
 | `strix-halo.bats` | AMD Strix Halo GPU params: amdgpu.gttsize, iommu=pt, amd_iommu=on, amdgpu.noretry=0, GTT >= 110GB, fixed VRAM <= 512MB. Skips on non-Strix Halo systems |
 

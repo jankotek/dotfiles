@@ -1,0 +1,99 @@
+#!/bin/bash
+# Persistently request a 1920x1080 boot and Linux console framebuffer.
+
+set -Eeuo pipefail
+
+readonly RESOLUTION=1920x1080
+
+if (( EUID != 0 )); then
+    echo "ERROR: jan-console-framebuffer must run as root" >&2
+    exit 1
+fi
+
+replace_grub_assignment() {
+    local file=$1 key=$2 value=$3 temp
+    temp=$(mktemp "${file}.jan.XXXXXX")
+    awk -v wanted="$key" -v replacement="$key=\"$value\"" '
+        $0 ~ "^[[:space:]]*" wanted "=" {
+            if (!written) print replacement
+            written=1
+            next
+        }
+        { print }
+        END { if (!written) print replacement }
+    ' "$file" > "$temp"
+    chmod --reference="$file" "$temp"
+    chown --reference="$file" "$temp"
+    if cmp -s "$file" "$temp"; then
+        rm -f -- "$temp"
+        return 1
+    fi
+    cp -p -- "$file" "${file}.bak"
+    mv -f -- "$temp" "$file"
+}
+
+set_grub_video_parameter() {
+    local file=$1 line value param
+    local -a params=() output=()
+    line=$(grep -m1 '^GRUB_CMDLINE_LINUX_DEFAULT=' "$file" || true)
+    value=${line#*=}
+    value=${value#\"}
+    value=${value%\"}
+    read -r -a params <<< "$value"
+    for param in "${params[@]}"; do
+        # Preserve connector-specific video= entries; replace only the global
+        # framebuffer mode owned by this helper.
+        [[ $param == video=* && $param != video=*:* ]] || output+=("$param")
+    done
+    output+=("video=$RESOLUTION")
+    replace_grub_assignment "$file" GRUB_CMDLINE_LINUX_DEFAULT "${output[*]}"
+}
+
+if [[ -f /etc/default/grub ]]; then
+    changed=0
+    replace_grub_assignment /etc/default/grub GRUB_GFXMODE "$RESOLUTION,auto" && changed=1
+    replace_grub_assignment /etc/default/grub GRUB_GFXPAYLOAD_LINUX "$RESOLUTION" && changed=1
+    set_grub_video_parameter /etc/default/grub && changed=1
+    if (( changed )); then
+        if command -v update-grub >/dev/null 2>&1; then
+            update-grub
+        elif command -v grub2-mkconfig >/dev/null 2>&1; then
+            grub2-mkconfig -o /boot/grub2/grub.cfg
+        else
+            echo "ERROR: no GRUB configuration generator was found" >&2
+            exit 1
+        fi
+    else
+        echo "Already configured in /etc/default/grub"
+    fi
+elif [[ -f /etc/kernel/cmdline ]]; then
+    # systemd-boot has no GRUB framebuffer handoff.  Use the kernel's generic
+    # framebuffer mode request, replacing any prior unqualified video= value.
+    read -r -a params < /etc/kernel/cmdline
+    output=()
+    replaced=0
+    for param in "${params[@]}"; do
+        if [[ $param == video=* && $param != video=*:* ]]; then
+            if (( ! replaced )); then output+=("video=$RESOLUTION"); replaced=1; fi
+        else
+            output+=("$param")
+        fi
+    done
+    if (( ! replaced )); then output+=("video=$RESOLUTION"); fi
+    new_cmdline=${output[*]}
+    old_cmdline=$(< /etc/kernel/cmdline)
+    if [[ $new_cmdline != "$old_cmdline" ]]; then
+        cp -p -- /etc/kernel/cmdline /etc/kernel/cmdline.bak
+        printf '%s\n' "$new_cmdline" > /etc/kernel/cmdline
+        command -v sdbootutil >/dev/null 2>&1 \
+            || { echo "ERROR: sdbootutil is required for systemd-boot" >&2; exit 1; }
+        sdbootutil update-all-entries
+    else
+        echo "Already configured in /etc/kernel/cmdline"
+    fi
+else
+    echo "ERROR: no supported bootloader configuration was found" >&2
+    exit 1
+fi
+
+echo "Reboot to apply the $RESOLUTION console framebuffer mode."

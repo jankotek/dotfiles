@@ -1,0 +1,115 @@
+#!/bin/bash
+# Replace this repository's multi-VT greetd setup with ordinary agetty/login.
+# tty1 through tty10 offer authenticated text logins.  From Bash,
+# `exec jan-plasma-session` replaces the login shell with Plasma Wayland.
+
+set -Eeuo pipefail
+
+readonly -a LOGIN_TTYS=(1 2 3 4 5 6 7 8 9 10)
+
+error_trap() {
+    local rc=$?
+    echo >&2 "${BASH_SOURCE[1]}:${BASH_LINENO[0]}: command \`$BASH_COMMAND\` failed with exit code $rc"
+    exit "$rc"
+}
+trap error_trap ERR
+
+if (( EUID != 0 )); then
+    echo "ERROR: jan-setup-agetty must run as root" >&2
+    exit 1
+fi
+if [[ ! -d /run/systemd/system ]]; then
+    echo "ERROR: jan-setup-agetty requires systemd as PID 1" >&2
+    exit 1
+fi
+
+# The login PAM service is what registers the shell (and therefore Plasma
+# after exec) as a logind session and creates /run/user/UID.
+login_pam=
+for candidate in /etc/pam.d/login /usr/etc/pam.d/login /usr/lib/pam.d/login; do
+    if [[ -r $candidate ]]; then
+        login_pam=$candidate
+        break
+    fi
+done
+[[ -n $login_pam ]] || { echo "ERROR: the login PAM service is missing" >&2; exit 1; }
+
+if grep -Eq '^[[:space:]]*session[[:space:]].*pam_systemd\.so([[:space:]]|$)' "$login_pam"; then
+    :
+elif grep -Eq '^[[:space:]]*session[[:space:]]+(include|substack)[[:space:]]+common-session([[:space:]]|$)' "$login_pam" \
+    && grep -Eq '^[[:space:]]*session[[:space:]].*pam_systemd\.so([[:space:]]|$)' /etc/pam.d/common-session; then
+    :
+else
+    echo "ERROR: the login PAM stack does not include pam_systemd.so" >&2
+    exit 1
+fi
+
+for command_name in \
+    agetty \
+    loginctl \
+    flock; do
+    command -v "$command_name" >/dev/null 2>&1 \
+        || { echo "ERROR: required command is missing: $command_name" >&2; exit 1; }
+done
+for command_path in \
+    /usr/bin/startplasma-wayland \
+    /usr/local/bin/jan-plasma-session \
+    /usr/local/bin/jan-greetd-session; do
+    [[ -x $command_path ]] || { echo "ERROR: required executable is missing: $command_path" >&2; exit 1; }
+done
+
+echo "==> Installing the local-console login banner"
+install -d -m 0755 /etc/issue.d
+if [[ ! -e /etc/issue ]]; then
+    install -m 0644 /dev/null /etc/issue
+fi
+cat > /etc/issue.d/80-jan-system-info.issue <<'EOF'
+\e{bold}\S\e{reset}
+Host: \n    Architecture: \m    Kernel: \r
+IPv4: \4    Console: \l
+Start Plasma Wayland: exec jan-plasma-session
+EOF
+chmod 0644 /etc/issue.d/80-jan-system-info.issue
+
+echo "==> Removing the previous greetd VT configuration"
+systemctl disable --now jan-greetd-switch-tty3.service 2>/dev/null || true
+systemctl disable --now greetd-kde.service 2>/dev/null || true
+rm -f -- \
+    /etc/systemd/system/jan-greetd-switch-tty3.service \
+    /etc/systemd/system/graphical.target.wants/jan-greetd-switch-tty3.service \
+    /etc/systemd/system/greetd-kde.service \
+    /etc/systemd/system/graphical.target.wants/greetd-kde.service \
+    /etc/greetd/kde-autologin.toml
+for tty in 3 4 5 6 7 8 9 10 11 12; do
+    systemctl disable --now "greetd-tty${tty}.service" 2>/dev/null || true
+    rm -f -- \
+        "/etc/systemd/system/greetd-tty${tty}.service" \
+        "/etc/systemd/system/graphical.target.wants/greetd-tty${tty}.service" \
+        "/etc/systemd/system/multi-user.target.wants/greetd-tty${tty}.service" \
+        "/etc/greetd/config-tty${tty}.toml"
+done
+
+echo "==> Enabling ordinary gettys on tty1 through tty10"
+for tty in "${LOGIN_TTYS[@]}"; do
+    systemctl unmask "getty@tty${tty}.service" "autovt@tty${tty}.service"
+    systemctl enable "getty@tty${tty}.service"
+done
+
+# Preserve tty12-menu and leave tty11 unused on the physical host.  Explicit
+# getty instances above do not depend on logind's on-demand NAutoVTs policy.
+rm -f -- /etc/systemd/logind.conf.d/80-jan-greetd-vts.conf
+
+for unit in display-manager.service display-manager-legacy.service greetd.service greetd-kde.service \
+    sddm.service lightdm.service gdm.service gdm3.service xdm.service lxdm.service; do
+    systemctl disable --now "$unit" 2>/dev/null || true
+    systemctl mask --force "$unit"
+done
+
+systemctl daemon-reload
+for tty in "${LOGIN_TTYS[@]}"; do
+    systemctl try-restart "getty@tty${tty}.service" 2>/dev/null || true
+done
+
+echo "=========== HOST AGETTY SETUP DONE ==========="
+echo "Log in on tty1-tty10 and run 'exec jan-plasma-session'."
+echo "Logging out of Plasma then returns the console to agetty."

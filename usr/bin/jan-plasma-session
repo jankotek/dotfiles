@@ -1,0 +1,48 @@
+#!/bin/bash
+# Start Plasma Wayland from a real local login, replacing the login shell.
+#
+# Run this as `exec jan-plasma-session`.  A standalone child process cannot
+# replace its parent Bash and is deliberately rejected: returning from it
+# would expose the shell that launched Plasma instead of ending the PAM login
+# and allowing getty to print a fresh prompt.
+
+set -Eeuo pipefail
+
+die() {
+    echo "ERROR: $*" >&2
+    exit 1
+}
+
+[[ -t 0 && -t 1 && -t 2 ]] || die "Plasma must be started from a local virtual console"
+tty_path=$(/usr/bin/tty)
+[[ $tty_path =~ ^/dev/tty[0-9]+$ ]] || die "not a Linux virtual console: $tty_path"
+
+[[ -n ${XDG_SESSION_ID:-} ]] || die "this login has no systemd-logind session"
+[[ -d ${XDG_RUNTIME_DIR:-} && -O ${XDG_RUNTIME_DIR:-} ]] \
+    || die "this login has no PAM-owned XDG_RUNTIME_DIR"
+
+session_properties=$(/usr/bin/loginctl show-session "$XDG_SESSION_ID" \
+    --property=User --property=Remote --property=Seat --property=TTY)
+[[ $session_properties == *$'User='"$EUID"$'\n'* \
+    || $session_properties == *$'User='"$EUID" ]] \
+    || die "logind session $XDG_SESSION_ID belongs to another user"
+[[ $session_properties == *$'Remote=no'* ]] || die "refusing to start Plasma in a remote login"
+[[ $session_properties == *$'Seat=seat0'* ]] || die "logind session is not attached to seat0"
+[[ $session_properties == *$'TTY='"${tty_path#/dev/}"* ]] \
+    || die "logind session is not attached to $tty_path"
+
+# With `exec jan-plasma-session`, the process which login originally started
+# as Bash has this script's image and login remains its parent.  If Bash is
+# still the parent, the caller forgot exec and Plasma would return to a shell.
+parent_comm=$(<"/proc/$PPID/comm")
+case $parent_comm in
+    login|login.*) ;;
+    *) die "an executable cannot replace its parent shell; run: exec jan-plasma-session" ;;
+esac
+
+[[ -x /usr/bin/startplasma-wayland ]] || die "/usr/bin/startplasma-wayland is missing"
+[[ -x /usr/local/bin/jan-greetd-session ]] || die "jan-greetd-session is missing"
+
+export XDG_CURRENT_DESKTOP=KDE
+export XDG_SESSION_DESKTOP=KDE
+exec /usr/local/bin/jan-greetd-session wayland /usr/bin/startplasma-wayland

@@ -9,7 +9,7 @@
 #   - installs KDE apps, virt stack, and CLI tools via zypper
 #   - locks packages we never want pulled in (X server, vim, PackageKit, ...)
 #   - masks services we replace or don't use (sddm, fwupd, ollama, ...)
-#   - sets up greetd+tuigreet logins on tty3-10 (sddm stays masked)
+#   - sets up agetty logins on tty1-10 and CLI-started Plasma Wayland
 #   - runs the cross-distro jan-* helpers
 #   - syncs repo home dotfiles WITHOUT --delete (user data survives re-runs)
 #
@@ -75,7 +75,6 @@ zypper -n install --no-recommends \
     konsole dolphin kate kwrite ark gwenview okular spectacle \
     kdenlive kdiff3 kfind krename krita kstars ksystemlog ktorrent \
     filelight partitionmanager \
-    greetd tuigreet \
     virt-manager virt-install virt-viewer qemu podman lima \
     mc htop git curl powertop fish iotop ncdu nano mosh ripgrep \
     pwgen telnet jdupes just bats zim sshpass jq yq fzf rsync dconf \
@@ -109,7 +108,7 @@ done
 zypper -n addlock -t pattern kde_pim 2>/dev/null || true
 
 # ---------- Mask unused / replaced services ----------
-# sddm is replaced by greetd (below). The rest are simply not used here.
+# Plasma is started from agetty logins (below). The rest are simply not used.
 # Guard each: a fresh install may not have all of these units.
 echo "==> Masking unused services"
 for unit in sddm.service fwupd.service ollama.service forgejo-runner.service; do
@@ -117,14 +116,14 @@ for unit in sddm.service fwupd.service ollama.service forgejo-runner.service; do
 done
 
 # ---------- Cross-distro jan-* helpers ----------
-# Each helper detects distro internally. greetd setup masks getty@tty3-10 and
-# enables greetd-tty3-10. tty11-root is intentionally omitted (see header).
+# tty11-root is intentionally omitted (see header).
 
 echo "==> Running jan-* setup helpers"
 jan-console-font            || echo "WARNING: console font setup failed (non-fatal)"
+jan-console-framebuffer
 jan-setup-pkg-safety        || echo "WARNING: pkg safety setup failed (non-fatal)"
 jan-setup-kernel-tweaks     || echo "WARNING: kernel tweaks setup failed (non-fatal)"
-jan-setup-greetd
+jan-setup-agetty
 jan-systemd-tty12-menu      || echo "WARNING: tty12 menu setup failed (non-fatal)"
 # Patch virt-manager/remote-viewer to run under XWayland (fractional scaling fix).
 jan-fix-virtman-scaling     || echo "WARNING: virt-manager scaling fix failed (non-fatal)"
@@ -254,4 +253,4 @@ configure-user-dirs "$HOME_USER" "$HOME_GROUP" "$HOME_DIR"
 systemctl daemon-reload
 
 echo "=========== DONE ==========="
-echo "Reboot to activate greetd logins (tty3-10) and the graphical target."
+echo "Reboot to activate agetty logins (tty1-10) and the Full HD console."
