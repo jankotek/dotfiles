@@ -9,7 +9,7 @@
 #   - installs KDE apps, virt stack, and CLI tools via zypper
 #   - locks packages we never want pulled in (X server, vim, PackageKit, ...)
 #   - masks services we replace or don't use (sddm, fwupd, ollama, ...)
-#   - sets up agetty logins on tty1-10 and CLI-started Plasma Wayland
+#   - leaves tty1 stock; sets up agetty on tty2-10 and CLI-started Plasma
 #   - runs the cross-distro jan-* helpers
 #   - syncs repo home dotfiles WITHOUT --delete (user data survives re-runs)
 #
@@ -255,4 +255,4 @@ configure-user-dirs "$HOME_USER" "$HOME_GROUP" "$HOME_DIR"
 systemctl daemon-reload
 
 echo "=========== DONE ==========="
-echo "Reboot to activate agetty logins (tty1-10) and the Full HD console."
+echo "Reboot to activate stock tty1, managed agetty logins on tty2-10, and the Full HD console."

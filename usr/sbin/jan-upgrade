@@ -41,8 +41,9 @@ else
   exit 1
 fi
 
-if command -v jan-dotfiles-update &> /dev/null; then
-  jan-dotfiles-update dotfiles
-fi
+# Do not run optional deployment hooks here. jan-dotfiles-update is not part of
+# this repository, so its service/session side effects cannot be audited. Keep
+# the system upgrade safe for an administrator logged in on the stock tty1;
+# update or deploy dotfiles explicitly as a separate operation.
 
 echo "== System updated successfully =="

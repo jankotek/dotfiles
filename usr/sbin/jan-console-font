@@ -85,10 +85,7 @@ EOF
 systemctl daemon-reload
 systemctl enable jan-console-font.service
 
-# Apply immediately
-systemctl restart systemd-vconsole-setup.service 2>/dev/null || true
-if command -v setupcon &>/dev/null; then
-    setupcon --force 2>/dev/null || true
-fi
-
-echo "Console font set to Terminus (re-applied on every boot)"
+# Do not reset a live virtual console. Applying a font through
+# systemd-vconsole-setup or setupcon can disturb the maintenance login that is
+# running this setup. The enabled oneshot applies the font at the next boot.
+echo "Console font set to Terminus for the next boot (re-applied on every boot)"

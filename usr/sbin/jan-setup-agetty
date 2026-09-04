@@ -1,11 +1,12 @@
 #!/bin/bash
 # Replace this repository's multi-VT greetd setup with ordinary agetty/login.
-# tty1 through tty10 offer authenticated text logins.  From Bash,
+# tty1 is deliberately left entirely to the distribution's stock getty setup.
+# This helper explicitly manages tty2 through tty10. From Bash,
 # `exec jan-plasma-session` replaces the login shell with Plasma Wayland.
 
 set -Eeuo pipefail
 
-readonly -a LOGIN_TTYS=(1 2 3 4 5 6 7 8 9 10)
+readonly -a MANAGED_LOGIN_TTYS=(2 3 4 5 6 7 8 9 10)
 
 error_trap() {
     local rc=$?
@@ -89,8 +90,9 @@ for tty in 3 4 5 6 7 8 9 10 11 12; do
         "/etc/greetd/config-tty${tty}.toml"
 done
 
-echo "==> Enabling ordinary gettys on tty1 through tty10"
-for tty in "${LOGIN_TTYS[@]}"; do
+echo "==> Leaving tty1 on its stock getty configuration"
+echo "==> Enabling ordinary gettys on tty2 through tty10"
+for tty in "${MANAGED_LOGIN_TTYS[@]}"; do
     systemctl unmask "getty@tty${tty}.service" "autovt@tty${tty}.service"
     systemctl enable "getty@tty${tty}.service"
 done
@@ -106,10 +108,11 @@ for unit in display-manager.service display-manager-legacy.service greetd.servic
 done
 
 systemctl daemon-reload
-for tty in "${LOGIN_TTYS[@]}"; do
-    systemctl try-restart "getty@tty${tty}.service" 2>/dev/null || true
-done
+# Do not start or restart any getty here. PAM/logind may move an authenticated
+# login into session-N.scope while its terminal remains owned by the getty
+# unit. A runtime getty operation can hang up that terminal and end the login.
+# The enablement above takes effect normally at boot.
 
 echo "=========== HOST AGETTY SETUP DONE ==========="
-echo "Log in on tty1-tty10 and run 'exec jan-plasma-session'."
+echo "tty1 remains stock. Log in on tty1-tty10 and run 'exec jan-plasma-session'."
 echo "Logging out of Plasma then returns the console to agetty."

@@ -3,11 +3,22 @@
 
 load ../helpers
 
-LOGIN_TTYS=(1 2 3 4 5 6 7 8 9 10)
+MANAGED_LOGIN_TTYS=(2 3 4 5 6 7 8 9 10)
 
-@test "tty1 through tty10 use ordinary getty services" {
+@test "tty1 uses the stock distribution getty without local overrides" {
+    local fragment drop_ins
+    fragment=$(systemctl show getty@tty1.service -p FragmentPath --value)
+    drop_ins=$(systemctl show getty@tty1.service -p DropInPaths --value)
+
+    [[ $fragment == /usr/lib/systemd/system/getty@.service ]]
+    [[ $drop_ins != *"/etc/systemd/system/getty@tty1.service.d/"* ]]
+    [[ ! -e /etc/systemd/system/getty@tty1.service ]]
+    [[ ! -e /etc/systemd/system/getty@tty1.service.d ]]
+}
+
+@test "tty2 through tty10 use ordinary getty services" {
     local tty state fragment
-    for tty in "${LOGIN_TTYS[@]}"; do
+    for tty in "${MANAGED_LOGIN_TTYS[@]}"; do
         state=$(systemctl is-enabled "getty@tty${tty}.service")
         [[ $state == enabled ]]
         fragment=$(systemctl show "getty@tty${tty}.service" \
@@ -15,6 +26,25 @@ LOGIN_TTYS=(1 2 3 4 5 6 7 8 9 10)
         [[ $fragment == *"agetty"* ]]
         [[ $fragment == *"Restart=always"* ]]
     done
+}
+
+@test "agetty setup never changes the runtime state of a getty" {
+    assert_file_contains /usr/local/sbin/jan-setup-agetty \
+        'readonly -a MANAGED_LOGIN_TTYS=(2 3 4 5 6 7 8 9 10)'
+    ! grep -Eq 'systemctl[[:space:]]+(start|stop|restart|try-restart)[[:space:]].*getty@tty' \
+        /usr/local/sbin/jan-setup-agetty
+}
+
+@test "host setup does not reset a live virtual console" {
+    local font_setup=/usr/local/sbin/jan-console-font
+    ! grep -Eq 'systemctl[[:space:]]+restart[[:space:]]+systemd-vconsole-setup|setupcon[[:space:]]+--force' \
+        "$font_setup"
+}
+
+@test "system upgrade has no unaudited service or session hook" {
+    local upgrade=/usr/local/sbin/jan-upgrade
+    ! sed '/^[[:space:]]*#/d' "$upgrade" | \
+        grep -Eq 'systemctl|loginctl|jan-dotfiles-update'
 }
 
 @test "login PAM stack registers sessions with logind" {
