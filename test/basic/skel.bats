@@ -54,6 +54,15 @@ load ../helpers
         '^WordModeAscii=true$'
 }
 
+@test "MC desktop shortcuts use the packaged icon name" {
+    assert_file_contains \
+        "$OPT_JAN/home/desk/mc.desktop" \
+        '^Icon=mc$'
+    assert_file_contains \
+        "$OPT_JAN/skel/home/desk/mc.desktop" \
+        '^Icon=mc$'
+}
+
 @test "monospace defaults use JetBrains Mono 10" {
     assert_file_contains \
         "$OPT_JAN/usr/share/color-schemes/Sweet-dark.colors" \

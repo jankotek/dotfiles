@@ -4,6 +4,6 @@ Type=Application
 Name=MC
 Comment=Midnight Commander
 Exec=mc
-Icon=MidnightCommander
+Icon=mc
 Terminal=true
 StartupNotify=false

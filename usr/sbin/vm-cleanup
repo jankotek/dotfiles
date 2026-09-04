@@ -27,6 +27,10 @@ done < <(find /usr/share/plasma/look-and-feel -type f \
 # unwanted entries alongside the curated profiles in /usr/local/share. Keep
 # Konsole's built-in color schemes: dark.profile and white.profile reference
 # its exact WhiteOnBlack and BlackOnWhite palettes.
+#
+# Konsole's "Built-in [Read-only]" profile is not a file: Konsole constructs
+# it internally as FALLBACK/ and always includes it in the profile settings
+# model. Deleting every packaged *.profile below cannot remove that row.
 if [[ -d /usr/share/konsole ]]; then
     find /usr/share/konsole -maxdepth 1 -type f -name '*.profile' -delete
 fi
