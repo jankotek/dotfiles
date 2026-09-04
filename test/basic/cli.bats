@@ -7,6 +7,10 @@ load ../helpers
     assert_command git
 }
 
+@test "lazygit is installed" {
+    assert_command lazygit
+}
+
 @test "curl is installed" {
     assert_command curl
 }

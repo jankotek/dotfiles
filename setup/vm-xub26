@@ -21,6 +21,10 @@ error_trap() {
 }
 trap error_trap ERR
 
+SETUP_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+# shellcheck source=/dev/null
+source "${SETUP_DIR}/common-cli-packages.sh"
+
 guest_agent_owner_token=
 
 cleanup_guest_agent_guard() {
@@ -69,11 +73,11 @@ fi
 
 apt-get update
 apt-get install -y \
-  terminator rofi mousepad arandr dconf-cli zim \
+  terminator rofi mousepad arandr dconf-cli \
   xfce4-fsguard-plugin xfce4-systemload-plugin xfce4-taskmanager \
-  links mc htop git curl powertop fish iftop iotop sshpass ncdu nano mosh ripgrep rsync starship \
+  links "${JAN_COMMON_CLI_PACKAGES[@]}" iftop sshpass starship \
   fonts-jetbrains-mono fonts-terminus console-setup \
-  pwgen telnet jdupes just bats xdotool
+  xdotool
 
 # Seed future VM accounts. The XFCE files are ignored by Plasma, and VM-only
 # display handling is a separate XFCE autostart entry.

@@ -40,6 +40,8 @@ if systemd-detect-virt -q -v; then
 fi
 
 REPO_DIR="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+# shellcheck source=/dev/null
+source "${REPO_DIR}/setup/common-cli-packages.sh"
 
 # ---------- repo usr/ -> /usr/local symlinks ----------
 
@@ -76,8 +78,8 @@ zypper -n install --no-recommends \
     kdenlive kdiff3 kfind krename krita kstars ksystemlog ktorrent \
     filelight partitionmanager \
     virt-manager virt-install virt-viewer qemu podman lima \
-    mc htop git curl powertop fish iotop ncdu nano mosh ripgrep \
-    pwgen telnet jdupes just bats zim sshpass jq yq fzf rsync dconf \
+    "${JAN_COMMON_CLI_PACKAGES[@]}" \
+    sshpass jq yq fzf dconf \
     NetworkManager-tui jetbrains-mono-fonts \
     java-17-openjdk-devel maven
 

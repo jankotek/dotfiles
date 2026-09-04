@@ -15,6 +15,10 @@ fi
 set -euo pipefail
 trap 'echo >&2 "${BASH_SOURCE[0]}:${BASH_LINENO[0]}: Command \`$BASH_COMMAND\` failed with exit code $?"; exit $?' ERR
 
+SETUP_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+# shellcheck source=/dev/null
+source "${SETUP_DIR}/common-cli-packages.sh"
+
 # ---------- /opt/jan/usr -> /usr/local symlinks ----------
 
 cp -f -s -r /opt/jan/usr/* /usr/local
@@ -38,8 +42,8 @@ zypper -n --no-gpg-checks refresh
 zypper -n install --no-recommends \
     terminator rofi mousepad arandr \
     xfce4-fsguard-plugin xfce4-systemload-plugin xfce4-taskmanager \
-    mc htop git curl powertop fish iftop iotop ncdu nano mosh ripgrep rsync \
-    pwgen telnet jdupes just bats zim \
+    "${JAN_COMMON_CLI_PACKAGES[@]}" \
+    iftop \
     jetbrains-mono-fonts terminus-bitmap-fonts
 
 # Seed future XFCE VM accounts while preserving /usr/etc/skel vendor files.
