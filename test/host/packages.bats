@@ -81,14 +81,6 @@ load ../helpers
     assert_command mvn
 }
 
-@test "node is installed" {
-    assert_command node
-}
-
-@test "tsc is installed" {
-    assert_command tsc
-}
-
 @test "java is installed" {
     assert_command java
 }

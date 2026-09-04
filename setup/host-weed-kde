@@ -88,13 +88,6 @@ zypper -n install --no-recommends \
 # files from /usr/etc/skel; this installs only administrator overrides.
 "${REPO_DIR}/skel/install"
 
-# Dev toolchains — best-effort (package names drift on a rolling distro;
-# portable tools live in /opt via jan-update-opt instead).
-echo "==> Installing dev toolchains (best-effort)"
-zypper -n install --no-recommends nodejs22 || \
-  zypper -n install --no-recommends nodejs || \
-  echo "WARNING: nodejs install skipped (install via jan-update-opt)"
-
 # ---------- Package locks (the "masked" packages) ----------
 # Remove if present, then lock so they can't be pulled back in. The X server
 # is locked because this host runs pure Wayland; vim/emacs/PackageKit are
