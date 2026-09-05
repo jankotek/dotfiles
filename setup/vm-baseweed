@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# vm-baseweed — Tumbleweed counterpart to setup/vm-xub24.
+# vm-baseweed — Tumbleweed counterpart to setup/vm-xub26.
 #
 # Symlinks /opt/jan/usr into /usr/local, installs core CLI tools via zypper,
 # runs the cross-distro jan-* setup helpers, and syncs the canonical dotfiles
@@ -38,7 +38,7 @@ cp -f -s -r /opt/jan/usr/* /usr/local
 systemctl mask qemu-guest-agent.service 2>/dev/null || true
 systemctl mask spice-vdagentd.service 2>/dev/null || true
 
-zypper -n --no-gpg-checks refresh
+zypper -n --gpg-auto-import-keys refresh
 
 # DO NOT add qemu-guest-agent or spice-vdagent here — they are already in
 # the baseweed image, and reinstalling/upgrading them mid-run kills our

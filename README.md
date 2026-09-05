@@ -36,3 +36,15 @@ OPT_JAN="$PWD" bats test/utils/pod-subid-allocation.bats
 The host and VM suites inspect provisioned systems. Tests under `test/utils/`
 may be destructive unless their documentation explicitly says they are
 fixture-only; see [test/README.md](test/README.md) for details.
+
+## Utilities
+
+- `jan-doctor` — read-only host/VM health summary
+- `jan-dotfiles-diff [USER|HOME|--skel]` — preview canonical skeleton changes
+- `jan-download URL OUTPUT [SHA256]` — resumable aria2 download with optional verification
+- `jan-vm-smoke VM` — quick QGA, DHCP, DNS, and service checks
+- `jan-vm-reset [--yes] VM BASE_VM` — recreate one disposable VM from its base
+- `jan-clean-check [MIN_MIB]` — report large caches, backups, overlays, and kernels
+
+For a user whose home does not exist yet, run `sudo /opt/jan/skel/install`
+before `useradd --create-home`. `jan-create-user` performs this automatically.

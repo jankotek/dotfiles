@@ -89,7 +89,6 @@ Install these packages:
 ARandR is included in every graphical VM bootstrap:
 
 - `setup/vm-baseweed`
-- `setup/vm-xub24`
 - `setup/vm-xub26`
 
 The Xubuntu scripts install both SPICE and QEMU guest agents. The Tumbleweed

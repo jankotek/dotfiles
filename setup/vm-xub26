@@ -2,8 +2,7 @@
 
 # Xubuntu 26.04 VM provisioning.
 #
-# Kept separate from vm-xub24 so package differences can diverge cleanly over
-# time, while preserving the same VM deployment contract.
+# This is the supported Ubuntu VM provisioner.
 
 # Sanity check: verify running inside a VM
 if ! systemd-detect-virt -q -v; then

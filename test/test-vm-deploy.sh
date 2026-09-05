@@ -13,9 +13,9 @@ VM_EXEC="$OPT_JAN/usr/bin/vm-exec"
 VM_WAIT="$OPT_JAN/usr/bin/vm-start-and-wait"
 
 IMAGES_DIR="$HOME/.local/share/libvirt/images"
-BASE_VM="${BASE_VM:-xub}"
+BASE_VM="${BASE_VM:-xub26}"
 BASE_DISK="${BASE_DISK:-$IMAGES_DIR/${BASE_VM}.qcow2}"
-SETUP_SCRIPT="${SETUP_SCRIPT:-/opt/jan/setup/vm-xub24}"
+SETUP_SCRIPT="${SETUP_SCRIPT:-/opt/jan/setup/vm-xub26}"
 VM_NAME_PREFIX="${VM_NAME_PREFIX:-test}"
 
 VM_NAME="${VM_NAME_PREFIX}-$(date +%y%m%d-%H%M)"
@@ -189,12 +189,7 @@ for i in $(seq 1 30); do
     sleep 1
 done
 
-# 6. Install bats inside the VM
-echo ""
-echo "=== Installing bats ==="
-"$VM_EXEC" "$VM_NAME" "DEBIAN_FRONTEND=noninteractive apt-get install -y bats"
-
-# 7. Run tests
+# 6. Run tests (the provisioner installs bats with the standard CLI tools)
 echo ""
 echo "=== Running tests ==="
 set +e

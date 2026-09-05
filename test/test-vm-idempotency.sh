@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Clone xub, run setup/vm-xub24 once, drop user-data sentinels, then run
+# Clone xub26, run setup/vm-xub26 once, drop user-data sentinels, then run
 # test/utils/idempotency.bats which re-runs setup and verifies the second
 # run is clean and didn't blast user data.
 #
@@ -13,8 +13,8 @@ OPT_JAN="${SCRIPT_DIR%/test}"
 VM_EXEC="$OPT_JAN/usr/bin/vm-exec"
 VM_WAIT="$OPT_JAN/usr/bin/vm-start-and-wait"
 
-BASE_VM="xub"
-BASE_DISK="$HOME/.local/share/libvirt/images/xub.qcow2"
+BASE_VM="${BASE_VM:-xub26}"
+BASE_DISK="${BASE_DISK:-$HOME/.local/share/libvirt/images/${BASE_VM}.qcow2}"
 IMAGES_DIR="$HOME/.local/share/libvirt/images"
 
 VM_NAME="idempo-$(date +%y%m%d-%H%M)"
@@ -54,13 +54,10 @@ XML=$(echo "$XML" | sed -E "s|<mac address='52:54:00:[^']+'/>|<mac address='$NEW
 echo "$XML" | virsh -c qemu:///session define /dev/stdin
 "$VM_WAIT" "$VM_NAME"
 
-echo "=== First setup/vm-xub24 ==="
-"$VM_EXEC" "$VM_NAME" "/opt/jan/setup/vm-xub24"
+echo "=== First setup/vm-xub26 ==="
+"$VM_EXEC" "$VM_NAME" "/opt/jan/setup/vm-xub26"
 
-echo "=== Install bats ==="
-"$VM_EXEC" "$VM_NAME" "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq bats"
-
-echo "=== Run idempotency.bats (re-runs setup/vm-xub24 in setup_file) ==="
+echo "=== Run idempotency.bats (re-runs setup/vm-xub26 in setup_file) ==="
 set +e
 "$VM_EXEC" "$VM_NAME" 'export OPT_JAN=/opt/jan; bats /opt/jan/test/utils/idempotency.bats'
 RC=$?

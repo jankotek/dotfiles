@@ -1,0 +1,146 @@
+#!/bin/bash
+# Delete one disposable VM and recreate it as a qcow2 overlay of a base VM.
+
+set -Eeuo pipefail
+
+usage() { echo "Usage: jan-vm-reset [--yes] VM BASE_VM"; }
+assume_yes=0
+if [[ ${1:-} == --yes ]]; then
+    assume_yes=1
+    shift
+fi
+if [[ ${1:-} == -h || ${1:-} == --help ]]; then
+    usage
+    exit 0
+fi
+if (( $# != 2 )); then
+    usage >&2
+    exit 2
+fi
+
+vm=$1
+base_vm=$2
+uri=qemu:///session
+[[ $vm != "$base_vm" ]] || { echo "ERROR: VM and base VM must differ" >&2; exit 2; }
+[[ $vm != */* && $base_vm != */* ]] || { echo "ERROR: invalid VM name" >&2; exit 2; }
+command -v qemu-img >/dev/null || { echo "ERROR: qemu-img is required" >&2; exit 1; }
+command -v jq >/dev/null || { echo "ERROR: jq is required" >&2; exit 1; }
+command -v virt-clone >/dev/null || { echo "ERROR: virt-clone is required" >&2; exit 1; }
+virsh -c "$uri" dominfo "$base_vm" >/dev/null
+[[ $(virsh -c "$uri" domstate "$base_vm") == "shut off" ]] || {
+    echo "ERROR: base VM must be shut off: $base_vm" >&2
+    exit 1
+}
+
+mapfile -t base_disks < <(
+    virsh -c "$uri" domblklist "$base_vm" --details |
+        awk '$1 == "file" && $2 == "disk" {print $4}'
+)
+(( ${#base_disks[@]} == 1 )) || {
+    echo "ERROR: base VM must have exactly one file-backed disk" >&2
+    exit 1
+}
+base_disk=${base_disks[0]}
+base_format=$(qemu-img info "$base_disk" | sed -n 's/^file format: //p')
+[[ -n $base_format ]] || { echo "ERROR: could not determine base disk format" >&2; exit 1; }
+
+target_exists=0
+target_disks=()
+if virsh -c "$uri" dominfo "$vm" >/dev/null 2>&1; then
+    target_exists=1
+    mapfile -t target_disks < <(
+        virsh -c "$uri" domblklist "$vm" --details |
+            awk '$1 == "file" && $2 == "disk" {print $4}'
+    )
+    (( ${#target_disks[@]} == 1 )) || {
+        echo "ERROR: target VM must have exactly one file-backed disk" >&2
+        exit 1
+    }
+    target_disk=${target_disks[0]}
+    target_info=$(qemu-img info --force-share --output=json "$target_disk")
+    target_format=$(jq -r '.format // empty' <<<"$target_info")
+    target_backing=$(jq -r '."full-backing-filename" // empty' <<<"$target_info")
+    [[ $target_format == qcow2 && -n $target_backing ]] || {
+        echo "ERROR: target disk is not a disposable qcow2 overlay: $target_disk" >&2
+        exit 1
+    }
+    [[ $(realpath -e "$target_backing") == "$(realpath -e "$base_disk")" ]] || {
+        echo "ERROR: target overlay is not backed by requested base: $base_disk" >&2
+        exit 1
+    }
+    while IFS= read -r other_vm; do
+        [[ -n $other_vm && $other_vm != "$vm" ]] || continue
+        while IFS= read -r other_disk; do
+            [[ -n $other_disk && -e $other_disk ]] || continue
+            [[ $(realpath -e "$other_disk") != "$(realpath -e "$target_disk")" ]] || {
+                echo "ERROR: target disk is also used by VM $other_vm" >&2
+                exit 1
+            }
+        done < <(virsh -c "$uri" domblklist "$other_vm" --details 2>/dev/null |
+            awk '$1 == "file" && $2 == "disk" {print $4}')
+    done < <(virsh -c "$uri" list --all --name)
+else
+    target_disk=$(dirname -- "$base_disk")/$vm.qcow2
+    [[ ! -e $target_disk ]] || {
+        echo "ERROR: unattached target disk already exists: $target_disk" >&2
+        exit 1
+    }
+fi
+[[ $target_disk != "$base_disk" ]] || {
+    echo "ERROR: target shares its base disk; refusing reset" >&2
+    exit 1
+}
+
+echo "This will recreate '$vm' as an overlay of '$base_vm'."
+echo "Target disk: $target_disk"
+
+# Let libvirt's clone tool generate and validate names, paths, MAC addresses,
+# firmware/NVRAM paths, and XML quoting. For an existing target this happens
+# before anything is destroyed.
+clone_xml=
+if (( target_exists )); then
+    clone_xml=$(virt-clone \
+        --connect "$uri" \
+        --original "$base_vm" \
+        --name "$vm" \
+        --file "$target_disk" \
+        --preserve-data \
+        --replace \
+        --check path_in_use=off \
+        --print-xml)
+    [[ -n $clone_xml ]] || { echo "ERROR: failed to generate clone XML" >&2; exit 1; }
+fi
+
+if (( ! assume_yes )); then
+    read -r -p "Type the VM name to continue: " confirmation
+    [[ $confirmation == "$vm" ]] || { echo "Cancelled."; exit 1; }
+fi
+
+if (( target_exists )); then
+    [[ $(virsh -c "$uri" domstate "$vm") == "shut off" ]] || virsh -c "$uri" destroy "$vm"
+    virsh -c "$uri" undefine "$vm" --nvram 2>/dev/null || virsh -c "$uri" undefine "$vm"
+    [[ ! -f $target_disk ]] || unlink -- "$target_disk"
+fi
+
+qemu-img create -f qcow2 -F "$base_format" -b "$base_disk" "$target_disk"
+if [[ -z $clone_xml ]]; then
+    if ! clone_xml=$(virt-clone \
+        --connect "$uri" \
+        --original "$base_vm" \
+        --name "$vm" \
+        --file "$target_disk" \
+        --preserve-data \
+        --check path_in_use=off \
+        --print-xml); then
+        unlink -- "$target_disk"
+        echo "ERROR: clone XML generation failed; removed incomplete overlay" >&2
+        exit 1
+    fi
+fi
+if ! printf '%s\n' "$clone_xml" | virsh -c "$uri" define /dev/stdin; then
+    unlink -- "$target_disk"
+    echo "ERROR: clone definition failed; removed incomplete overlay" >&2
+    exit 1
+fi
+
+echo "VM $vm recreated as an overlay of $base_vm."

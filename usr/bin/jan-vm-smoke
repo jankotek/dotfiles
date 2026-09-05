@@ -1,0 +1,28 @@
+#!/bin/bash
+# Start a libvirt VM and run quick, non-mutating guest checks through QGA.
+
+set -Eeuo pipefail
+
+usage() { echo "Usage: jan-vm-smoke VM"; }
+if [[ ${1:-} == -h || ${1:-} == --help ]]; then
+    usage
+    exit 0
+fi
+if (( $# != 1 )); then
+    usage >&2
+    exit 2
+fi
+
+script_dir=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+vm=$1
+
+"$script_dir/vm-start-and-wait" "$vm"
+"$script_dir/vm-exec" "$vm" --argv systemd-detect-virt --quiet
+"$script_dir/vm-exec" "$vm" --argv systemctl is-active --quiet systemd-networkd.service
+"$script_dir/vm-exec" "$vm" --argv systemctl is-active --quiet systemd-resolved.service
+"$script_dir/vm-exec" "$vm" 'find /run/systemd/netif/leases -type f -size +0c -print -quit | grep -q .'
+"$script_dir/vm-exec" "$vm" 'ip route show default | grep -q .'
+"$script_dir/vm-exec" "$vm" --argv getent hosts example.com
+"$script_dir/vm-exec" "$vm" --argv systemctl is-active --quiet qemu-guest-agent.service
+
+echo "VM $vm passed smoke checks."

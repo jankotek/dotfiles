@@ -1,11 +1,11 @@
 #!/usr/bin/env bats
 #
-# Re-run idempotency + user-data preservation checks for setup/vm-xub24.
+# Re-run idempotency + user-data preservation checks for setup/vm-xub26.
 #
 # Run inside an already-deployed VM as root. The launcher
-# test/test-vm-idempotency.sh wires this up: clones xub, runs
-# setup/vm-xub24 once, drops sentinel files, then runs this bats file.
-# This file then re-runs setup/vm-xub24 in setup_file and verifies the
+# test/test-vm-idempotency.sh wires this up: clones xub26, runs
+# setup/vm-xub26 once, drops sentinel files, then runs this bats file.
+# This file then re-runs setup/vm-xub26 in setup_file and verifies the
 # second run completed cleanly without destroying user data.
 #
 # Manually:
@@ -17,15 +17,15 @@ load ../helpers
 SENTINEL_DOWN="/home/jan/down/.idempotency-sentinel"
 SENTINEL_DOC="/home/jan/doc/.idempotency-sentinel"
 SENTINEL_CACHE="/home/jan/.cache/.idempotency-sentinel"
-RERUN_LOG="${BATS_FILE_TMPDIR:-/tmp}/vm-xub24-rerun.log"
-RERUN_RC_FILE="${BATS_FILE_TMPDIR:-/tmp}/vm-xub24-rerun.rc"
+RERUN_LOG="${BATS_FILE_TMPDIR:-/tmp}/vm-xub26-rerun.log"
+RERUN_RC_FILE="${BATS_FILE_TMPDIR:-/tmp}/vm-xub26-rerun.rc"
 
 setup_file() {
     if [[ "$EUID" -ne 0 ]]; then
         skip "requires root"
     fi
-    if ! [[ -x /opt/jan/setup/vm-xub24 ]]; then
-        skip "/opt/jan/setup/vm-xub24 not found"
+    if ! [[ -x /opt/jan/setup/vm-xub26 ]]; then
+        skip "/opt/jan/setup/vm-xub26 not found"
     fi
 
     install -d -o jan -g users /home/jan/down /home/jan/doc /home/jan/.cache
@@ -37,12 +37,12 @@ setup_file() {
     echo "preserve-me" > "$SENTINEL_CACHE"
 
     set +e
-    /opt/jan/setup/vm-xub24 >"$RERUN_LOG" 2>&1
+    /opt/jan/setup/vm-xub26 >"$RERUN_LOG" 2>&1
     echo $? > "$RERUN_RC_FILE"
     set -e
 }
 
-@test "second setup/vm-xub24 run exits 0" {
+@test "second setup/vm-xub26 run exits 0" {
     rc=$(cat "$RERUN_RC_FILE")
     if [[ "$rc" != "0" ]]; then
         echo "Re-run exit code: $rc" >&2

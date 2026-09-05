@@ -1,0 +1,79 @@
+#!/bin/bash
+# Read-only health summary for hosts and provisioned VMs.
+
+set -uo pipefail
+
+if [[ ${1:-} == -h || ${1:-} == --help ]]; then
+    echo "Usage: jan-doctor"
+    exit 0
+fi
+if (( $# )); then
+    echo "Usage: jan-doctor" >&2
+    exit 2
+fi
+
+issues=0
+ok() { echo "OK: $*"; }
+warn() { echo "WARN: $*"; issues=$((issues + 1)); }
+
+if [[ -r /etc/os-release ]]; then
+    # shellcheck source=/dev/null
+    source /etc/os-release
+    echo "System: ${PRETTY_NAME:-${ID:-unknown}}"
+fi
+echo "Kernel: $(uname -r)"
+echo "Root:   $(df -hP / | awk 'NR == 2 {print $3 " used of " $2 " (" $5 ")"}')"
+
+if command -v systemctl >/dev/null 2>&1; then
+    mapfile -t failed_units < <(systemctl --failed --no-legend --plain 2>/dev/null | awk '{print $1}')
+    if (( ${#failed_units[@]} )); then
+        warn "failed units: ${failed_units[*]}"
+    else
+        ok "no failed systemd units"
+    fi
+fi
+
+if systemd-detect-virt --vm --quiet 2>/dev/null; then
+    for unit in systemd-networkd.service systemd-resolved.service qemu-guest-agent.service; do
+        if systemctl is-active --quiet "$unit"; then
+            ok "$unit is active"
+        else
+            warn "$unit is not active"
+        fi
+    done
+    if command -v NetworkManager >/dev/null 2>&1; then
+        warn "NetworkManager is still installed in this VM"
+    else
+        ok "NetworkManager is absent"
+    fi
+    if ip route show default 2>/dev/null | grep -q .; then
+        ok "default route exists"
+    else
+        warn "default route is missing"
+    fi
+    if getent hosts example.com >/dev/null 2>&1; then
+        ok "DNS resolution works"
+    else
+        warn "DNS resolution failed"
+    fi
+fi
+
+if [[ -e /run/reboot-required ]]; then
+    warn "reboot required"
+fi
+
+while IFS=: read -r _ _ _ _ _ home_dir _; do
+    [[ $home_dir == /home/* && -d $home_dir ]] || continue
+    size_kib=$(du -skx "$home_dir" 2>/dev/null | awk '{print $1}')
+    mode=$(stat -c %a "$home_dir" 2>/dev/null)
+    [[ $mode == 700 ]] || warn "$home_dir mode is ${mode:-unknown}, expected 700"
+    if [[ ${size_kib:-0} -gt 102400 ]]; then
+        warn "$home_dir exceeds 100 MiB ($((size_kib / 1024)) MiB)"
+    fi
+done < <(getent passwd)
+
+if (( issues )); then
+    echo "Doctor found $issues warning(s)."
+    exit 1
+fi
+echo "Doctor found no problems."

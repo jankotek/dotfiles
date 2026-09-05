@@ -7,7 +7,7 @@ All tests use [bats-core](https://github.com/bats-core/bats-core). Shared assert
 ```bash
 test/test-host.sh              # runs basic/ + host/     (on the host)
 test/test-vm.sh                # runs basic/ + vm/       (inside a VM)
-test/test-vm-deploy.sh             # clone xub -> provision -> reboot -> test -> destroy
+test/test-vm-deploy.sh             # clone xub26 -> provision -> reboot -> test -> destroy
 test/test-vm-deploy.sh --keep      # same, but keep VM for debugging
 test/test-vm-xub26-deploy.sh       # clone xub26 -> setup/vm-xub26 -> test -> destroy
 ```
@@ -52,6 +52,7 @@ be run as root.
 | File | What it checks |
 |------|---------------|
 | `update-opt.bats` | Downloads Herdr, Codex, Grok, Pi, and Claude Code into temporary `JAN_OPT` trees; verifies native binaries, publisher checksums, version tracking, and idempotent re-runs (network-heavy) |
+| `utilities.bats` | Fixture checks for utility help, dotfile dry-runs, missing-user guidance, and atomic verified downloads |
 | `repo-policy.bats` | Fast, fixture-only checks for canonical dotfiles, error traps, download policy, and provisioning safety limits |
 | `pod-subid-allocation.bats` | Fixture-only unit tests for non-overlapping subordinate UID/GID allocation; does not require root |
 | `pod-security.bats` | Creates a temporary pod user via `jan-pod-setup`, verifies subordinate-ID preservation and matching UID/GID ranges plus all security hardening layers (nologin shell, locked password, nogroup, 0700 home, sudo denied, cron denied, filesystem ACLs, podman configs, linger, cgroup delegation, sysctl port restriction), then deletes everything |

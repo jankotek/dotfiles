@@ -1,0 +1,53 @@
+#!/bin/bash
+# Preview changes made by the canonical skel/home sync.
+
+set -Eeuo pipefail
+
+usage() {
+    echo "Usage: jan-dotfiles-diff [USER|HOME|--skel]"
+}
+
+if [[ ${1:-} == -h || ${1:-} == --help ]]; then
+    usage
+    exit 0
+fi
+if (( $# > 1 )); then
+    usage >&2
+    exit 2
+fi
+
+repo=${OPT_JAN:-/opt/jan}
+source_dir=$repo/skel/home
+selector=${1:-${SUDO_USER:-$USER}}
+
+if [[ ! -d $source_dir ]]; then
+    echo "ERROR: canonical skeleton not found at $source_dir" >&2
+    exit 1
+fi
+
+if [[ $selector == --skel ]]; then
+    destination=/etc/skel
+elif [[ $selector == /* ]]; then
+    destination=$selector
+elif getent passwd "$selector" >/dev/null; then
+    destination=$(getent passwd "$selector" | cut -d: -f6)
+else
+    echo "No account or home exists for '$selector'."
+    echo "Seed future homes first: sudo $repo/skel/install"
+    echo "Then create the account with useradd --create-home."
+    exit 2
+fi
+
+if [[ ! -d $destination ]]; then
+    echo "Home does not exist yet: $destination"
+    echo "Seed /etc/skel first: sudo $repo/skel/install"
+    exit 2
+fi
+
+echo "Canonical source: $source_dir"
+echo "Preview target:   $destination"
+rsync -ain \
+    --no-owner \
+    --no-group \
+    --out-format='%i %n%L' \
+    "$source_dir/" "$destination/"

@@ -4,7 +4,7 @@ Personal dotfiles and system provisioning repo. Checked out at `/opt/jan` on tar
 
 ## Two deployment modes
 
-1. **Fresh install** — clone repo to `/opt/jan`, run a setup script (e.g. `setup/vm-xub24`)
+1. **Fresh install** — clone repo to `/opt/jan`, run a setup script (e.g. `setup/vm-xub26`)
 2. **VM with host mount** — host's `/opt` is mounted into the guest; tools are already available
 
 ## Directory layout
@@ -12,7 +12,7 @@ Personal dotfiles and system provisioning repo. Checked out at `/opt/jan` on tar
 | Path | Purpose | Deployment |
 |------|---------|------------|
 | `skel/home/` | Canonical user dotfiles and new-user defaults | `rsync` to existing homes; installed into `/etc/skel` |
-| `home-root/` | Root dotfiles | `rsync --delete` to `/root` |
+| `home-root/` | Root dotfiles | Non-deleting `rsync` to `/root` |
 | `usr/bin/` | User utilities | Symlinked into `/usr/local/bin` |
 | `usr/sbin/` | Admin scripts (run as root) | Symlinked into `/usr/local/sbin` |
 | `usr/share/` | Fonts, icons, themes, cursors | Symlinked into `/usr/local/share` |
@@ -64,19 +64,19 @@ Tests use [bats-core](https://github.com/bats-core/bats-core). Three test scenar
 ### Automated VM deploy-and-test
 
 ```bash
-/opt/jan/test/test-vm-deploy.sh          # clone xub -> provision -> reboot -> test -> destroy
+/opt/jan/test/test-vm-deploy.sh          # clone xub26 -> provision -> reboot -> test -> destroy
 /opt/jan/test/test-vm-deploy.sh --keep   # same, but keep VM for debugging
 /opt/jan/test/test-vm-xub26-deploy.sh    # clone xub26 -> setup/vm-xub26 -> test -> destroy
 ```
 
 The deploy script:
-1. Shuts down the base VM (default `xub`; override with `BASE_VM`)
+1. Shuts down the base VM (default `xub26`; override with `BASE_VM`)
 2. Creates a qcow2 overlay (copy-on-write, fast)
 3. Clones the VM XML (new name `test-YYMMDD-HHMM`, new MAC, same virtiofs share)
 4. Starts the clone, waits for the guest agent
-5. Runs the setup script (default `setup/vm-xub24`; override with `SETUP_SCRIPT`)
+5. Runs the setup script (default `setup/vm-xub26`; override with `SETUP_SCRIPT`)
 6. Reboots, waits for desktop session (autologin + XFCE)
-7. Installs bats, runs `test-vm.sh`
+7. Runs `test-vm.sh` (Bats is installed by provisioning)
 8. On exit: destroys VM and deletes overlay (unless `--keep`)
 
 ### Design principles

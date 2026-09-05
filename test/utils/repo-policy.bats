@@ -4,13 +4,13 @@ load ../helpers
 
 @test "skel/home is the only user-dotfile source" {
     [[ ! -e "$OPT_JAN/home" ]]
-    for script in setup/vm-xub24 setup/vm-xub26 setup/vm-baseweed; do
+    for script in setup/vm-xub26 setup/vm-baseweed; do
         assert_file_contains "$OPT_JAN/$script" 'rsync -a /opt/jan/skel/home/'
     done
 }
 
 @test "legacy provisioning traps preserve the failing status" {
-    for script in setup/host-weed-kde setup/vm-xub24 setup/vm-baseweed; do
+    for script in setup/host-weed-kde setup/vm-xub26 setup/vm-baseweed; do
         assert_file_contains "$OPT_JAN/$script" 'local rc=\$?'
         assert_file_contains "$OPT_JAN/$script" 'exit "\$rc"'
     done
@@ -38,11 +38,38 @@ load ../helpers
 }
 
 @test "VM provisioners use systemd-networkd instead of NetworkManager" {
-    for script in setup/vm-xub24 setup/vm-xub26 setup/vm-baseweed; do
+    for script in setup/vm-xub26 setup/vm-baseweed; do
         assert_file_contains "$OPT_JAN/$script" '^jan-setup-vm-networkd$'
     done
     assert_file_contains "$OPT_JAN/usr/sbin/jan-setup-vm-networkd" \
         '^DHCP=ipv4$'
     assert_file_contains "$OPT_JAN/usr/sbin/jan-setup-vm-networkd" \
         'apt-get purge -y network-manager network-manager-gnome'
+}
+
+@test "retired Ubuntu 24 VM provisioner stays absent" {
+    [[ ! -e "$OPT_JAN/setup/vm-xub24" ]]
+}
+
+@test "Tumbleweed refresh keeps repository signature verification" {
+    assert_file_contains "$OPT_JAN/setup/vm-baseweed" \
+        'zypper -n --gpg-auto-import-keys refresh'
+    ! grep -q -- '--no-gpg-checks' "$OPT_JAN/setup/vm-baseweed"
+}
+
+@test "jan-create-user seeds the canonical skeleton before useradd" {
+    assert_file_contains "$OPT_JAN/usr/sbin/jan-create-user" \
+        '"\$REPO_DIR/skel/install"'
+    assert_file_contains "$OPT_JAN/usr/sbin/jan-create-user" \
+        '^    useradd \\'
+    assert_file_contains "$OPT_JAN/usr/sbin/jan-create-user" \
+        '"\$REPO_DIR/skel/install" "\$USER_HOME"'
+}
+
+@test "test launchers never install packages" {
+    ! grep -E '(apt-get|zypper|dnf)[[:space:]]+install' \
+        "$OPT_JAN/test/test-host.sh" \
+        "$OPT_JAN/test/test-vm.sh" \
+        "$OPT_JAN/test/test-vm-deploy.sh" \
+        "$OPT_JAN/test/test-vm-idempotency.sh"
 }

@@ -1,0 +1,73 @@
+#!/bin/bash
+# Resumable aria2 download with optional SHA-256 verification and atomic publish.
+
+set -Eeuo pipefail
+
+usage() {
+    echo "Usage: jan-download URL OUTPUT [SHA256|sha256:SHA256]"
+}
+
+if [[ ${1:-} == -h || ${1:-} == --help ]]; then
+    usage
+    exit 0
+fi
+if (( $# < 2 || $# > 3 )); then
+    usage >&2
+    exit 2
+fi
+if ! command -v aria2c >/dev/null 2>&1; then
+    echo "ERROR: aria2c is required" >&2
+    exit 1
+fi
+
+url=$1
+output=$2
+expected=${3:-}
+partial=${output}.partial
+partial_url=${partial}.url
+output_dir=$(dirname -- "$output")
+
+if [[ -n $expected ]]; then
+    expected=${expected#sha256:}
+    expected=${expected,,}
+    if [[ ! $expected =~ ^[0-9a-f]{64}$ ]]; then
+        echo "ERROR: SHA-256 must be 64 hexadecimal characters" >&2
+        exit 2
+    fi
+fi
+
+install -d "$output_dir"
+if [[ -e $partial ]]; then
+    previous_url=
+    [[ ! -f $partial_url ]] || previous_url=$(<"$partial_url")
+    if [[ $previous_url != "$url" ]]; then
+        echo "Discarding partial download from a different URL."
+        unlink -- "$partial"
+    fi
+fi
+printf '%s\n' "$url" > "$partial_url"
+aria2c \
+    --allow-overwrite=true \
+    --auto-file-renaming=false \
+    --continue=true \
+    --file-allocation=none \
+    --max-connection-per-server=8 \
+    --max-tries=10 \
+    --retry-wait=3 \
+    --dir="$output_dir" \
+    --out="$(basename -- "$partial")" \
+    "$url"
+
+if [[ -n $expected ]]; then
+    actual=$(sha256sum "$partial" | awk '{print $1}')
+    if [[ $actual != "$expected" ]]; then
+        echo "ERROR: SHA-256 mismatch for $output" >&2
+        unlink -- "$partial"
+        unlink -- "$partial_url"
+        exit 1
+    fi
+fi
+
+mv -f -- "$partial" "$output"
+unlink -- "$partial_url"
+echo "Downloaded $output"

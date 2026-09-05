@@ -1,8 +1,6 @@
 # shellcheck shell=bash
 # shellcheck disable=SC2034 # This array is consumed by the sourcing setup scripts.
-# CLI package names shared by openSUSE Tumbleweed and Ubuntu 26.04.
-# Ubuntu 24.04 intentionally keeps its own list because not every package
-# below is available from its configured repositories.
+# CLI package names shared by the supported VM provisioners.
 
 readonly -a JAN_COMMON_CLI_PACKAGES=(
     mc

@@ -144,4 +144,4 @@ To avoid interference: don't resize the virt-manager window during automated scr
 
 ## Adding xdotool to VM setup
 
-Add `xdotool` to the package list in `setup/vm-xub24` if you want it available on all test VMs.
+`xdotool` is installed by `setup/vm-xub26` for GUI automation in test VMs.

@@ -1,0 +1,62 @@
+#!/bin/bash
+# Report cleanup candidates without deleting anything.
+
+set -Eeuo pipefail
+
+usage() { echo "Usage: jan-clean-check [MIN_MIB]"; }
+if [[ ${1:-} == -h || ${1:-} == --help ]]; then
+    usage
+    exit 0
+fi
+if (( $# > 1 )) || [[ ! ${1:-512} =~ ^[0-9]+$ ]]; then
+    usage >&2
+    exit 2
+fi
+
+min_mib=${1:-512}
+min_kib=$((min_mib * 1024))
+
+echo "Cleanup candidates (read-only; threshold ${min_mib} MiB)"
+echo
+echo "Home backups:"
+while IFS= read -r -d '' backup; do
+    size_kib=$(du -skx "$backup" 2>/dev/null | awk '{print $1}') || size_kib=0
+    printf '%6d MiB  %s\n' "$((size_kib / 1024))" "$backup"
+done < <(find /home -mindepth 1 -maxdepth 1 -type d -name '*-backup-*' -print0 2>/dev/null)
+
+echo
+echo "Large caches:"
+for cache in /var/cache /home/*/.cache; do
+    [[ -d $cache ]] || continue
+    size_kib=$(du -skx "$cache" 2>/dev/null | awk '{print $1}') || size_kib=0
+    [[ ${size_kib:-0} -ge $min_kib ]] && printf '%6d MiB  %s\n' "$((size_kib / 1024))" "$cache"
+done
+
+echo
+echo "Unattached qcow2 overlays:"
+if command -v virsh >/dev/null 2>&1 && command -v qemu-img >/dev/null 2>&1; then
+    declare -A attached=()
+    while IFS= read -r vm; do
+        [[ -n $vm ]] || continue
+        while IFS= read -r disk; do
+            [[ -n $disk ]] && attached["$disk"]=1
+        done < <(virsh -c qemu:///session domblklist "$vm" --details 2>/dev/null |
+            awk '$1 == "file" && $2 == "disk" {print $4}')
+    done < <(virsh -c qemu:///session list --all --name 2>/dev/null)
+
+    image_dir=${XDG_DATA_HOME:-$HOME/.local/share}/libvirt/images
+    if [[ -d $image_dir ]]; then
+        while IFS= read -r -d '' disk; do
+            [[ -z ${attached[$disk]:-} ]] || continue
+            qemu-img info "$disk" 2>/dev/null | grep -q '^backing file:' && echo "$disk"
+        done < <(find "$image_dir" -maxdepth 1 -type f -name '*.qcow2' -print0)
+    fi
+fi
+
+echo
+echo "Installed kernels:"
+if command -v rpm >/dev/null 2>&1; then
+    rpm -qa 2>/dev/null | grep -E '^kernel-(default|longterm|zbook)-[0-9]' | sort -V || true
+elif command -v dpkg-query >/dev/null 2>&1; then
+    dpkg-query -W -f='${binary:Package} ${Version}\n' 'linux-image-[0-9]*' 2>/dev/null | sort -V || true
+fi

@@ -92,9 +92,8 @@ apt-get install -y --no-install-recommends \
     xserver-xorg-core \
     xserver-xorg-input-libinput
 
-# Install the curated skeleton before creating jan so this path exercises the
-# same defaults that all future VM accounts receive.
-/opt/jan/skel/install
+# jan-create-user refreshes /etc/skel immediately before useradd, ensuring a
+# newly created home starts with the canonical payload.
 /opt/jan/usr/sbin/jan-create-user
 
 # Apply the existing Xubuntu 26.04 package pruning, dotfiles, user directories,
