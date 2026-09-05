@@ -3,7 +3,7 @@
 # vm-baseweed — Tumbleweed counterpart to setup/vm-xub24.
 #
 # Symlinks /opt/jan/usr into /usr/local, installs core CLI tools via zypper,
-# runs the cross-distro jan-* setup helpers, and syncs the repo home dotfiles
+# runs the cross-distro jan-* setup helpers, and syncs the canonical dotfiles
 # without --delete (so user data survives re-runs).
 
 # Sanity check: verify running inside a VM
@@ -12,8 +12,13 @@ if ! systemd-detect-virt -q -v; then
     exit 1
 fi
 
-set -euo pipefail
-trap 'echo >&2 "${BASH_SOURCE[0]}:${BASH_LINENO[0]}: Command \`$BASH_COMMAND\` failed with exit code $?"; exit $?' ERR
+set -Eeuo pipefail
+error_trap() {
+    local rc=$?
+    echo >&2 "${BASH_SOURCE[1]}:${BASH_LINENO[0]}: Command \`$BASH_COMMAND\` failed with exit code $rc"
+    exit "$rc"
+}
+trap error_trap ERR
 
 SETUP_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 # shellcheck source=/dev/null
@@ -77,7 +82,7 @@ PICTURES=media/pic
 VIDEOS=media/video
 EOF
 
-# ---------- Sync repo home (NO --delete) ----------
+# ---------- Sync canonical skeleton home (NO --delete) ----------
 # Detect the primary unprivileged user — Tumbleweed VMs are seeded under
 # different names depending on how the image was bootstrapped. Common cases
 # are 'jan' (this repo's convention) or 'tumbleweed' (default openSUSE
@@ -96,14 +101,14 @@ if [[ -z "$HOME_USER" ]]; then
 fi
 HOME_GROUP=$(id -gn "$HOME_USER")
 HOME_DIR=$(getent passwd "$HOME_USER" | cut -d: -f6)
-echo "==> Syncing repo home to ${HOME_DIR} (user=${HOME_USER})"
+echo "==> Syncing canonical skeleton home to ${HOME_DIR} (user=${HOME_USER})"
 
 # Backup before sync (timestamped, kept until manually removed).
 cp -a "$HOME_DIR" "${HOME_DIR}-backup-$(date +%Y-%m-%d-%H%M)" 2>/dev/null || true
 chmod 0700 "${HOME_DIR}-backup-"* 2>/dev/null || true
 
 # Sync without --delete: dotfiles deploy, user data survives.
-rsync -r /opt/jan/home/ "${HOME_DIR}/"
+rsync -a /opt/jan/skel/home/ "${HOME_DIR}/"
 [[ -d /opt/jan/home-root ]] && rsync -r /opt/jan/home-root/ /root/
 
 chmod 0755 /home

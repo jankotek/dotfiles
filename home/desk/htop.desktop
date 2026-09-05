@@ -1,9 +1,0 @@
-[Desktop Entry]
-Version=1.0
-Type=Application
-Name=Htop
-Comment=View and manage running processes
-Exec=htop
-Icon=org.xfce.taskmanager
-Terminal=true
-StartupNotify=false

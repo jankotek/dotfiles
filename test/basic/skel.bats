@@ -62,9 +62,6 @@ load ../helpers
 
 @test "MC desktop shortcuts use the packaged icon name" {
     assert_file_contains \
-        "$OPT_JAN/home/desk/mc.desktop" \
-        '^Icon=mc$'
-    assert_file_contains \
         "$OPT_JAN/skel/home/desk/mc.desktop" \
         '^Icon=mc$'
 }

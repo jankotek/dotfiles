@@ -1,9 +1,0 @@
-[Desktop Entry]
-Version=1.0
-Type=Application
-Name=Autostart
-Comment=script executed at startup
-Exec=sh -c "exec mousepad \\$HOME/.local/bin/autostart.sh"
-Icon=org.xfce.session
-Terminal=false
-StartupNotify=false

@@ -20,6 +20,8 @@ PARAMS=(
 add_params_grub() {
     local grub_file="/etc/default/grub"
     local changed=0
+    local cloud_dropin="/etc/default/grub.d/50-cloudimg-settings.cfg"
+    local jan_dropin="/etc/default/grub.d/99-jan-kernel-tweaks.cfg"
 
     cp -p "$grub_file" "${grub_file}.bak"
 
@@ -32,14 +34,27 @@ add_params_grub() {
         fi
     done
 
-    if [[ $changed -eq 0 ]]; then
-        echo "Already configured in $grub_file"
-        return
+    # Ubuntu cloud images override GRUB_CMDLINE_LINUX_DEFAULT in a later
+    # 50-cloudimg-settings.cfg file. Append our parameters from a final drop-in
+    # instead of editing the vendor-owned cloud file.
+    if [[ -f "$cloud_dropin" ]]; then
+        printf '%s\n' \
+            '# Managed by jan-setup-kernel-tweaks.' \
+            "GRUB_CMDLINE_LINUX_DEFAULT=\"\${GRUB_CMDLINE_LINUX_DEFAULT} ${PARAMS[*]}\"" \
+            > "$jan_dropin"
+        chmod 0644 "$jan_dropin"
+        changed=1
     fi
 
-    echo "Updated $grub_file (backup at ${grub_file}.bak)"
-    grep CMDLINE "$grub_file"
+    if [[ $changed -eq 0 ]]; then
+        echo "Already configured in $grub_file"
+    else
+        echo "Updated $grub_file (backup at ${grub_file}.bak)"
+        grep CMDLINE "$grub_file"
+    fi
 
+    # Always regenerate the bootloader output. The source configuration may be
+    # correct while grub.cfg is stale or was replaced by an image build.
     if command -v update-grub &>/dev/null; then
         update-grub
     elif command -v grub2-mkconfig &>/dev/null; then
@@ -68,12 +83,13 @@ add_params_sdboot() {
 
     if [[ $changed -eq 0 ]]; then
         echo "Already configured in $cmdline_file"
-        return
+    else
+        echo "Updated $cmdline_file (backup at ${cmdline_file}.bak)"
+        cat "$cmdline_file"
     fi
 
-    echo "Updated $cmdline_file (backup at ${cmdline_file}.bak)"
-    cat "$cmdline_file"
-
+    # Keep generated entry files converged even when /etc/kernel/cmdline was
+    # already correct before this run.
     sdbootutil update-all-entries
 }
 

@@ -31,6 +31,11 @@ load ../helpers
     assert_file_contains "$JAN_HOME/.config/fish/config.fish" 'starship init fish'
 }
 
+@test "deployed user helper scripts are executable" {
+    assert_executable "$JAN_HOME/.local/bin/autostart.sh"
+    assert_executable "$JAN_HOME/.local/bin/autoini.sh"
+}
+
 @test "profile does not force a GTK theme in Plasma" {
     assert_file "$JAN_HOME/.profile"
     if grep -q '^[[:space:]]*export GTK_THEME=' "$JAN_HOME/.profile"; then

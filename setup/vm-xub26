@@ -50,6 +50,46 @@ release_guest_agent_guard() {
     unset JAN_QGA_GUARD_TOKEN
 }
 
+disable_automatic_apt() {
+    local unit
+    local -a units=(
+        apt-daily.timer
+        apt-daily-upgrade.timer
+        apt-daily.service
+        apt-daily-upgrade.service
+        unattended-upgrades.service
+    )
+
+    echo "==> Disabling automatic APT updates"
+    for unit in "${units[@]}"; do
+        systemctl mask --now "$unit"
+    done
+
+    cat > /etc/apt/apt.conf.d/20auto-upgrades <<'EOF'
+APT::Periodic::Enable "0";
+APT::Periodic::Update-Package-Lists "0";
+APT::Periodic::Unattended-Upgrade "0";
+EOF
+
+    # A timer may have launched apt immediately before it was masked. Never
+    # race dpkg; wait for that final process to release all package locks.
+    echo "==> Waiting for active APT/dpkg jobs to finish"
+    for _ in $(seq 1 300); do
+        if ! fuser \
+            /var/lib/dpkg/lock \
+            /var/lib/dpkg/lock-frontend \
+            /var/lib/apt/lists/lock \
+            /var/cache/apt/archives/lock \
+            >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+    done
+
+    echo "ERROR: timed out waiting for APT/dpkg locks" >&2
+    return 1
+}
+
 
 cp -f -s -r /opt/jan/usr/* /usr/local
 # cursors do not work in /usr/local/share/icons
@@ -70,6 +110,8 @@ if [[ -n "${JAN_QGA_GUARD_TOKEN:-}" ]]; then
 else
     acquire_guest_agent_guard
 fi
+
+disable_automatic_apt
 
 apt-get update
 apt-get install -y \
@@ -175,11 +217,15 @@ fi
 # accumulate when removed from the repo. That's acceptable; user-data
 # preservation is more important than dotfile cleanliness.
 
-rsync -r /opt/jan/home/ /home/jan
+rsync -a /opt/jan/skel/home/ /home/jan
 [[ -d /opt/jan/home-root ]] && rsync -r /opt/jan/home-root/ /root
 
 chmod 0755 /home
-chmod 0700 /root/ /home/jan
+chmod 0700 /root/
+for home_dir in /home/*/; do
+    [[ -d "$home_dir" ]] || continue
+    chmod 0700 "$home_dir"
+done
 chown jan:users -R /home/jan
 rm -rf /home/jan/.cache/sessions
 

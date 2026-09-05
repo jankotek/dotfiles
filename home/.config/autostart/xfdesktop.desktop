@@ -1,7 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=XFCE Desktop
-Exec=sh -c "pgrep -u \\$USER xfdesktop >/dev/null || exec xfdesktop"
-OnlyShowIn=XFCE;
-StartupNotify=false
-Terminal=false

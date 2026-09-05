@@ -15,8 +15,8 @@ load ../helpers
     assert_dir "$OPT_JAN/usr/sbin"
 }
 
-@test "/opt/jan/home exists" {
-    assert_dir "$OPT_JAN/home"
+@test "/opt/jan/skel/home exists" {
+    assert_dir "$OPT_JAN/skel/home"
 }
 
 @test "/opt/jan/setup exists" {

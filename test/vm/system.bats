@@ -60,6 +60,31 @@ load ../helpers
     fi
 }
 
+@test "automatic APT updates are disabled" {
+    local unit
+    for unit in \
+        apt-daily.timer \
+        apt-daily-upgrade.timer \
+        apt-daily.service \
+        apt-daily-upgrade.service \
+        unattended-upgrades.service; do
+        [[ $(systemctl is-enabled "$unit" 2>/dev/null || true) == masked ]]
+    done
+    assert_file_contains /etc/apt/apt.conf.d/20auto-upgrades \
+        '^APT::Periodic::Enable "0";$'
+    assert_file_contains /etc/apt/apt.conf.d/20auto-upgrades \
+        '^APT::Periodic::Unattended-Upgrade "0";$'
+}
+
+@test "Ubuntu cloud GRUB defaults preserve managed kernel parameters" {
+    local dropin=/etc/default/grub.d/99-jan-kernel-tweaks.cfg
+    [[ -f /etc/default/grub.d/50-cloudimg-settings.cfg ]] || \
+        skip "not an Ubuntu cloud-image GRUB configuration"
+    assert_file_contains "$dropin" 'zswap.enabled=1'
+    assert_file_contains "$dropin" 'zswap.compressor=lzo'
+    assert_file_contains "$dropin" 'ipv6.disable=1'
+}
+
 @test "tty11-root service is enabled" {
     systemctl is-enabled tty11-root.service
 }

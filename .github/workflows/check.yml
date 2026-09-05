@@ -1,0 +1,40 @@
+name: Check
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install test tools
+        run: sudo apt-get update && sudo apt-get install -y bats shellcheck
+
+      - name: Check shell syntax and errors
+        shell: bash
+        run: |
+          scripts=()
+          while IFS= read -r -d '' file; do
+            [[ -f "$file" && ! -L "$file" ]] || continue
+            IFS= read -r first < "$file" || true
+            case "$first" in
+              '#!'*bash*|'#!'*'/sh') scripts+=("$file") ;;
+            esac
+          done < <(git ls-files -z)
+
+          for script in "${scripts[@]}"; do
+            bash -n "$script"
+          done
+          shellcheck --severity=error --external-sources "${scripts[@]}"
+
+      - name: Run fixture-only unit tests
+        run: |
+          OPT_JAN="$GITHUB_WORKSPACE" bats \
+            test/utils/pod-subid-allocation.bats \
+            test/utils/repo-policy.bats

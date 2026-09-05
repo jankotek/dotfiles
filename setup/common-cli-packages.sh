@@ -10,6 +10,7 @@ readonly -a JAN_COMMON_CLI_PACKAGES=(
     git
     lazygit
     curl
+    aria2
     powertop
     fish
     iotop

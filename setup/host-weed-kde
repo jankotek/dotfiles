@@ -8,7 +8,7 @@
 #   - symlinks /usr/local <- repo usr/
 #   - installs KDE apps, virt stack, and CLI tools via zypper
 #   - locks packages we never want pulled in (X server, vim, PackageKit, ...)
-#   - masks services we replace or don't use (sddm, fwupd, ollama, ...)
+#   - masks services we replace or don't use (sddm, fwupd, ...)
 #   - leaves tty1 stock; sets up agetty on tty2-10 and CLI-started Plasma
 #   - runs the cross-distro jan-* helpers
 #   - applies the curated skeleton WITHOUT --delete (user data survives re-runs)
@@ -24,8 +24,13 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-set -euo pipefail
-trap 'echo >&2 "${BASH_SOURCE[0]}:${BASH_LINENO[0]}: Command \`$BASH_COMMAND\` failed with exit code $?"; exit $?' ERR
+set -Eeuo pipefail
+error_trap() {
+    local rc=$?
+    echo >&2 "${BASH_SOURCE[1]}:${BASH_LINENO[0]}: Command \`$BASH_COMMAND\` failed with exit code $rc"
+    exit "$rc"
+}
+trap error_trap ERR
 
 # Sanity check: this is a Tumbleweed-specific script.
 if ! grep -q '^ID="\?opensuse-tumbleweed' /etc/os-release 2>/dev/null; then
@@ -106,7 +111,7 @@ zypper -n addlock -t pattern kde_pim 2>/dev/null || true
 # Plasma is started from agetty logins (below). The rest are simply not used.
 # Guard each: a fresh install may not have all of these units.
 echo "==> Masking unused services"
-for unit in sddm.service fwupd.service ollama.service forgejo-runner.service; do
+for unit in sddm.service fwupd.service forgejo-runner.service; do
     systemctl mask "$unit" 2>/dev/null || true
 done
 
@@ -191,6 +196,16 @@ HOME_GROUP=$(id -gn "$HOME_USER")
 HOME_DIR=$(getent passwd "$HOME_USER" | cut -d: -f6)
 echo "==> Applying curated user defaults to ${HOME_DIR} (user=${HOME_USER})"
 
+# Refuse to make an unexpectedly large full-home backup. This applies to the
+# selected primary account (normally adam), not to every directory under /home.
+HOME_SIZE_KIB=$(du -skx -- "$HOME_DIR" | awk '{print $1}')
+readonly HOME_BACKUP_MAX_KIB=102400
+if (( HOME_SIZE_KIB > HOME_BACKUP_MAX_KIB )); then
+    echo "ERROR: ${HOME_DIR} is larger than 100 MiB (${HOME_SIZE_KIB} KiB); refusing full-home backup" >&2
+    echo "Move large user data elsewhere or back it up manually, then rerun." >&2
+    exit 1
+fi
+
 # Back up the complete existing home before replacing any managed template.
 # Fail before deployment if the backup cannot be made.
 HOME_BACKUP="${HOME_DIR}-backup-$(date +%Y-%m-%d-%H%M%S)-$$"
@@ -199,9 +214,8 @@ cp -a -- "$HOME_DIR" "$HOME_BACKUP"
 chmod 0700 "$HOME_BACKUP"
 
 # Apply the same curated payload installed into /etc/skel. It is a superset of
-# the legacy home/ tree and adds the Plasma/Konsole defaults an account created
-# by the OS installer could not have received. No --delete: personal files
-# outside the managed paths survive.
+# the same canonical skeleton used for new accounts. No --delete: personal
+# files outside the managed paths survive.
 rsync -a --chown="${HOME_USER}:${HOME_GROUP}" "${REPO_DIR}/skel/home/" "${HOME_DIR}/"
 [[ -d "${REPO_DIR}/home-root" ]] && rsync -r "${REPO_DIR}/home-root/" /root/
 

@@ -15,6 +15,10 @@ load ../helpers
     assert_command curl
 }
 
+@test "aria2c is installed" {
+    assert_command aria2c
+}
+
 @test "mc is installed" {
     assert_command mc
 }

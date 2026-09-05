@@ -1,7 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=User autostart
-Comment=Start the configured desktop applications
-Exec=sh -c "exec \\$HOME/.local/bin/autostart.sh"
-StartupNotify=false
-Terminal=false

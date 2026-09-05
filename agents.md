@@ -11,7 +11,7 @@ Personal dotfiles and system provisioning repo. Checked out at `/opt/jan` on tar
 
 | Path | Purpose | Deployment |
 |------|---------|------------|
-| `home/` | User dotfiles for `jan` | `rsync --delete` to `/home/jan` |
+| `skel/home/` | Canonical user dotfiles and new-user defaults | `rsync` to existing homes; installed into `/etc/skel` |
 | `home-root/` | Root dotfiles | `rsync --delete` to `/root` |
 | `usr/bin/` | User utilities | Symlinked into `/usr/local/bin` |
 | `usr/sbin/` | Admin scripts (run as root) | Symlinked into `/usr/local/sbin` |
@@ -22,7 +22,8 @@ Personal dotfiles and system provisioning repo. Checked out at `/opt/jan` on tar
 ## Key conventions
 
 - `usr/` is symlinked into `/usr/local` (not copied) — file paths must work as symlinks
-- `home/` is rsynced with `--delete` — every file here replaces what's on target
+- `skel/home/` is the single source for user dotfiles; sync it without `--delete`
+  so provisioning never removes personal data
 - Scripts in `usr/sbin/` are prefixed `jan-` for namespacing (e.g. `jan-upgrade`, `jan-install-chrome`)
 - `jan-update-opt` downloads portable tools into `/opt/` with `.version` file tracking
 - `jan-upgrade` is distro-agnostic: handles zypper (openSUSE), dnf (Fedora), apt (Ubuntu)
@@ -45,10 +46,10 @@ Tests use [bats-core](https://github.com/bats-core/bats-core). Three test scenar
 
 | Directory | Runs on | What it verifies |
 |-----------|---------|-----------------|
-| `test/basic/` | everywhere | `/opt/jan` structure, CLI tools (fish, htop, ncdu, yq, java, maven, go, ...), JetBrains Mono font |
+| `test/basic/` | everywhere | `/opt/jan` structure, CLI tools (fish, htop, ncdu, aria2c, yq, java, maven, go, ...), JetBrains Mono font |
 | `test/host/` | host only | Plasma/Wayland, KDE apps (kdenlive, krita, kdiff3, ...), virt tools, stock tty1 plus managed agetty on tty2-10, GDK_BACKEND=x11 patches |
 | `test/vm/` | VM only | Deployed dotfiles (.bashrc, fish, git, user-dirs), XFCE/X11, terminator, rofi, autologin (xfce4-panel + xfdesktop running as jan), spice/qemu agents (installed + running), display resize loop, symlinks into /usr/local, purged packages (snapd, xfce4-terminal), systemd services |
-| `test/utils/` | manual only | Destructive integration tests (e.g. pod-security: creates a pod user, verifies ACLs/hardening, then deletes it). NOT run by test-host.sh or test-vm.sh. Run individually: `sudo bats test/utils/pod-security.bats` |
+| `test/utils/` | CI / manual | Fast fixture-policy tests plus opt-in destructive integration tests such as pod-security |
 
 ### Launchers
 

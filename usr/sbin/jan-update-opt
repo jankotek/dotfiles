@@ -25,6 +25,33 @@ github_api() {
     fi
 }
 
+# Download an artifact body. aria2c handles retries, partial transfers, and
+# multiple connections; curl remains a fallback for minimally provisioned
+# systems. Metadata and checksum requests stay on curl elsewhere in this file.
+download_file() {
+    local url=$1 output=$2
+    if command -v aria2c >/dev/null 2>&1; then
+        aria2c \
+            --allow-overwrite=true \
+            --auto-file-renaming=false \
+            --continue=true \
+            --connect-timeout=15 \
+            --file-allocation=none \
+            --max-connection-per-server=4 \
+            --max-tries=5 \
+            --min-split-size=1M \
+            --retry-wait=2 \
+            --split=4 \
+            --summary-interval=0 \
+            --console-log-level=warn \
+            --dir="$(dirname -- "$output")" \
+            --out="$(basename -- "$output")" \
+            "$url"
+    else
+        curl -fLsS --retry 4 --retry-all-errors "$url" -o "$output"
+    fi
+}
+
 # GitHub may return either pretty-printed or compact JSON depending on the
 # client/CDN path. Normalize both forms before extracting release metadata;
 # target systems should not need jq just to run this downloader.
@@ -162,7 +189,7 @@ download_and_extract() (
     echo "→ Downloading $name $version..."
     temp_dir=$(mktemp -d "$BASE_DIR/.jan-update-${dir//\//_}.staging.XXXXXX")
     trap 'rm -rf "$temp_dir"' EXIT
-    curl -fLsS "$url" -o "$temp_dir/archive.tar.gz"
+    download_file "$url" "$temp_dir/archive.tar.gz"
     if [ -n "$expected" ]; then
         verify_file "$temp_dir/archive.tar.gz" "$expected"
     else
@@ -210,7 +237,7 @@ download_zstd_binary_to_dir() (
     echo "→ Downloading $name $version..."
     temp_dir=$(mktemp -d "$BASE_DIR/.jan-update-${dir//\//_}.staging.XXXXXX")
     trap 'rm -rf "$temp_dir"' EXIT
-    curl -fLsS "$url" -o "$temp_dir/$binary.zst"
+    download_file "$url" "$temp_dir/$binary.zst"
     verify_file "$temp_dir/$binary.zst" "$archive_expected"
     zstd -q -d -c "$temp_dir/$binary.zst" > "$temp_dir/$binary"
     rm "$temp_dir/$binary.zst"
@@ -501,10 +528,11 @@ install_gradle() {
 
     [ -f "$version_file" ] && current_version=$(<"$version_file")
 
-    if [ "$current_version" = "$version" ]; then
+    if [ "$current_version" = "$version" ] && [ -x "$BASE_DIR/gradle/bin/gradle" ]; then
         echo "✓ Gradle already at version $version"
         return 0
     fi
+    [ "$current_version" != "$version" ] || echo "→ Rebuilding incomplete Gradle $version installation"
 
     local sum=$(fetch_checksum "${url}.sha256")
     [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for Gradle"; return 1; }
@@ -514,7 +542,7 @@ install_gradle() {
     rm -rf "$temp_dir"
     mkdir -p "$temp_dir"
 
-    curl -fLsS "$url" -o "$temp_dir/gradle.zip"
+    download_file "$url" "$temp_dir/gradle.zip"
     verify_file "$temp_dir/gradle.zip" "$sum" || { rm -rf "$temp_dir"; return 1; }
     unzip -q "$temp_dir/gradle.zip" -d "$temp_dir"
 
@@ -539,10 +567,11 @@ install_maven() {
 
     [ -f "$version_file" ] && current_version=$(<"$version_file")
 
-    if [ "$current_version" = "$version" ]; then
+    if [ "$current_version" = "$version" ] && [ -x "$BASE_DIR/maven/bin/mvn" ]; then
         echo "✓ Maven already at version $version"
         return 0
     fi
+    [ "$current_version" != "$version" ] || echo "→ Rebuilding incomplete Maven $version installation"
 
     # Cross-host verification: artifact from the CDN, canonical sha512 from
     # Apache's origin server — tampering would have to hit both.
@@ -555,7 +584,7 @@ install_maven() {
     mkdir -p "$temp_dir"
 
     # Download to file first, verify, then extract
-    curl -fLsS "$url" -o "$temp_dir/maven.tar.gz"
+    download_file "$url" "$temp_dir/maven.tar.gz"
     verify_file "$temp_dir/maven.tar.gz" "sha512:$sum" || { rm -rf "$temp_dir"; return 1; }
     tar xzf "$temp_dir/maven.tar.gz" -C "$temp_dir" --strip-components=1
     rm "$temp_dir/maven.tar.gz"
@@ -593,7 +622,7 @@ install_pgadmin() {
     rm -rf "$temp_dir"
     mkdir -p "$temp_dir"
 
-    curl -fLsS "$url" -o "$temp_dir/pgadmin4.whl"
+    download_file "$url" "$temp_dir/pgadmin4.whl"
     unzip -q "$temp_dir/pgadmin4.whl" -d "$temp_dir"
 
     rm -rf "$BASE_DIR/pgadmin"
@@ -635,17 +664,19 @@ download_single_binary() (
     make_shared_directory "$BASE_DIR/bin"
     make_shared_directory "$BASE_DIR/.versions"
     temp_file=$(mktemp "$BASE_DIR/bin/.${binary}.staging.XXXXXX")
-    trap 'rm -f "$temp_file"' EXIT
-    if ! curl -fLsS "$url" -o "$temp_file"; then
+    trap 'rm -f "$temp_file" "$temp_file.aria2"' EXIT
+    if ! download_file "$url" "$temp_file"; then
         [ -n "$fallback_url" ] || return 1
         echo "→ Primary download failed; trying publisher fallback"
-        curl -fLsS "$fallback_url" -o "$temp_file"
+        rm -f "$temp_file" "$temp_file.aria2"
+        download_file "$fallback_url" "$temp_file"
         used_fallback=1
     fi
     if [ -n "$expected" ] && ! verify_file "$temp_file" "$expected"; then
         [ -n "$fallback_url" ] && [ "$used_fallback" -eq 0 ] || return 1
         echo "→ Primary checksum failed; trying publisher fallback"
-        curl -fLsS "$fallback_url" -o "$temp_file"
+        rm -f "$temp_file" "$temp_file.aria2"
+        download_file "$fallback_url" "$temp_file"
         verify_file "$temp_file" "$expected"
     elif [ -z "$expected" ]; then
         echo "  ⚠ $name: publisher provides no checksum — installing unverified"
@@ -734,43 +765,6 @@ install_yq() {
     download_single_binary "yq" "yq" "$url" "$version" "$sum"
 }
 
-install_ollama() {
-    local version=$(github_api https://api.github.com/repos/ollama/ollama/releases/latest | grep -oP '"tag_name": "\K[^"]+')
-    local url="https://github.com/ollama/ollama/releases/download/${version}/ollama-linux-amd64.tar.zst"
-    local version_file="$BASE_DIR/ollama/.version"
-    local current_version=""
-
-    if [ -z "$version" ]; then
-        echo "✗ Failed to fetch version for Ollama"
-        return 1
-    fi
-
-    [ -f "$version_file" ] && current_version=$(cat "$version_file")
-
-    if [ "$current_version" = "$version" ]; then
-        echo "✓ Ollama already at version $version"
-        return 0
-    fi
-
-    local sum=$(fetch_checksum "https://github.com/ollama/ollama/releases/download/${version}/sha256sum.txt" "ollama-linux-amd64.tar.zst")
-    [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for Ollama"; return 1; }
-
-    echo "→ Downloading Ollama $version..."
-    local temp_dir="$BASE_DIR/ollama_temp"
-    rm -rf "$temp_dir"
-    mkdir -p "$temp_dir"
-
-    curl -fLsS "$url" -o "$temp_dir/ollama.tar.zst"
-    verify_file "$temp_dir/ollama.tar.zst" "$sum" || { rm -rf "$temp_dir"; return 1; }
-    tar --zstd -xf "$temp_dir/ollama.tar.zst" -C "$temp_dir"
-    rm "$temp_dir/ollama.tar.zst"
-
-    rm -rf "$BASE_DIR/ollama"
-    mv "$temp_dir" "$BASE_DIR/ollama"
-    echo "$version" > "$version_file"
-    echo "✓ Ollama $version installed"
-}
-
 install_ffmpeg() {
     # BtbN dropped nonfree builds; gpl is the closest remaining variant.
     local version=$(github_api https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest | grep -oP '"tag_name": "\K[^"]+')
@@ -786,10 +780,11 @@ install_ffmpeg() {
 
     [ -f "$version_file" ] && current_version=$(cat "$version_file")
 
-    if [ "$current_version" = "$version" ]; then
+    if [ "$current_version" = "$version" ] && [ -x "$BASE_DIR/ffmpeg/bin/ffmpeg" ]; then
         echo "✓ FFmpeg already at version $version"
         return 0
     fi
+    [ "$current_version" != "$version" ] || echo "→ Rebuilding incomplete FFmpeg $version installation"
 
     local sum=$(fetch_checksum "https://github.com/BtbN/FFmpeg-Builds/releases/download/${version}/checksums.sha256" "$file")
     [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for FFmpeg"; return 1; }
@@ -799,7 +794,7 @@ install_ffmpeg() {
     rm -rf "$temp_dir"
     mkdir -p "$temp_dir"
 
-    curl -fLsS "$url" -o "$temp_dir/ffmpeg.tar.xz"
+    download_file "$url" "$temp_dir/ffmpeg.tar.xz"
     verify_file "$temp_dir/ffmpeg.tar.xz" "$sum" || { rm -rf "$temp_dir"; return 1; }
     tar xJf "$temp_dir/ffmpeg.tar.xz" -C "$temp_dir" --strip-components=1
     rm "$temp_dir/ffmpeg.tar.xz"
@@ -812,7 +807,7 @@ install_ffmpeg() {
 
 # Default install set; pass tool names as arguments to install a subset.
 ALL_TOOLS=(idea nushell starship herdr codex grok pi claude obsidian gradle maven
-           kubectl kind k9s helm stern skaffold jq yq ollama ffmpeg corretto_all)
+           kubectl kind k9s helm stern skaffold jq yq ffmpeg corretto_all)
 
 if [ $# -gt 0 ]; then
     TOOLS=("$@")
@@ -843,7 +838,6 @@ chmod 0755 "$BASE_DIR/bin"
 [ -f "$BASE_DIR/stern/stern" ] && ln -sf "$BASE_DIR/stern/stern" "$BASE_DIR/bin/stern"
 [ -f "$BASE_DIR/idea/bin/idea.sh" ] && ln -sf "$BASE_DIR/idea/bin/idea.sh" "$BASE_DIR/bin/idea"
 [ -f "$BASE_DIR/obsidian/obsidian" ] && ln -sf "$BASE_DIR/obsidian/obsidian" "$BASE_DIR/bin/obsidian"
-[ -f "$BASE_DIR/ollama/bin/ollama" ] && ln -sf "$BASE_DIR/ollama/bin/ollama" "$BASE_DIR/bin/ollama"
 [ -f "$BASE_DIR/ffmpeg/bin/ffmpeg" ] && ln -sf "$BASE_DIR/ffmpeg/bin/ffmpeg" "$BASE_DIR/bin/ffmpeg"
 [ -f "$BASE_DIR/ffmpeg/bin/ffplay" ] && ln -sf "$BASE_DIR/ffmpeg/bin/ffplay" "$BASE_DIR/bin/ffplay"
 [ -f "$BASE_DIR/ffmpeg/bin/ffprobe" ] && ln -sf "$BASE_DIR/ffmpeg/bin/ffprobe" "$BASE_DIR/bin/ffprobe"

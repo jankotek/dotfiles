@@ -21,7 +21,7 @@ test/test-vm-xub26-deploy.sh       # clone xub26 -> setup/vm-xub26 -> test -> de
 
 | File | What it checks |
 |------|---------------|
-| `cli.bats` | Common CLI tools: git, curl, mc, htop, fish, nano, ncdu, rg, starship, iotop, powertop, pwgen, telnet, jdupes, just, bats, zim, JetBrains Mono font |
+| `cli.bats` | Common CLI tools: git, curl, aria2c, mc, htop, fish, nano, ncdu, rg, starship, iotop, powertop, pwgen, telnet, jdupes, just, bats, zim, JetBrains Mono font |
 | `optjan.bats` | `/opt/jan` directory structure, key scripts exist in repo |
 | `zswap.bats` | zswap enabled with zstd compressor in boot params and at runtime |
 
@@ -41,16 +41,18 @@ test/test-vm-xub26-deploy.sh       # clone xub26 -> setup/vm-xub26 -> test -> de
 | `dotfiles.bats` | Deployed dotfiles: .bashrc (EDITOR, VISUAL, starship), fish config, .profile (GTK_THEME), git config (name, email, defaultBranch), user-dirs (lowercase folders) |
 | `xfce.bats` | xfce4-session, Xorg, autologin (xfce4-panel + xfdesktop running as jan), jan-vm-resize-display-loop running, terminator config (font, fish, titlebar), rofi, XFCE panel/xfwm4/xsettings XML, autostart entry, desktop shortcuts |
 | `agents.bats` | Running inside VM, spice-vdagent installed + service enabled + process running as jan, spice-vdagentd running, qemu-guest-agent installed + enabled |
-| `system.bats` | /opt/jan/usr symlinked into /usr/local, terminator/rofi/mousepad/arandr installed, home owned by jan with 0700, snapd/xfce4-screensaver/xfce4-terminal removed, snapd blocked from reinstall, tty11-root service enabled |
+| `system.bats` | /opt/jan/usr symlinked into /usr/local, terminator/rofi/mousepad/arandr installed, home owned by jan with 0700, automatic APT updates disabled, snapd/xfce4-screensaver/xfce4-terminal removed, snapd blocked from reinstall, tty11-root service enabled |
 
-### utils/ — manual integration tests
+### utils/ — fixture checks and manual integration tests
 
-Not triggered by any launcher. Run individually; tests that modify system state
-must be run as root.
+Not triggered by the host or VM launchers. CI runs `repo-policy.bats` and
+`pod-subid-allocation.bats`; tests that modify system state are manual and must
+be run as root.
 
 | File | What it checks |
 |------|---------------|
 | `update-opt.bats` | Downloads Herdr, Codex, Grok, Pi, and Claude Code into temporary `JAN_OPT` trees; verifies native binaries, publisher checksums, version tracking, and idempotent re-runs (network-heavy) |
+| `repo-policy.bats` | Fast, fixture-only checks for canonical dotfiles, error traps, download policy, and provisioning safety limits |
 | `pod-subid-allocation.bats` | Fixture-only unit tests for non-overlapping subordinate UID/GID allocation; does not require root |
 | `pod-security.bats` | Creates a temporary pod user via `jan-pod-setup`, verifies subordinate-ID preservation and matching UID/GID ranges plus all security hardening layers (nologin shell, locked password, nogroup, 0700 home, sudo denied, cron denied, filesystem ACLs, podman configs, linger, cgroup delegation, sysctl port restriction), then deletes everything |
 
