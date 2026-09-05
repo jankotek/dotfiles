@@ -7,3 +7,4 @@ Exec=nmtui
 Icon=network-wired
 Terminal=true
 StartupNotify=false
+OnlyShowIn=KDE;

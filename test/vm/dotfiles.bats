@@ -31,9 +31,11 @@ load ../helpers
     assert_file_contains "$JAN_HOME/.config/fish/config.fish" 'starship init fish'
 }
 
-@test "deployed user helper scripts are executable" {
+@test "user helper scripts retain executable modes" {
     assert_executable "$JAN_HOME/.local/bin/autostart.sh"
-    assert_executable "$JAN_HOME/.local/bin/autoini.sh"
+    # autostart.sh intentionally removes the deployed autoini.sh after its
+    # one-time XFCE initialization, so check its canonical source instead.
+    assert_executable "$OPT_JAN/skel/home/.local/bin/autoini.sh"
 }
 
 @test "profile does not force a GTK theme in Plasma" {

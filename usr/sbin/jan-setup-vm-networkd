@@ -1,0 +1,64 @@
+#!/bin/bash
+# Configure simple DHCP networking for VMs without NetworkManager.
+
+set -Eeuo pipefail
+
+if (( EUID != 0 )); then
+    echo "ERROR: jan-setup-vm-networkd must run as root" >&2
+    exit 1
+fi
+
+if ! systemd-detect-virt --quiet; then
+    echo "ERROR: jan-setup-vm-networkd must run inside a virtual machine" >&2
+    exit 1
+fi
+
+echo "==> Configuring systemd-networkd"
+install -d -m 0755 /etc/systemd/network
+cat > /etc/systemd/network/05-jan-wired.network <<'EOF'
+[Match]
+Type=ether
+
+[Network]
+DHCP=ipv4
+IPv6AcceptRA=no
+LinkLocalAddressing=no
+EOF
+
+# Package names differ, but both VM families use systemd-resolved for DNS.
+if command -v apt-get >/dev/null 2>&1; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get purge -y network-manager network-manager-gnome
+    cat > /etc/apt/preferences.d/block-network-manager.pref <<'EOF'
+Package: network-manager network-manager-gnome
+Pin: release *
+Pin-Priority: -1
+EOF
+elif command -v zypper >/dev/null 2>&1; then
+    networkmanager_packages=()
+    for package in NetworkManager NetworkManager-tui; do
+        rpm -q "$package" >/dev/null 2>&1 && networkmanager_packages+=("$package")
+    done
+    if (( ${#networkmanager_packages[@]} )); then
+        zypper -n remove --clean-deps "${networkmanager_packages[@]}"
+    fi
+    zypper -n addlock NetworkManager NetworkManager-tui
+    systemctl disable --now wicked.service wicked-nanny.service 2>/dev/null || true
+    systemctl mask wicked.service wicked-nanny.service 2>/dev/null || true
+else
+    echo "ERROR: unsupported package manager" >&2
+    exit 1
+fi
+
+# Prevent another network stack from racing networkd, including on images that
+# retain an old unit file after package removal.
+systemctl disable --now NetworkManager.service 2>/dev/null || true
+systemctl mask NetworkManager.service
+
+systemctl unmask systemd-networkd.service systemd-resolved.service
+systemctl enable systemd-networkd.service systemd-resolved.service
+ln -sfn /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+systemctl restart systemd-networkd.service systemd-resolved.service
+
+systemctl is-active --quiet systemd-networkd.service
+systemctl is-active --quiet systemd-resolved.service

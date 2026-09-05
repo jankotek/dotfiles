@@ -119,7 +119,7 @@ apt-get install -y \
   xfce4-fsguard-plugin xfce4-systemload-plugin xfce4-taskmanager \
   links "${JAN_COMMON_CLI_PACKAGES[@]}" iftop sshpass starship \
   fonts-jetbrains-mono fonts-terminus console-setup \
-  xdotool
+  xdotool systemd-resolved
 
 # Seed future VM accounts. The XFCE files are ignored by Plasma, and VM-only
 # display handling is a separate XFCE autostart entry.
@@ -134,11 +134,10 @@ apt-get purge -y snapd \
   xfce4-terminal \
   libwebkit2gtk-* \
   cups* printer-driver* \
-  xfce4-screensaver network-manager-gnome \
+  xfce4-screensaver \
   *packagekit* apport* yelp* \
   xterm xfce4-screensaver xscreensaver \
   pulseaudio* gstreamer* bluez* pipewire* pavucontrol \
-  network-manager-gnome \
   xserver-xorg-video-all memtest86+ mesa-vulkan-drivers \
   bind9* colord* \
   avahi-daemon apparmor *fwup* \
@@ -251,6 +250,9 @@ EOF
 }
 
 configure-user-dirs jan users /home/jan
+
+# Switch only after every network-dependent package operation has finished.
+jan-setup-vm-networkd
 
 # Re-enable the guest agent when this standalone script owns the guard. When
 # called by vm-ub26-xfce, the wrapper retains the lease and performs the final

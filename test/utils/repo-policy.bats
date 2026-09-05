@@ -36,3 +36,13 @@ load ../helpers
     assert_file_contains "$OPT_JAN/setup/host-weed-kde" \
         'HOME_SIZE_KIB > HOME_BACKUP_MAX_KIB'
 }
+
+@test "VM provisioners use systemd-networkd instead of NetworkManager" {
+    for script in setup/vm-xub24 setup/vm-xub26 setup/vm-baseweed; do
+        assert_file_contains "$OPT_JAN/$script" '^jan-setup-vm-networkd$'
+    done
+    assert_file_contains "$OPT_JAN/usr/sbin/jan-setup-vm-networkd" \
+        '^DHCP=ipv4$'
+    assert_file_contains "$OPT_JAN/usr/sbin/jan-setup-vm-networkd" \
+        'apt-get purge -y network-manager network-manager-gnome'
+}

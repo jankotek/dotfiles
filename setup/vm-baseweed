@@ -49,6 +49,7 @@ zypper -n install --no-recommends \
     xfce4-fsguard-plugin xfce4-systemload-plugin xfce4-taskmanager \
     "${JAN_COMMON_CLI_PACKAGES[@]}" \
     iftop \
+    systemd-networkd systemd-resolved \
     jetbrains-mono-fonts terminus-bitmap-fonts
 
 # Seed future XFCE VM accounts while preserving /usr/etc/skel vendor files.
@@ -137,6 +138,9 @@ EOF
 }
 
 configure-user-dirs "$HOME_USER" "$HOME_GROUP" "$HOME_DIR"
+
+# Switch only after every network-dependent package operation has finished.
+jan-setup-vm-networkd
 
 # ---------- Re-enable guest agents on next boot ----------
 

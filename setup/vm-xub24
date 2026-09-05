@@ -35,7 +35,7 @@ apt-get install -y \
   xfce4-fsguard-plugin xfce4-systemload-plugin xfce4-taskmanager \
   links mc htop git curl aria2 powertop fish iftop iotop sshpass ncdu nano mosh ripgrep rsync \
   fonts-jetbrains-mono fonts-terminus console-setup \
-  pwgen telnet jdupes just bats
+  pwgen telnet jdupes just bats systemd-resolved
 
 /opt/jan/skel/install
 
@@ -48,11 +48,10 @@ apt-get purge -y  snapd  \
   xfce4-terminal     \
   libwebkit2gtk-*    \
   cups* printer-driver*      \
-  xfce4-screensaver  network-manager-gnome           \
+  xfce4-screensaver                              \
   *packagekit*  apport*  yelp*    \
   xterm xfce4-screensaver  xscreensaver     \
 pulseaudio* gstreamer* bluez* pipewire* pavucontrol     \
-network-manager-gnome   \
 xserver-xorg-video-all memtest86+ mesa-vulkan-drivers  \
 bind9*  colord*  \
 avahi-daemon apparmor *fwup* \
@@ -144,6 +143,9 @@ EOF
 }
 
 configure-user-dirs jan users /home/jan
+
+# Switch only after every network-dependent package operation has finished.
+jan-setup-vm-networkd
 
 # Unmask and re-enable guest agent — it will start properly on reboot
 systemctl unmask qemu-guest-agent.service 2>/dev/null || true

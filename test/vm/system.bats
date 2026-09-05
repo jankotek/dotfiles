@@ -85,6 +85,24 @@ load ../helpers
     assert_file_contains "$dropin" 'ipv6.disable=1'
 }
 
+@test "systemd-networkd manages VM Ethernet with DHCP" {
+    assert_file_contains /etc/systemd/network/05-jan-wired.network '^Type=ether$'
+    assert_file_contains /etc/systemd/network/05-jan-wired.network '^DHCP=ipv4$'
+    systemctl is-enabled --quiet systemd-networkd.service
+    systemctl is-active --quiet systemd-networkd.service
+}
+
+@test "systemd-resolved provides VM DNS" {
+    [[ $(readlink -f /etc/resolv.conf) == /run/systemd/resolve/stub-resolv.conf ]]
+    systemctl is-enabled --quiet systemd-resolved.service
+    systemctl is-active --quiet systemd-resolved.service
+}
+
+@test "NetworkManager is removed and masked" {
+    ! command -v NetworkManager
+    [[ $(systemctl is-enabled NetworkManager.service 2>/dev/null || true) == masked ]]
+}
+
 @test "tty11-root service is enabled" {
     systemctl is-enabled tty11-root.service
 }
