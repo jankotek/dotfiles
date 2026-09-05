@@ -90,14 +90,14 @@ EOF
 # installer). Bail out if neither exists.
 
 HOME_USER=""
-for u in jan tumbleweed opensuse playai; do
+for u in jan admin tumbleweed opensuse playai; do
     if id "$u" &>/dev/null; then
         HOME_USER="$u"
         break
     fi
 done
 if [[ -z "$HOME_USER" ]]; then
-    echo "ERROR: no candidate user found (tried: jan tumbleweed opensuse playai)" >&2
+    echo "ERROR: no candidate user found (tried: jan admin tumbleweed opensuse playai)" >&2
     exit 1
 fi
 HOME_GROUP=$(id -gn "$HOME_USER")

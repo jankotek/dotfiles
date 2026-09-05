@@ -57,6 +57,15 @@ load ../helpers
     ! grep -q -- '--no-gpg-checks' "$OPT_JAN/setup/vm-baseweed"
 }
 
+@test "baseweed deployment supports the baked qdistro image" {
+    assert_file_contains "$OPT_JAN/setup/vm-baseweed" \
+        '^for u in jan admin tumbleweed opensuse playai; do$'
+    assert_file_contains "$OPT_JAN/test/test-vm-baseweed-deploy.sh" \
+        "if ! grep -q '<memoryBacking>'"
+    assert_file_contains "$OPT_JAN/test/test-vm-baseweed-deploy.sh" \
+        "bats --filter 'systemd-networkd|systemd-resolved|NetworkManager'"
+}
+
 @test "jan-create-user seeds the canonical skeleton before useradd" {
     assert_file_contains "$OPT_JAN/usr/sbin/jan-create-user" \
         '"\$REPO_DIR/skel/install"'

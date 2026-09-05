@@ -1,8 +1,8 @@
 #!/bin/bash
 #
 # Tumbleweed counterpart to test-vm-deploy.sh. Clones the `baseweed` VM,
-# runs setup/vm-baseweed, reboots, and runs the basic/ bats suite (the vm/
-# suite is XFCE-specific, so we skip it for Tumbleweed).
+# runs setup/vm-baseweed, reboots, then runs the basic suite and the portable
+# systemd-networkd checks from the VM suite.
 #
 # Usage: ./test-vm-baseweed-deploy.sh [--keep]
 #
@@ -13,8 +13,8 @@ OPT_JAN="${SCRIPT_DIR%/test}"
 VM_EXEC="$OPT_JAN/usr/bin/vm-exec"
 VM_WAIT="$OPT_JAN/usr/bin/vm-start-and-wait"
 
-BASE_VM="baseweed"
-BASE_DISK="$HOME/.local/share/libvirt/images/baseweed.qcow2"
+BASE_VM="${BASE_VM:-baseweed}"
+BASE_DISK="${BASE_DISK:-$HOME/.local/share/libvirt/images/${BASE_VM}.qcow2}"
 IMAGES_DIR="$HOME/.local/share/libvirt/images"
 
 VM_NAME="weedtest-$(date +%y%m%d-%H%M)"
@@ -75,10 +75,18 @@ XML=$(echo "$XML" | sed "s|$BASE_DISK|$VM_DISK|")
 NEW_MAC="52:54:00:$(printf '%02x:%02x:%02x' $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256)))"
 XML=$(echo "$XML" | sed -E "s|<mac address='52:54:00:[^']+'/>|<mac address='$NEW_MAC'/>|")
 
-# Add a SECOND virtiofs filesystem entry that mounts our repo into the
-# guest under tag 'opt-jan'. baseweed already has an 'opt' share for
-# /opt; we leave it alone and mount our repo separately at /opt/jan
-# from inside the VM (manual mount, no fstab edit needed).
+# virtiofs requires shared guest memory. The minimal qdistro template used to
+# bootstrap baseweed does not need it itself, so add it to the test clone.
+if ! grep -q '<memoryBacking>' <<<"$XML"; then
+    XML=$(echo "$XML" | sed "/<currentMemory/a\\
+  <memoryBacking>\\
+    <source type='memfd'/>\\
+    <access mode='shared'/>\\
+  </memoryBacking>")
+fi
+
+# Add a virtiofs filesystem entry that exposes this repository under the
+# 'opt-jan' tag. Mount it manually at /opt/jan without changing guest fstab.
 EXTRA_FS=$(cat <<EOF
     <filesystem type='mount' accessmode='passthrough'>
       <driver type='virtiofs'/>
@@ -120,7 +128,8 @@ echo "=== Re-mounting /opt/jan after reboot ==="
 echo ""
 echo "=== Running basic/ bats suite ==="
 set +e
-"$VM_EXEC" "$VM_NAME" "OPT_JAN=/opt/jan bats /opt/jan/test/basic/"
+"$VM_EXEC" "$VM_NAME" \
+    "OPT_JAN=/opt/jan bats /opt/jan/test/basic/ && bats --filter 'systemd-networkd|systemd-resolved|NetworkManager' /opt/jan/test/vm/system.bats"
 TEST_EXIT=$?
 set -e
 
