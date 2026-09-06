@@ -4,11 +4,11 @@
 set -uo pipefail
 
 if [[ ${1:-} == -h || ${1:-} == --help ]]; then
-    echo "Usage: jan-doctor"
+    echo "Usage: host-doctor"
     exit 0
 fi
 if (( $# )); then
-    echo "Usage: jan-doctor" >&2
+    echo "Usage: host-doctor" >&2
     exit 2
 fi
 

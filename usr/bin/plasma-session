@@ -1,7 +1,7 @@
 #!/bin/bash
 # Start Plasma Wayland from a real local login, replacing the login shell.
 #
-# Run this as `exec jan-plasma-session`.  A standalone child process cannot
+# Run this as `exec plasma-session`.  A standalone child process cannot
 # replace its parent Bash and is deliberately rejected: returning from it
 # would expose the shell that launched Plasma instead of ending the PAM login
 # and allowing getty to print a fresh prompt.
@@ -31,18 +31,18 @@ session_properties=$(/usr/bin/loginctl show-session "$XDG_SESSION_ID" \
 [[ $session_properties == *$'TTY='"${tty_path#/dev/}"* ]] \
     || die "logind session is not attached to $tty_path"
 
-# With `exec jan-plasma-session`, the process which login originally started
+# With `exec plasma-session`, the process which login originally started
 # as Bash has this script's image and login remains its parent.  If Bash is
 # still the parent, the caller forgot exec and Plasma would return to a shell.
 parent_comm=$(<"/proc/$PPID/comm")
 case $parent_comm in
     login|login.*) ;;
-    *) die "an executable cannot replace its parent shell; run: exec jan-plasma-session" ;;
+    *) die "an executable cannot replace its parent shell; run: exec plasma-session" ;;
 esac
 
 [[ -x /usr/bin/startplasma-wayland ]] || die "/usr/bin/startplasma-wayland is missing"
-[[ -x /usr/local/bin/jan-greetd-session ]] || die "jan-greetd-session is missing"
+[[ -x /usr/local/bin/greetd-session ]] || die "greetd-session is missing"
 
 export XDG_CURRENT_DESKTOP=KDE
 export XDG_SESSION_DESKTOP=KDE
-exec /usr/local/bin/jan-greetd-session wayland /usr/bin/startplasma-wayland
+exec /usr/local/bin/greetd-session wayland /usr/bin/startplasma-wayland

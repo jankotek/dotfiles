@@ -137,9 +137,9 @@ load ../helpers
 }
 
 @test "VM display resize is a separate XFCE-only autostart" {
-    local entry="$OPT_JAN/skel/home/.config/autostart/jan-vm-resize-display.desktop"
+    local entry="$OPT_JAN/skel/home/.config/autostart/vm-resize-display.desktop"
     assert_file_contains "$entry" '^OnlyShowIn=XFCE;$'
-    if grep -F jan-vm-resize-display-loop \
+    if grep -F vm-resize-display-loop \
         "$OPT_JAN/skel/home/.local/bin/autostart.sh" \
         "$OPT_JAN/skel/home/.xsessionrc"; then
         return 1

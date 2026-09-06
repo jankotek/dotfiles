@@ -46,7 +46,7 @@ Use `--keep` only when the user wants the provisioned VM retained.
 To recreate a named disposable VM from an existing base:
 
 ```bash
-"$repo/usr/bin/jan-vm-reset" "$vm" "$base_vm"
+"$repo/usr/bin/vm-reset" "$vm" "$base_vm"
 ```
 
 This verifies the overlay relationship and asks for the target VM name before
@@ -61,7 +61,7 @@ builder. Do not improvise an installer workflow or substitute another image.
 Start the guest and wait up to 120 seconds for QGA:
 
 ```bash
-"$repo/usr/bin/vm-start-and-wait" "$vm"
+"$repo/usr/bin/vm-wait" "$vm"
 ```
 
 Prefer literal argv execution, especially for user-provided arguments:
@@ -87,14 +87,14 @@ After reboot, allow the old QGA connection to disappear before waiting:
 ```bash
 virsh -c qemu:///session reboot "$vm"
 sleep 5
-"$repo/usr/bin/vm-start-and-wait" "$vm"
+"$repo/usr/bin/vm-wait" "$vm"
 ```
 
 QGA readiness does not guarantee DHCP or DNS readiness. Run the lightweight,
 non-mutating smoke check when network health matters:
 
 ```bash
-"$repo/usr/bin/jan-vm-smoke" "$vm"
+"$repo/usr/bin/vm-smoke" "$vm"
 ```
 
 After disposable work, confirm the target domain and overlay are gone and the

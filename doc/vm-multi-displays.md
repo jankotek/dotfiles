@@ -123,9 +123,9 @@ virtio GPU may expose an unused head as a disconnected XRandR output with no
 advertised modes. Enabling a viewer display alone does not always activate the
 corresponding guest output.
 
-The desktop autostarts `jan-vm-resize-display-loop`. It waits for XRandR output
+The desktop autostarts `vm-resize-display-loop`. It waits for XRandR output
 change events, allows 0.15 seconds for SPICE to publish the updated mode list,
-then calls the one-shot `jan-vm-resize-display` command.
+then calls the one-shot `vm-resize-display` command.
 
 The one-shot command:
 
@@ -145,7 +145,7 @@ break absolute mouse-coordinate translation.
 
 ARandR can be used to change monitor positions after all outputs are active.
 The automatic script has a preservation gate: if every output already uses its
-preferred resolution, `jan-vm-resize-display` leaves the positions unchanged
+preferred resolution, `vm-resize-display` leaves the positions unchanged
 and exits. It may still mark the first output primary.
 
 Change positions only when using this gate. If a monitor is inactive or is no

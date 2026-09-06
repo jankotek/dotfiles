@@ -2,7 +2,7 @@
 # Replace this repository's multi-VT greetd setup with ordinary agetty/login.
 # tty1 is deliberately left entirely to the distribution's stock getty setup.
 # This helper explicitly manages tty2 through tty10. From Bash,
-# `exec jan-plasma-session` replaces the login shell with Plasma Wayland.
+# `exec plasma-session` replaces the login shell with Plasma Wayland.
 
 set -Eeuo pipefail
 
@@ -16,11 +16,11 @@ error_trap() {
 trap error_trap ERR
 
 if (( EUID != 0 )); then
-    echo "ERROR: jan-setup-agetty must run as root" >&2
+    echo "ERROR: setup-agetty must run as root" >&2
     exit 1
 fi
 if [[ ! -d /run/systemd/system ]]; then
-    echo "ERROR: jan-setup-agetty requires systemd as PID 1" >&2
+    echo "ERROR: setup-agetty requires systemd as PID 1" >&2
     exit 1
 fi
 
@@ -54,8 +54,8 @@ for command_name in \
 done
 for command_path in \
     /usr/bin/startplasma-wayland \
-    /usr/local/bin/jan-plasma-session \
-    /usr/local/bin/jan-greetd-session; do
+    /usr/local/bin/plasma-session \
+    /usr/local/bin/greetd-session; do
     [[ -x $command_path ]] || { echo "ERROR: required executable is missing: $command_path" >&2; exit 1; }
 done
 
@@ -68,7 +68,7 @@ cat > /etc/issue.d/80-jan-system-info.issue <<'EOF'
 \e{bold}\S\e{reset}
 Host: \n    Architecture: \m    Kernel: \r
 IPv4: \4    Console: \l
-Start Plasma Wayland: exec jan-plasma-session
+Start Plasma Wayland: exec plasma-session
 EOF
 chmod 0644 /etc/issue.d/80-jan-system-info.issue
 
@@ -114,5 +114,5 @@ systemctl daemon-reload
 # The enablement above takes effect normally at boot.
 
 echo "=========== HOST AGETTY SETUP DONE ==========="
-echo "tty1 remains stock. Log in on tty1-tty10 and run 'exec jan-plasma-session'."
+echo "tty1 remains stock. Log in on tty1-tty10 and run 'exec plasma-session'."
 echo "Logging out of Plasma then returns the console to agetty."

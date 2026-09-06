@@ -43,7 +43,7 @@ rm -rf /lib/firmware/* /usr/lib/firmware/*
 rm -rf /usr/share/doc/*
 
 if command -v apt-get >/dev/null; then
-    jan-ubuntu-remove-older-kernel
+    ubuntu-remove-older-kernel
     apt-get autoremove -y
     apt-get clean
 elif command -v zypper >/dev/null; then

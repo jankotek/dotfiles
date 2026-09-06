@@ -10,13 +10,13 @@
 #   - locks packages we never want pulled in (X server, vim, PackageKit, ...)
 #   - masks services we replace or don't use (sddm, fwupd, ...)
 #   - leaves tty1 stock; sets up agetty on tty2-10 and CLI-started Plasma
-#   - runs the cross-distro jan-* helpers
+#   - runs the cross-distro setup helpers
 #   - installs curated defaults into /etc/skel without touching existing homes
 #
 # Idempotent: safe to re-run. Run as root from a checkout, e.g.
 #   sudo /opt/jan/setup/host-weed-kde
 #
-# NOTE: unlike vm-baseweed this does NOT install jan-systemd-tty11-root —
+# NOTE: unlike vm-baseweed this does NOT install install-tty11-root —
 # that grants unauthenticated root on a console TTY and is VM-only.
 
 if [ "$EUID" -ne 0 ]; then
@@ -52,6 +52,7 @@ source "${REPO_DIR}/setup/common-cli-packages.sh"
 
 echo "==> Symlinking ${REPO_DIR}/usr -> /usr/local"
 cp -f -s -r "${REPO_DIR}/usr/"* /usr/local
+"${REPO_DIR}/setup/retire-path-util-names.sh"
 
 # Keep the Sweet palette in one installed color-scheme file. KConfig needs the
 # palette groups in its global cascade as well as the ColorScheme name in each
@@ -66,7 +67,7 @@ ln -sfn /usr/local/share/fontconfig/conf.avail/60-jan-jetbrains-mono.conf \
     /etc/fonts/conf.d/60-jan-jetbrains-mono.conf
 fc-cache -f
 
-# The jan-* helpers now live in /usr/local/{sbin,bin}. Make sure they're on
+# Repo helpers now live in /usr/local/{sbin,bin}. Make sure they're on
 # PATH for the rest of this script regardless of how it was invoked (a
 # locked-down sudo secure_path or a guest-agent exec may omit /usr/local).
 export PATH="/usr/local/sbin:/usr/local/bin:$PATH"
@@ -115,23 +116,23 @@ for unit in sddm.service fwupd.service forgejo-runner.service; do
     systemctl mask "$unit" 2>/dev/null || true
 done
 
-# ---------- Cross-distro jan-* helpers ----------
+# ---------- Cross-distro setup helpers ----------
 # tty11-root is intentionally omitted (see header).
 
-echo "==> Running jan-* setup helpers"
-jan-console-font            || echo "WARNING: console font setup failed (non-fatal)"
-jan-console-framebuffer
-jan-setup-pkg-safety        || echo "WARNING: pkg safety setup failed (non-fatal)"
-jan-setup-kernel-tweaks     || echo "WARNING: kernel tweaks setup failed (non-fatal)"
-jan-setup-agetty
-jan-systemd-tty12-menu      || echo "WARNING: tty12 menu setup failed (non-fatal)"
+echo "==> Running setup helpers"
+console-font            || echo "WARNING: console font setup failed (non-fatal)"
+console-framebuffer
+setup-pkg-safety        || echo "WARNING: pkg safety setup failed (non-fatal)"
+setup-kernel-tweaks     || echo "WARNING: kernel tweaks setup failed (non-fatal)"
+setup-agetty
+install-tty12-menu      || echo "WARNING: tty12 menu setup failed (non-fatal)"
 # Patch virt-manager/remote-viewer to run under XWayland (fractional scaling fix).
-jan-fix-virtman-scaling     || echo "WARNING: virt-manager scaling fix failed (non-fatal)"
+fix-virtman-scaling     || echo "WARNING: virt-manager scaling fix failed (non-fatal)"
 
 # AMD Strix Halo unified-memory tuning — only on matching hardware.
 if lspci -nn 2>/dev/null | grep -qi 'Strix Halo'; then
     echo "==> Strix Halo detected — applying GPU/memory tweaks"
-    jan-setup-strix-halo    || echo "WARNING: strix-halo setup failed (non-fatal)"
+    setup-strix-halo    || echo "WARNING: strix-halo setup failed (non-fatal)"
 fi
 
 # ---------- Replace all wallpapers with a single image ----------

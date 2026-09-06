@@ -34,9 +34,11 @@ Personal dotfiles and system provisioning repo. Checked out at `/opt/jan` on tar
 - New homes get real `~/.agents/skills`, `~/.claude/skills`, `~/.grok/skills`,
   and `~/.pi/agent/skills` directories of per-skill links to
   `/opt/jan/agent/skills/<name>`
-- Scripts in `usr/sbin/` are prefixed `jan-` for namespacing (e.g. `jan-upgrade`, `jan-install-chrome`)
-- `jan-update-opt` downloads portable tools into `/opt/` with `.version` file tracking
-- `jan-upgrade` is distro-agnostic: handles zypper (openSUSE), dnf (Fedora), apt (Ubuntu)
+- PATH commands in `usr/bin/` and `usr/sbin/` use domain-first kebab-case stems
+  (`vm-gui`, `pod-setup`, `distro-upgrade`); no `jan-` brand prefix and no
+  `.sh` suffix. Vendored binaries keep the upstream name (`starship`)
+- `host-optupdate` downloads portable tools into `/opt/` with `.version` file tracking
+- `distro-upgrade` is distro-agnostic: handles zypper (openSUSE), dnf (Fedora), apt (Ubuntu)
 - Setup scripts must check `systemd-detect-virt` before doing VM-specific operations
 - Shell configs exist for both bash (`.bashrc`) and fish (`config.fish`) — keep them in sync
 

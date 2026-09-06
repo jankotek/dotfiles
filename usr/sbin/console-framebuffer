@@ -6,7 +6,7 @@ set -Eeuo pipefail
 readonly RESOLUTION=1920x1080
 
 if (( EUID != 0 )); then
-    echo "ERROR: jan-console-framebuffer must run as root" >&2
+    echo "ERROR: console-framebuffer must run as root" >&2
     exit 1
 fi
 

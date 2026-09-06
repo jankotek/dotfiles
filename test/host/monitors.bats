@@ -3,7 +3,7 @@
 # Verify the desired post-fix state for the multi-monitor / TTY-switch
 # flicker mitigations described in doc/todo/monitors.md.
 #
-# Each fix has a corresponding setup script in usr/sbin/jan-host-monitors-fix-*.
+# Each fix has a corresponding setup script in usr/sbin/host-monitors-fix-*.
 # These tests assume those scripts have been run and the system rebooted.
 # Tests are skipped when not on host hardware (no DRM cards, in a VM, etc.)
 # so this file is safe to run via test-host.sh on any system.

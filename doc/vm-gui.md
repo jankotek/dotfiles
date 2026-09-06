@@ -130,7 +130,7 @@ vm-gui $VM start "xrandr --output Virtual-1 --mode 1920x1080"
 vm-gui $VM screenshot /tmp/hires.png
 ```
 
-This works even with a SPICE viewer connected. The `jan-vm-resize-display-loop` autostart script only reacts to spice client resize events — setting resolution via xrandr inside the guest does **not** trigger it. However, if the user resizes the virt-manager window while you're working, the resize loop will override your resolution back to match the viewer.
+This works even with a SPICE viewer connected. The `vm-resize-display-loop` autostart script only reacts to spice client resize events — setting resolution via xrandr inside the guest does **not** trigger it. However, if the user resizes the virt-manager window while you're working, the resize loop will override your resolution back to match the viewer.
 
 To avoid interference: don't resize the virt-manager window during automated screenshot sequences.
 
@@ -140,7 +140,7 @@ To avoid interference: don't resize the virt-manager window during automated scr
 - **No OCR**: screenshots are images — coordinates must be known or estimated
 - **Typing speed**: 100ms per keystroke; fast enough for automation, slow enough for apps to keep up
 - **JSON escaping**: `vm-exec` passes commands via QEMU guest agent JSON protocol — some special characters in arguments may need escaping
-- **Resize loop interference**: the VM's `jan-vm-resize-display-loop` auto-matches resolution to the spice viewer window size. It won't fight your xrandr calls, but resizing the viewer window will override them
+- **Resize loop interference**: the VM's `vm-resize-display-loop` auto-matches resolution to the spice viewer window size. It won't fight your xrandr calls, but resizing the viewer window will override them
 
 ## Adding xdotool to VM setup
 

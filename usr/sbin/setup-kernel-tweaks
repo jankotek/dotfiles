@@ -39,7 +39,7 @@ add_params_grub() {
     # instead of editing the vendor-owned cloud file.
     if [[ -f "$cloud_dropin" ]]; then
         printf '%s\n' \
-            '# Managed by jan-setup-kernel-tweaks.' \
+            '# Managed by setup-kernel-tweaks.' \
             "GRUB_CMDLINE_LINUX_DEFAULT=\"\${GRUB_CMDLINE_LINUX_DEFAULT} ${PARAMS[*]}\"" \
             > "$jan_dropin"
         chmod 0644 "$jan_dropin"

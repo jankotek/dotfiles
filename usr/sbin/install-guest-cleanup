@@ -1,11 +1,14 @@
 #!/bin/bash
 
+systemctl disable --now vm-cleanup.service 2>/dev/null || true
+rm -f /etc/systemd/system/vm-cleanup.service
+
 SERVICE_FILE_CONTENT="[Unit]
 Description=VM cleanup
 Before=shutdown.target graphical.target
 
 [Service]
-ExecStart=/usr/local/sbin/vm-cleanup
+ExecStart=/usr/local/sbin/guest-cleanup
 Type=oneshot
 User=root
 
@@ -13,13 +16,14 @@ User=root
 WantedBy=default.target"
 
 # Set the service file path
-SERVICE_FILE_PATH="/etc/systemd/system/vm-cleanup.service"
+SERVICE_FILE_PATH="/etc/systemd/system/guest-cleanup.service"
 
 # Echo the service file content to the file
 echo "$SERVICE_FILE_CONTENT" | tee "$SERVICE_FILE_PATH" > /dev/null
 
+systemctl daemon-reload
 # Enable and start the service
-systemctl enable vm-cleanup.service
-systemctl start vm-cleanup.service
+systemctl enable guest-cleanup.service
+systemctl start guest-cleanup.service
 
 echo "Service installed and started successfully."

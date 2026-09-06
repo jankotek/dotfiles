@@ -4,7 +4,7 @@
 set -Eeuo pipefail
 
 usage() {
-    echo "Usage: jan-dotfiles-diff [USER|HOME|--skel]"
+    echo "Usage: dotfiles-diff [USER|HOME|--skel]"
 }
 
 if [[ ${1:-} == -h || ${1:-} == --help ]]; then

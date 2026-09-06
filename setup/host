@@ -21,13 +21,14 @@ for dir in /home/*/; do
 done
 echo "  /home -> 0755"
 
-echo "=== Installing jan-* tools into /usr/local ==="
+echo "=== Installing repo tools into /usr/local ==="
 cp -f -s -r "${REPO_DIR}/usr/"* /usr/local
+"${REPO_DIR}/setup/retire-path-util-names.sh"
 
 echo "=== Setting console font ==="
-jan-console-font
+console-font
 
 echo "=== Package manager safety ==="
-jan-setup-pkg-safety
+setup-pkg-safety
 
 echo "=== Done ==="

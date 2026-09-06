@@ -3,12 +3,12 @@
 
 set -Eeuo pipefail
 
-readonly GUARD_DIR=/run/jan-qga-guard
+readonly GUARD_DIR=/run/qga-guard
 readonly LOCK_FILE=$GUARD_DIR/lock
 readonly OWNER_FILE=$GUARD_DIR/owner
 
 if (( EUID != 0 )); then
-    echo "ERROR: jan-qga-guard must run as root" >&2
+    echo "ERROR: qga-guard must run as root" >&2
     exit 1
 fi
 
@@ -41,7 +41,7 @@ valid_token() {
 }
 
 watchdog_unit_for() {
-    printf 'jan-qga-guard-%s.service\n' "$1"
+    printf 'qga-guard-%s.service\n' "$1"
 }
 
 acquire_guard() (
@@ -112,7 +112,7 @@ acquire_guard() (
         --property Type=exec \
         --property Restart=on-failure \
         --property RestartSec=5s \
-        /usr/local/sbin/jan-qga-guard watchdog "$owner_pid" "$owner_start" "$owner_token"
+        /usr/local/sbin/qga-guard watchdog "$owner_pid" "$owner_start" "$owner_token"
     systemctl mask --runtime qemu-guest-agent.service >/dev/null
     printf '%s\n' "$owner_token"
 )
@@ -184,23 +184,23 @@ watch_guard() {
 
 case "${1:-}" in
     acquire)
-        (( $# == 2 )) || { echo "Usage: jan-qga-guard acquire OWNER_PID" >&2; exit 2; }
+        (( $# == 2 )) || { echo "Usage: qga-guard acquire OWNER_PID" >&2; exit 2; }
         acquire_guard "$2"
         ;;
     release)
-        (( $# == 2 )) || { echo "Usage: jan-qga-guard release OWNER_TOKEN" >&2; exit 2; }
+        (( $# == 2 )) || { echo "Usage: qga-guard release OWNER_TOKEN" >&2; exit 2; }
         release_guard "$2"
         ;;
     verify)
-        (( $# == 2 )) || { echo "Usage: jan-qga-guard verify OWNER_TOKEN" >&2; exit 2; }
+        (( $# == 2 )) || { echo "Usage: qga-guard verify OWNER_TOKEN" >&2; exit 2; }
         verify_guard "$2"
         ;;
     watchdog)
-        (( $# == 4 )) || { echo "Usage: jan-qga-guard watchdog PID START TOKEN" >&2; exit 2; }
+        (( $# == 4 )) || { echo "Usage: qga-guard watchdog PID START TOKEN" >&2; exit 2; }
         watch_guard "$2" "$3" "$4"
         ;;
     *)
-        echo "Usage: jan-qga-guard {acquire OWNER_PID|release OWNER_TOKEN|verify OWNER_TOKEN|watchdog PID START TOKEN}" >&2
+        echo "Usage: qga-guard {acquire OWNER_PID|release OWNER_TOKEN|verify OWNER_TOKEN|watchdog PID START TOKEN}" >&2
         exit 2
         ;;
 esac

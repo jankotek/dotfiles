@@ -1,5 +1,5 @@
 #!/bin/bash
-# Usage: ./vm-start-and-wait <vm_name>
+# Usage: ./vm-wait <vm_name>
 # Starts VM if not running and waits for QEMU guest agent
 
 set -euo pipefail

@@ -30,7 +30,7 @@ cleanup_guest_agent_guard() {
     local rc=$?
     trap - EXIT
     if [[ -n "$guest_agent_owner_token" ]]; then
-        if ! /usr/local/sbin/jan-qga-guard release "$guest_agent_owner_token"; then
+        if ! /usr/local/sbin/qga-guard release "$guest_agent_owner_token"; then
             echo "WARNING: failed to release the QEMU guest-agent guard; watchdog will retry" >&2
         fi
     fi
@@ -39,12 +39,12 @@ cleanup_guest_agent_guard() {
 trap cleanup_guest_agent_guard EXIT
 
 acquire_guest_agent_guard() {
-    guest_agent_owner_token=$(/usr/local/sbin/jan-qga-guard acquire "$$")
+    guest_agent_owner_token=$(/usr/local/sbin/qga-guard acquire "$$")
     export JAN_QGA_GUARD_TOKEN=$guest_agent_owner_token
 }
 
 release_guest_agent_guard() {
-    /usr/local/sbin/jan-qga-guard release "$guest_agent_owner_token"
+    /usr/local/sbin/qga-guard release "$guest_agent_owner_token"
     guest_agent_owner_token=
     unset JAN_QGA_GUARD_TOKEN
 }
@@ -91,6 +91,7 @@ EOF
 
 
 cp -f -s -r /opt/jan/usr/* /usr/local
+/opt/jan/setup/retire-path-util-names.sh
 # cursors do not work in /usr/local/share/icons
 cp -f -s -r /usr/local/share/icons/DMZ* /usr/share/icons/
 cp -f -s -r /usr/local/share/icons/Rare* /usr/share/icons/
@@ -105,7 +106,7 @@ export DEBIAN_FRONTEND=noninteractive
 # runtime mask. The EXIT trap removes it on ordinary failures, and reboot
 # inherently removes it after power loss or a killed process.
 if [[ -n "${JAN_QGA_GUARD_TOKEN:-}" ]]; then
-    /usr/local/sbin/jan-qga-guard verify "$JAN_QGA_GUARD_TOKEN"
+    /usr/local/sbin/qga-guard verify "$JAN_QGA_GUARD_TOKEN"
 else
     acquire_guest_agent_guard
 fi
@@ -159,16 +160,16 @@ apt-get autoremove -y
 apt-get clean
 
 
-jan-systemd-tty11-root
-jan-systemd-vm-cleanup
-jan-console-font || echo "WARNING: console font setup failed (non-fatal)"
+install-tty11-root
+install-guest-cleanup
+console-font || echo "WARNING: console font setup failed (non-fatal)"
 # sysfb/simpledrm may take DRM card0 before virtio_gpu and later disappear,
 # leaving virtio_gpu at card1. spice-vdagent expects card0 when mapping the
 # SPICE display to XRandR, so this breaks resize and absolute pointer mapping.
-jan-setup-kernel-tweaks \
+setup-kernel-tweaks \
     initcall_blacklist=sysfb_init,simpledrm_platform_driver_init \
     || echo "WARNING: kernel tweaks setup failed (non-fatal)"
-jan-setup-pkg-safety || echo "WARNING: pkg safety setup failed (non-fatal)"
+setup-pkg-safety || echo "WARNING: pkg safety setup failed (non-fatal)"
 
 
 
@@ -230,7 +231,7 @@ EOF
 configure-user-dirs jan users /home/jan
 
 # Switch only after every network-dependent package operation has finished.
-jan-setup-vm-networkd
+setup-vm-networkd
 
 # Re-enable the guest agent when this standalone script owns the guard. When
 # called by vm-ub26-xfce, the wrapper retains the lease and performs the final

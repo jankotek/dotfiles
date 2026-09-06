@@ -1,9 +1,9 @@
 #!/usr/bin/env bats
-# Unit tests for jan-pod-setup subordinate-ID allocation. These use fixtures
+# Unit tests for pod-setup subordinate-ID allocation. These use fixtures
 # only and do not require root or modify the host account databases.
 
 setup() {
-    SCRIPT="${OPT_JAN:-$BATS_TEST_DIRNAME/../..}/usr/sbin/jan-pod-setup"
+    SCRIPT="${OPT_JAN:-$BATS_TEST_DIRNAME/../..}/usr/sbin/pod-setup"
     POD_SECURITY_TEST="${OPT_JAN:-$BATS_TEST_DIRNAME/../..}/test/utils/pod-security.bats"
 
     # Load the production helper functions without executing the privileged

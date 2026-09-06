@@ -4,7 +4,7 @@
 set -Eeuo pipefail
 
 usage() {
-    echo "Usage: jan-download URL OUTPUT [SHA256|sha256:SHA256]"
+    echo "Usage: verified-download URL OUTPUT [SHA256|sha256:SHA256]"
 }
 
 if [[ ${1:-} == -h || ${1:-} == --help ]]; then

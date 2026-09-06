@@ -72,7 +72,7 @@ ps aux --sort=-%mem | head -n 3 | awk '{printf "%-8s %-6s %-10s %-10s %-40.40s\n
   case "$choice" in
     "Q" | "q")
       clear
-      jan-upgrade
+      distro-upgrade
       echo ""
       echo " !!!!!!!!!!!! SHUTDOWN !!!!!!!!!!!!!!!"
       echo ""
@@ -81,7 +81,7 @@ ps aux --sort=-%mem | head -n 3 | awk '{printf "%-8s %-6s %-10s %-10s %-40.40s\n
       ;;
     "W" | "w")
       clear
-      jan-upgrade
+      distro-upgrade
       echo ""
       echo " !!!!!!!!!!!! REBOOT !!!!!!!!!!!!!!!"
       echo ""

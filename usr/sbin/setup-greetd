@@ -19,19 +19,19 @@ error_trap() {
 trap error_trap ERR
 
 if (( EUID != 0 )); then
-    echo "ERROR: jan-setup-greetd must run as root" >&2
+    echo "ERROR: setup-greetd must run as root" >&2
     exit 1
 fi
 
 if [[ ! -d /run/systemd/system ]]; then
-    echo "ERROR: jan-setup-greetd requires systemd as PID 1" >&2
+    echo "ERROR: setup-greetd requires systemd as PID 1" >&2
     exit 1
 fi
 
 # shellcheck source=/dev/null
 source /etc/os-release
 if [[ "${ID:-}" != opensuse-tumbleweed ]]; then
-    echo "ERROR: jan-setup-greetd currently targets openSUSE Tumbleweed" >&2
+    echo "ERROR: setup-greetd currently targets openSUSE Tumbleweed" >&2
     exit 1
 fi
 
@@ -55,7 +55,7 @@ zypper -n install --no-recommends greetd tuigreet xinit dbus-1-tools
 readonly GREETD_BIN=/usr/bin/greetd
 readonly TUIGREET_BIN=/usr/bin/tuigreet
 readonly CHVT_BIN=/usr/bin/chvt
-readonly SESSION_WRAPPER=/usr/local/bin/jan-greetd-session
+readonly SESSION_WRAPPER=/usr/local/bin/greetd-session
 readonly FLOCK_BIN=/usr/bin/flock
 readonly STARTX_BIN=/usr/bin/startx
 readonly DBUS_UPDATE_BIN=/usr/bin/dbus-update-activation-environment
@@ -146,7 +146,7 @@ if [[ $(effective_logind_value NAutoVTs) != 2 || $(effective_logind_value Reserv
 fi
 
 # Reconcile the previous/manual out-of-range layout before tty12-menu is
-# started by host-weed-kde. These exact names belong to jan-setup-greetd.
+# started by host-weed-kde. These exact names belong to setup-greetd.
 echo "==> Removing stale greetd ownership from tty11 and tty12"
 for tty in "${EXCLUDED_GREETD_TTYS[@]}"; do
     stale_unit="greetd-tty${tty}.service"

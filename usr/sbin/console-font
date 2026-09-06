@@ -39,8 +39,13 @@ if [ -z "$FONT" ]; then
     FONT="ter-v18b"
 fi
 
+# Retire names from earlier checkouts.
+systemctl disable --now jan-console-font.service 2>/dev/null || true
+rm -f /etc/systemd/system/jan-console-font.service \
+    /usr/local/sbin/jan-console-font-apply
+
 # Write the apply script
-cat > /usr/local/sbin/jan-console-font-apply <<SCRIPT
+cat > /usr/local/sbin/console-font-apply <<SCRIPT
 #!/bin/sh
 # Re-apply terminus font to vconsole.conf if it was overwritten
 grep -q "FONT=${FONT}" /etc/vconsole.conf 2>/dev/null && exit 0
@@ -48,7 +53,7 @@ sed -i "s/^FONT=.*/FONT=${FONT}/" /etc/vconsole.conf 2>/dev/null || \
     echo "FONT=${FONT}" >> /etc/vconsole.conf
 setfont ${FONT} 2>/dev/null || true
 SCRIPT
-chmod +x /usr/local/sbin/jan-console-font-apply
+chmod +x /usr/local/sbin/console-font-apply
 
 # Set vconsole.conf now
 cat > /etc/vconsole.conf <<EOF
@@ -69,21 +74,21 @@ EOF
 fi
 
 # Create systemd service that re-applies font on boot
-cat > /etc/systemd/system/jan-console-font.service <<EOF
+cat > /etc/systemd/system/console-font.service <<EOF
 [Unit]
 Description=Re-apply Terminus console font
 After=systemd-vconsole-setup.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/sbin/jan-console-font-apply
+ExecStart=/usr/local/sbin/console-font-apply
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable jan-console-font.service
+systemctl enable console-font.service
 
 # Do not reset a live virtual console. Applying a font through
 # systemd-vconsole-setup or setupcon can disturb the maintenance login that is

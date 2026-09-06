@@ -11,8 +11,8 @@ set -Eeuo pipefail
 
 readonly LAB_GROUP=lab
 readonly REGULAR_GROUP=users
-readonly PASSWORD_HELPER=/usr/local/sbin/jan-randomize-user-passwords
-readonly PAM_MARKER='# Managed by jan-create-lab-users.'
+readonly PASSWORD_HELPER=/usr/local/sbin/randomize-user-passwords
+readonly PAM_MARKER='# Managed by create-lab-users.'
 readonly POLKIT_RULE=/etc/polkit-1/rules.d/00-jan-lab-restrictions.rules
 readonly DBUS_RULE=/etc/dbus-1/system.d/90-jan-lab-restrictions.conf
 readonly SUDO_RULE=/etc/sudoers.d/99-jan-lab-deny
@@ -26,20 +26,20 @@ error_trap() {
 trap error_trap ERR
 
 if (( EUID != 0 )); then
-    echo "ERROR: jan-create-lab-users must run as root" >&2
+    echo "ERROR: create-lab-users must run as root" >&2
     exit 1
 fi
 
-exec 8>/run/lock/jan-create-lab-users.lock
+exec 8>/run/lock/create-lab-users.lock
 if ! flock -n 8; then
-    echo "ERROR: another jan-create-lab-users instance is already running" >&2
+    echo "ERROR: another create-lab-users instance is already running" >&2
     exit 1
 fi
 
 # shellcheck source=/dev/null
 source /etc/os-release
 if [[ ${ID:-} != opensuse-tumbleweed ]]; then
-    echo "ERROR: jan-create-lab-users currently targets openSUSE Tumbleweed" >&2
+    echo "ERROR: create-lab-users currently targets openSUSE Tumbleweed" >&2
     exit 1
 fi
 
@@ -172,9 +172,9 @@ assert_managed_or_absent() {
     fi
 }
 
-readonly POLKIT_MARKER='// Managed by jan-create-lab-users.'
-readonly DBUS_MARKER='<!-- Managed by jan-create-lab-users. -->'
-readonly SUDO_MARKER='# Managed by jan-create-lab-users.'
+readonly POLKIT_MARKER='// Managed by create-lab-users.'
+readonly DBUS_MARKER='<!-- Managed by create-lab-users. -->'
+readonly SUDO_MARKER='# Managed by create-lab-users.'
 assert_managed_or_absent "$POLKIT_RULE" "$POLKIT_MARKER"
 assert_managed_or_absent "$DBUS_RULE" "$DBUS_MARKER"
 assert_managed_or_absent "$SUDO_RULE" "$SUDO_MARKER"
@@ -191,7 +191,7 @@ cleanup_policy_stages() {
 trap cleanup_policy_stages EXIT
 
 cat > "$polkit_stage" <<'EOF'
-// Managed by jan-create-lab-users.
+// Managed by create-lab-users.
 polkit.addRule(function(action, subject) {
     if (!subject.isInGroup("lab")) {
         return polkit.Result.NOT_HANDLED;
@@ -210,7 +210,7 @@ EOF
 chmod 0644 "$polkit_stage"
 
 cat > "$dbus_stage" <<'EOF'
-<!-- Managed by jan-create-lab-users. -->
+<!-- Managed by create-lab-users. -->
 <!DOCTYPE busconfig PUBLIC
  "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
  "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
@@ -224,7 +224,7 @@ EOF
 chmod 0644 "$dbus_stage"
 
 cat > "$sudo_stage" <<'EOF'
-# Managed by jan-create-lab-users.
+# Managed by create-lab-users.
 %lab ALL=(ALL:ALL) !ALL
 EOF
 chmod 0440 "$sudo_stage"

@@ -4,12 +4,12 @@
 set -Eeuo pipefail
 
 if (( EUID != 0 )); then
-    echo "ERROR: jan-setup-vm-networkd must run as root" >&2
+    echo "ERROR: setup-vm-networkd must run as root" >&2
     exit 1
 fi
 
 if ! systemd-detect-virt --quiet; then
-    echo "ERROR: jan-setup-vm-networkd must run inside a virtual machine" >&2
+    echo "ERROR: setup-vm-networkd must run inside a virtual machine" >&2
     exit 1
 fi
 

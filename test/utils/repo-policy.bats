@@ -18,8 +18,8 @@ load ../helpers
 
 @test "aria2 is installed and used for artifact downloads" {
     assert_file_contains "$OPT_JAN/setup/common-cli-packages.sh" '^[[:space:]]*aria2$'
-    assert_file_contains "$OPT_JAN/usr/sbin/jan-update-opt" 'command -v aria2c'
-    assert_file_contains "$OPT_JAN/usr/sbin/jan-update-opt" 'download_file "\$url"'
+    assert_file_contains "$OPT_JAN/usr/sbin/host-optupdate" 'command -v aria2c'
+    assert_file_contains "$OPT_JAN/usr/sbin/host-optupdate" 'download_file "\$url"'
 }
 
 @test "provisioning and update scripts do not manage Ollama" {
@@ -53,11 +53,11 @@ load ../helpers
 
 @test "VM provisioners use systemd-networkd instead of NetworkManager" {
     for script in setup/vm-xub26 setup/vm-baseweed; do
-        assert_file_contains "$OPT_JAN/$script" '^jan-setup-vm-networkd$'
+        assert_file_contains "$OPT_JAN/$script" '^setup-vm-networkd$'
     done
-    assert_file_contains "$OPT_JAN/usr/sbin/jan-setup-vm-networkd" \
+    assert_file_contains "$OPT_JAN/usr/sbin/setup-vm-networkd" \
         '^DHCP=ipv4$'
-    assert_file_contains "$OPT_JAN/usr/sbin/jan-setup-vm-networkd" \
+    assert_file_contains "$OPT_JAN/usr/sbin/setup-vm-networkd" \
         'apt-get purge -y network-manager network-manager-gnome'
 }
 
@@ -125,13 +125,37 @@ load ../helpers
     done
 }
 
-@test "jan-create-user seeds the canonical skeleton before useradd" {
-    assert_file_contains "$OPT_JAN/usr/sbin/jan-create-user" \
+@test "create-user seeds the canonical skeleton before useradd" {
+    assert_file_contains "$OPT_JAN/usr/sbin/create-user" \
         '"\$REPO_DIR/skel/install"'
-    assert_file_contains "$OPT_JAN/usr/sbin/jan-create-user" \
+    assert_file_contains "$OPT_JAN/usr/sbin/create-user" \
         '^    useradd \\'
-    assert_file_contains "$OPT_JAN/usr/sbin/jan-create-user" \
+    assert_file_contains "$OPT_JAN/usr/sbin/create-user" \
         '"\$REPO_DIR/skel/install" "\$USER_HOME"'
+}
+
+@test "PATH utils use domain-first kebab-case stems" {
+    local path name
+    for path in "$OPT_JAN"/usr/bin/* "$OPT_JAN"/usr/sbin/*; do
+        [[ -f $path ]] || continue
+        name=${path##*/}
+        [[ $name == starship ]] && continue
+        [[ $name =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]
+        [[ $name != *.sh ]]
+        [[ $name != jan-* ]]
+    done
+}
+
+@test "setup scripts retire leftover PATH util names after symlink" {
+    local script
+    for script in \
+        setup/host \
+        setup/host-weed-kde \
+        setup/vm-xub26 \
+        setup/vm-baseweed \
+        setup/vm-ub26-xfce; do
+        assert_file_contains "$OPT_JAN/$script" 'retire-path-util-names.sh'
+    done
 }
 
 @test "test launchers never install packages" {

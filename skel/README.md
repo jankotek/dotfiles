@@ -34,7 +34,7 @@ the distribution's KDE/GTK integration. XFCE obtains packaged themes, icons,
 backdrops, and desktop data under `/usr/share`; its per-user panel, power, and
 appearance choices in this skeleton intentionally override `/etc/xdg/xfce4`.
 The skeleton does not contain per-monitor XFCE or Plasma wallpaper state. VM
-provisioning installs `vm-cleanup.service`, which removes packaged wallpapers
+provisioning installs `guest-cleanup.service`, which removes packaged wallpapers
 and backdrops during setup and on every boot. This keeps wallpaper policy
 VM-specific while allowing a Plasma host to retain its configured wallpaper.
 

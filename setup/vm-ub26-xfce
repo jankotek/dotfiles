@@ -20,7 +20,7 @@ cleanup_guest_agent_guard() {
     local rc=$?
     trap - EXIT
     if [[ -n "$guest_agent_owner_token" ]]; then
-        if ! /usr/local/sbin/jan-qga-guard release "$guest_agent_owner_token"; then
+        if ! /usr/local/sbin/qga-guard release "$guest_agent_owner_token"; then
             echo "WARNING: failed to release the QEMU guest-agent guard; watchdog will retry" >&2
         fi
     fi
@@ -29,12 +29,12 @@ cleanup_guest_agent_guard() {
 trap cleanup_guest_agent_guard EXIT
 
 acquire_guest_agent_guard() {
-    guest_agent_owner_token=$(/usr/local/sbin/jan-qga-guard acquire "$$")
+    guest_agent_owner_token=$(/usr/local/sbin/qga-guard acquire "$$")
     export JAN_QGA_GUARD_TOKEN=$guest_agent_owner_token
 }
 
 release_guest_agent_guard() {
-    /usr/local/sbin/jan-qga-guard release "$guest_agent_owner_token"
+    /usr/local/sbin/qga-guard release "$guest_agent_owner_token"
     guest_agent_owner_token=
     unset JAN_QGA_GUARD_TOKEN
 }
@@ -65,6 +65,7 @@ export DEBIAN_FRONTEND=noninteractive
 
 # Make repository helpers available before invoking either setup script.
 cp -f -s -r /opt/jan/usr/* /usr/local
+/opt/jan/setup/retire-path-util-names.sh
 
 # Package operations may otherwise restart qemu-guest-agent and sever the
 # vm-exec connection carrying this setup process. vm-xub26 applies the same
@@ -92,9 +93,9 @@ apt-get install -y --no-install-recommends \
     xserver-xorg-core \
     xserver-xorg-input-libinput
 
-# jan-create-user refreshes /etc/skel immediately before useradd, ensuring a
+# create-user refreshes /etc/skel immediately before useradd, ensuring a
 # newly created home starts with the canonical payload.
-/opt/jan/usr/sbin/jan-create-user
+/opt/jan/usr/sbin/create-user
 
 # Apply the existing Xubuntu 26.04 package pruning, dotfiles, user directories,
 # VM agents, and system services now that its formerly implicit prerequisites
@@ -116,7 +117,7 @@ fi
 # opens its packaged PAM/logind session before executing this wrapper. The
 # session is therefore tracked on seat0 even though logind describes a
 # startx-based graphical session on a physical VT as type "tty".
-cat > /usr/local/bin/jan-start-xfce <<'EOF'
+cat > /usr/local/bin/start-xfce <<'EOF'
 #!/bin/sh
 export DESKTOP_SESSION=xfce
 export XDG_CURRENT_DESKTOP=XFCE
@@ -124,7 +125,7 @@ export XDG_SESSION_DESKTOP=xfce
 export XDG_SESSION_TYPE=x11
 exec /usr/bin/startxfce4
 EOF
-chmod 0755 /usr/local/bin/jan-start-xfce
+chmod 0755 /usr/local/bin/start-xfce
 
 install -d -m 0755 /etc/greetd
 cat > /etc/greetd/config.toml <<EOF
@@ -138,11 +139,11 @@ runfile = "/run/greetd.run"
 service = "greetd"
 
 [default_session]
-command = "$agreety_bin --cmd /usr/local/bin/jan-start-xfce"
+command = "$agreety_bin --cmd /usr/local/bin/start-xfce"
 user = "$greeter_user"
 
 [initial_session]
-command = "/usr/local/bin/jan-start-xfce"
+command = "/usr/local/bin/start-xfce"
 user = "jan"
 EOF
 chmod 0644 /etc/greetd/config.toml

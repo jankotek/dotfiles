@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 #
-# Network integration checks for portable tools managed by jan-update-opt.
+# Network integration checks for portable tools managed by host-optupdate.
 #
 # Manually:
 #   OPT_JAN="$PWD" bats test/utils/update-opt.bats
@@ -8,11 +8,11 @@
 
 load ../helpers
 
-@test "jan-update-opt installs and tracks Herdr" {
+@test "host-optupdate installs and tracks Herdr" {
     local target="$BATS_TEST_TMPDIR/opt"
     mkdir -p "$target"
 
-    run env JAN_OPT="$target" "$OPT_JAN/usr/sbin/jan-update-opt" herdr
+    run env JAN_OPT="$target" "$OPT_JAN/usr/sbin/host-optupdate" herdr
     if [[ "$status" -ne 0 ]]; then
         echo "$output" >&2
     fi
@@ -26,17 +26,17 @@ load ../helpers
 
     local version
     version=$(<"$target/.versions/herdr")
-    run env JAN_OPT="$target" "$OPT_JAN/usr/sbin/jan-update-opt" herdr
+    run env JAN_OPT="$target" "$OPT_JAN/usr/sbin/host-optupdate" herdr
     [[ "$status" -eq 0 ]]
     [[ "$output" == *"Herdr already at version $version"* ]]
 }
 
-@test "jan-update-opt installs and tracks Grok" {
+@test "host-optupdate installs and tracks Grok" {
     # Grok stable is ~160 MiB — network integration only.
     local target="$BATS_TEST_TMPDIR/opt"
     mkdir -p "$target"
 
-    run env JAN_OPT="$target" "$OPT_JAN/usr/sbin/jan-update-opt" grok
+    run env JAN_OPT="$target" "$OPT_JAN/usr/sbin/host-optupdate" grok
     if [[ "$status" -ne 0 ]]; then
         echo "$output" >&2
     fi
@@ -51,16 +51,16 @@ load ../helpers
 
     local version
     version=$(<"$target/.versions/grok")
-    run env JAN_OPT="$target" "$OPT_JAN/usr/sbin/jan-update-opt" grok
+    run env JAN_OPT="$target" "$OPT_JAN/usr/sbin/host-optupdate" grok
     [[ "$status" -eq 0 ]]
     [[ "$output" == *"Grok already at version $version"* ]]
 }
 
-@test "jan-update-opt installs and tracks Codex" {
+@test "host-optupdate installs and tracks Codex" {
     local target="$BATS_TEST_TMPDIR/opt"
     mkdir -p "$target"
 
-    run env JAN_OPT="$target" "$OPT_JAN/usr/sbin/jan-update-opt" codex
+    run env JAN_OPT="$target" "$OPT_JAN/usr/sbin/host-optupdate" codex
     if [[ "$status" -ne 0 ]]; then
         echo "$output" >&2
     fi
@@ -75,16 +75,16 @@ load ../helpers
 
     local version
     version=$(<"$target/codex/.version")
-    run env JAN_OPT="$target" "$OPT_JAN/usr/sbin/jan-update-opt" codex
+    run env JAN_OPT="$target" "$OPT_JAN/usr/sbin/host-optupdate" codex
     [[ "$status" -eq 0 ]]
     [[ "$output" == *"Codex CLI already at version $version"* ]]
 }
 
-@test "jan-update-opt installs and tracks native Pi archive" {
+@test "host-optupdate installs and tracks native Pi archive" {
     local target="$BATS_TEST_TMPDIR/opt"
     mkdir -p "$target"
 
-    run env JAN_OPT="$target" "$OPT_JAN/usr/sbin/jan-update-opt" pi
+    run env JAN_OPT="$target" "$OPT_JAN/usr/sbin/host-optupdate" pi
     if [[ "$status" -ne 0 ]]; then
         echo "$output" >&2
     fi
@@ -100,17 +100,17 @@ load ../helpers
 
     local version
     version=$(<"$target/pi/.version")
-    run env JAN_OPT="$target" "$OPT_JAN/usr/sbin/jan-update-opt" pi
+    run env JAN_OPT="$target" "$OPT_JAN/usr/sbin/host-optupdate" pi
     [[ "$status" -eq 0 ]]
     [[ "$output" == *"Pi agent harness already at version $version"* ]]
 }
 
-@test "jan-update-opt installs and tracks native Claude Code archive" {
+@test "host-optupdate installs and tracks native Claude Code archive" {
     command -v zstd >/dev/null || skip "zstd is required"
     local target="$BATS_TEST_TMPDIR/opt"
     mkdir -p "$target"
 
-    run env JAN_OPT="$target" "$OPT_JAN/usr/sbin/jan-update-opt" claude
+    run env JAN_OPT="$target" "$OPT_JAN/usr/sbin/host-optupdate" claude
     if [[ "$status" -ne 0 ]]; then
         echo "$output" >&2
     fi
@@ -124,7 +124,7 @@ load ../helpers
 
     local version
     version=$(<"$target/claude/.version")
-    run env JAN_OPT="$target" "$OPT_JAN/usr/sbin/jan-update-opt" claude
+    run env JAN_OPT="$target" "$OPT_JAN/usr/sbin/host-optupdate" claude
     [[ "$status" -eq 0 ]]
     [[ "$output" == *"Claude Code already at version $version"* ]]
 }

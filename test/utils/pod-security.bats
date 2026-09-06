@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 #
-# Integration test for jan-pod-setup security hardening.
+# Integration test for pod-setup security hardening.
 # Creates a temporary pod user, verifies permissions, then removes it.
 #
 # Run manually as root:  bats test/utils/pod-security.bats
@@ -22,8 +22,8 @@ setup_file() {
     if [[ "$EUID" -ne 0 ]]; then
         skip "requires root"
     fi
-    if ! command -v jan-pod-setup &>/dev/null && ! [[ -x "$OPT_JAN/usr/sbin/jan-pod-setup" ]]; then
-        skip "jan-pod-setup not found"
+    if ! command -v pod-setup &>/dev/null && ! [[ -x "$OPT_JAN/usr/sbin/pod-setup" ]]; then
+        skip "pod-setup not found"
     fi
     if ! command -v getfacl &>/dev/null || ! command -v setfacl &>/dev/null; then
         skip "requires getfacl and setfacl for safe ACL restoration"
@@ -58,10 +58,10 @@ setup_file() {
         -path '/etc/systemd/system/user@*.service.d/delegate.conf' \
         -print > "${BATS_FILE_TMPDIR}/delegate-files.before"
 
-    if [[ -x "$OPT_JAN/usr/sbin/jan-pod-setup" ]]; then
-        "$OPT_JAN/usr/sbin/jan-pod-setup" "$POD_NAME" >/dev/null 2>&1
+    if [[ -x "$OPT_JAN/usr/sbin/pod-setup" ]]; then
+        "$OPT_JAN/usr/sbin/pod-setup" "$POD_NAME" >/dev/null 2>&1
     else
-        jan-pod-setup "$POD_NAME" >/dev/null 2>&1
+        pod-setup "$POD_NAME" >/dev/null 2>&1
     fi
 }
 

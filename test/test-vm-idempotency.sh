@@ -11,7 +11,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 OPT_JAN="${SCRIPT_DIR%/test}"
 VM_EXEC="$OPT_JAN/usr/bin/vm-exec"
-VM_WAIT="$OPT_JAN/usr/bin/vm-start-and-wait"
+VM_WAIT="$OPT_JAN/usr/bin/vm-wait"
 
 BASE_VM="${BASE_VM:-xub26}"
 BASE_DISK="${BASE_DISK:-$HOME/.local/share/libvirt/images/${BASE_VM}.qcow2}"

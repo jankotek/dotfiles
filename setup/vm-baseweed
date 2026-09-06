@@ -3,7 +3,7 @@
 # vm-baseweed — Tumbleweed counterpart to setup/vm-xub26.
 #
 # Symlinks /opt/jan/usr into /usr/local, installs core CLI tools via zypper,
-# runs the cross-distro jan-* setup helpers, and syncs the canonical dotfiles
+# runs the cross-distro setup helpers, and syncs the canonical dotfiles
 # without --delete (so user data survives re-runs).
 
 # Sanity check: verify running inside a VM
@@ -27,6 +27,7 @@ source "${SETUP_DIR}/common-cli-packages.sh"
 # ---------- /opt/jan/usr -> /usr/local symlinks ----------
 
 cp -f -s -r /opt/jan/usr/* /usr/local
+/opt/jan/setup/retire-path-util-names.sh
 
 # ---------- Package install ----------
 
@@ -55,20 +56,20 @@ zypper -n install --no-recommends \
 # Seed future XFCE VM accounts while preserving /usr/etc/skel vendor files.
 /opt/jan/skel/install
 
-# ---------- Cross-distro jan-* helpers ----------
+# ---------- Cross-distro setup helpers ----------
 # Each helper detects distro internally; only kernel-tweaks has a real
 # Tumbleweed-specific branch (sdbootutil).
 
-jan-systemd-tty11-root || echo "WARNING: tty11-root setup failed (non-fatal)"
-jan-systemd-vm-cleanup || echo "WARNING: vm-cleanup setup failed (non-fatal)"
-jan-console-font || echo "WARNING: console font setup failed (non-fatal)"
+install-tty11-root || echo "WARNING: tty11-root setup failed (non-fatal)"
+install-guest-cleanup || echo "WARNING: guest-cleanup setup failed (non-fatal)"
+console-font || echo "WARNING: console font setup failed (non-fatal)"
 # sysfb/simpledrm may take DRM card0 before virtio_gpu and later disappear,
 # leaving virtio_gpu at card1. spice-vdagent expects card0 when mapping the
 # SPICE display to XRandR, so this breaks resize and absolute pointer mapping.
-jan-setup-kernel-tweaks \
+setup-kernel-tweaks \
     initcall_blacklist=sysfb_init,simpledrm_platform_driver_init \
     || echo "WARNING: kernel tweaks setup failed (non-fatal)"
-jan-setup-pkg-safety || echo "WARNING: pkg safety setup failed (non-fatal)"
+setup-pkg-safety || echo "WARNING: pkg safety setup failed (non-fatal)"
 
 # ---------- xdg user-dirs (lowercase) ----------
 
@@ -142,7 +143,7 @@ EOF
 configure-user-dirs "$HOME_USER" "$HOME_GROUP" "$HOME_DIR"
 
 # Switch only after every network-dependent package operation has finished.
-jan-setup-vm-networkd
+setup-vm-networkd
 
 # ---------- Re-enable guest agents on next boot ----------
 

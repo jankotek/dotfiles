@@ -3,7 +3,7 @@
 
 set -Eeuo pipefail
 
-usage() { echo "Usage: jan-clean-check [MIN_MIB]"; }
+usage() { echo "Usage: clean-check [MIN_MIB]"; }
 if [[ ${1:-} == -h || ${1:-} == --help ]]; then
     usage
     exit 0

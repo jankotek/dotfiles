@@ -4,16 +4,16 @@
 load ../helpers
 
 @test "/opt/jan/usr symlinked into /usr/local" {
-    [[ -L /usr/local/bin/jan-vm-resize-display ]] || \
+    [[ -L /usr/local/bin/vm-resize-display ]] || \
     [[ -L /usr/local/bin/image-strip ]]
 }
 
-@test "jan-upgrade is available via symlink" {
-    assert_executable /usr/local/sbin/jan-upgrade
+@test "distro-upgrade is available via symlink" {
+    assert_executable /usr/local/sbin/distro-upgrade
 }
 
-@test "jan-update-opt is available via symlink" {
-    assert_executable /usr/local/sbin/jan-update-opt
+@test "host-optupdate is available via symlink" {
+    assert_executable /usr/local/sbin/host-optupdate
 }
 
 @test "terminator is installed" {

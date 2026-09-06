@@ -23,6 +23,6 @@ load ../helpers
     fi
 }
 
-@test "jan-console-font-apply script exists" {
-    assert_executable /usr/local/sbin/jan-console-font-apply
+@test "console-font-apply script exists" {
+    assert_executable /usr/local/sbin/console-font-apply
 }

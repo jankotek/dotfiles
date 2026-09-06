@@ -164,7 +164,7 @@ After=local-fs.target
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/bin/true
-ExecStop=/usr/sbin/jan-host-monitors-fix-edid --refresh-only
+ExecStop=/usr/sbin/host-monitors-fix-edid --refresh-only
 TimeoutStopSec=30s
 
 [Install]

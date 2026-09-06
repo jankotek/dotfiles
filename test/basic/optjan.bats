@@ -23,12 +23,12 @@ load ../helpers
     assert_dir "$OPT_JAN/setup"
 }
 
-@test "jan-upgrade script exists in repo" {
-    assert_executable "$OPT_JAN/usr/sbin/jan-upgrade"
+@test "distro-upgrade script exists in repo" {
+    assert_executable "$OPT_JAN/usr/sbin/distro-upgrade"
 }
 
-@test "jan-update-opt script exists in repo" {
-    assert_executable "$OPT_JAN/usr/sbin/jan-update-opt"
+@test "host-optupdate script exists in repo" {
+    assert_executable "$OPT_JAN/usr/sbin/host-optupdate"
 }
 
 @test "/home is 0755" {

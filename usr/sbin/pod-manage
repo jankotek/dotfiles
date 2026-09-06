@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# jan-pod-manage — Admin wrapper for pod services. Run as root.
+# pod-manage — Admin wrapper for pod services. Run as root.
 #
-# Usage:  jan-pod-manage <pod> <command>
+# Usage:  pod-manage <pod> <command>
 #
 #   shell       Open a bash shell as the pod user
 #   upgrade     Pull latest images and restart
@@ -32,7 +32,7 @@ ERROR: must be root or a member of '$ADMIN_GROUP' to run this command.
 HOW TO ENABLE:
   sudo groupadd -f $ADMIN_GROUP
   sudo usermod -aG $ADMIN_GROUP $INVOKER
-  echo "%$ADMIN_GROUP ALL=(root) NOPASSWD: /opt/jan/usr/sbin/jan-pod-manage" \\
+  echo "%$ADMIN_GROUP ALL=(root) NOPASSWD: /opt/jan/usr/sbin/pod-manage" \\
       | sudo tee /etc/sudoers.d/jan-pod-admin >/dev/null
   sudo chmod 0440 /etc/sudoers.d/jan-pod-admin
 
@@ -45,7 +45,7 @@ fi
 
 # Audit log — recorded BEFORE the action so a kill-mid-execution still leaves
 # evidence of who attempted what.
-logger -t jan-pod-manage -p auth.notice \
+logger -t pod-manage -p auth.notice \
     "invoked by ${SUDO_USER:-root}: pod=${1:-?} cmd=${2:-help} args=${*:3}"
 
 NAME="${1:-}"

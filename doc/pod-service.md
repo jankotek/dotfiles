@@ -1,4 +1,4 @@
-# jan-pod-setup
+# pod-setup
 
 Create a maximally restricted user and rootless podman pod as a systemd user service.
 
@@ -7,7 +7,7 @@ Tested on Ubuntu 24.04 (podman 4.9, AppArmor) and openSUSE Tumbleweed (podman 5.
 ## Usage
 
 ```bash
-sudo jan-pod-setup <name>
+sudo pod-setup <name>
 ```
 
 The `<name>` becomes the username, home directory name, pod name, and service name.
@@ -31,20 +31,20 @@ The `<name>` becomes the username, home directory name, pod name, and service na
 ├── sysctl.conf         -> /etc/sysctl.d/90-podman-<name>.conf
 └── tmpfiles.conf       -> /etc/tmpfiles.d/podman-<name>.conf
 
-jan-pod-manage          # Admin wrapper (shared by all pods)
+pod-manage          # Admin wrapper (shared by all pods)
 ```
 
 ## Admin commands
 
 ```bash
-jan-pod-manage <name> shell       # bash shell as the pod user
-jan-pod-manage <name> status      # pod + container + service status
-jan-pod-manage <name> upgrade     # pull latest images + restart
-jan-pod-manage <name> recreate    # reload Quadlet files + restart
-jan-pod-manage <name> logs        # follow container + service logs (journald)
-jan-pod-manage <name> exec <ctr> sh  # exec into a running container
-jan-pod-manage <name> prune       # stop, remove containers/images, free disk (keeps data/)
-jan-pod-manage                    # list all pods
+pod-manage <name> shell       # bash shell as the pod user
+pod-manage <name> status      # pod + container + service status
+pod-manage <name> upgrade     # pull latest images + restart
+pod-manage <name> recreate    # reload Quadlet files + restart
+pod-manage <name> logs        # follow container + service logs (journald)
+pod-manage <name> exec <ctr> sh  # exec into a running container
+pod-manage <name> prune       # stop, remove containers/images, free disk (keeps data/)
+pod-manage                    # list all pods
 ```
 
 ## Logging
@@ -53,7 +53,7 @@ Container stdout/stderr is sent to journald via `LogDriver=journald`. Logs are t
 
 View logs:
 ```bash
-jan-pod-manage <name> logs                          # follow logs (as root)
+pod-manage <name> logs                          # follow logs (as root)
 journalctl _SYSTEMD_USER_UNIT=<name>-app.service     # filter by service
 ```
 
@@ -151,13 +151,13 @@ On podman 4.x, add `PublishPort=8080:80` and `AddCapability=NET_BIND_SERVICE` di
 Pull image and start:
 
 ```bash
-jan-pod-manage freshrss recreate
+pod-manage freshrss recreate
 ```
 
 Create admin user:
 
 ```bash
-jan-pod-manage freshrss exec freshrss-app ./cli/create-user.php \
+pod-manage freshrss exec freshrss-app ./cli/create-user.php \
   --user admin --password <pass> --language en
 ```
 
@@ -274,7 +274,7 @@ WantedBy=default.target
 Then reload:
 
 ```bash
-jan-pod-manage <name> recreate
+pod-manage <name> recreate
 ```
 
 Containers in the same pod share `localhost` — the app connects to `localhost:5432`.
@@ -282,11 +282,11 @@ Containers in the same pod share `localhost` — the app connects to `localhost:
 ## Prune (free disk space)
 
 ```bash
-jan-pod-manage <name> prune
+pod-manage <name> prune
 ```
 
 Stops services, removes all containers/pods/images for this user. The `data/` directory is not touched. To restart after prune:
 
 ```bash
-jan-pod-manage <name> recreate
+pod-manage <name> recreate
 ```

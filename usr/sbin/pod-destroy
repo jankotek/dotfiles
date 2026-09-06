@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# jan-pod-destroy — Inverse of jan-pod-setup.
+# pod-destroy — Inverse of pod-setup.
 #
 # Stops the pod, removes the user, and cleans up every host-side artifact
-# that jan-pod-setup creates: subuid/subgid, sudoers drop-in, cron/at deny
+# that pod-setup creates: subuid/subgid, sudoers drop-in, cron/at deny
 # entries, sysctl drop-in, tmpfiles drop-in, AppArmor profile, SELinux
 # fcontext entries, cgroup-delegation drop-in, ACLs.
 #
@@ -12,7 +12,7 @@
 # Does NOT touch the persistent data dir under /var/pod/<name>/data unless
 # --purge-data is given (default: home dir is removed except for data/).
 #
-# Usage:  sudo jan-pod-destroy <name> [--purge-data] [--yes]
+# Usage:  sudo pod-destroy <name> [--purge-data] [--yes]
 #
 set -euo pipefail
 

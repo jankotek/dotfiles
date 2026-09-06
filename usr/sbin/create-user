@@ -7,7 +7,7 @@
 set -euo pipefail
 
 if (( EUID != 0 )); then
-    echo "ERROR: jan-create-user must run as root" >&2
+    echo "ERROR: create-user must run as root" >&2
     exit 1
 fi
 

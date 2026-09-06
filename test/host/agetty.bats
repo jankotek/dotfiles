@@ -29,20 +29,20 @@ MANAGED_LOGIN_TTYS=(2 3 4 5 6 7 8 9 10)
 }
 
 @test "agetty setup never changes the runtime state of a getty" {
-    assert_file_contains /usr/local/sbin/jan-setup-agetty \
+    assert_file_contains /usr/local/sbin/setup-agetty \
         'readonly -a MANAGED_LOGIN_TTYS=(2 3 4 5 6 7 8 9 10)'
     ! grep -Eq 'systemctl[[:space:]]+(start|stop|restart|try-restart)[[:space:]].*getty@tty' \
-        /usr/local/sbin/jan-setup-agetty
+        /usr/local/sbin/setup-agetty
 }
 
 @test "host setup does not reset a live virtual console" {
-    local font_setup=/usr/local/sbin/jan-console-font
+    local font_setup=/usr/local/sbin/console-font
     ! grep -Eq 'systemctl[[:space:]]+restart[[:space:]]+systemd-vconsole-setup|setupcon[[:space:]]+--force' \
         "$font_setup"
 }
 
 @test "system upgrade has no unaudited service or session hook" {
-    local upgrade=/usr/local/sbin/jan-upgrade
+    local upgrade=/usr/local/sbin/distro-upgrade
     ! sed '/^[[:space:]]*#/d' "$upgrade" | \
         grep -Eq 'systemctl|loginctl|jan-dotfiles-update'
 }
@@ -64,16 +64,16 @@ MANAGED_LOGIN_TTYS=(2 3 4 5 6 7 8 9 10)
     assert_file_contains /etc/issue.d/80-jan-system-info.issue 'Architecture: \\m'
     assert_file_contains /etc/issue.d/80-jan-system-info.issue 'IPv4: \\4'
     assert_file_contains /etc/issue.d/80-jan-system-info.issue 'Console: \\l'
-    assert_file_contains /etc/issue.d/80-jan-system-info.issue 'Start Plasma Wayland: exec jan-plasma-session'
+    assert_file_contains /etc/issue.d/80-jan-system-info.issue 'Start Plasma Wayland: exec plasma-session'
     [[ ! -e /etc/issue.net.d/80-jan-system-info.issue ]]
 }
 
 @test "Plasma command replaces Bash with the supervised Wayland launcher" {
-    assert_executable /usr/local/bin/jan-plasma-session
-    assert_executable /usr/local/bin/jan-greetd-session
-    assert_file_contains /usr/local/bin/jan-plasma-session '^exec /usr/local/bin/jan-greetd-session wayland /usr/bin/startplasma-wayland$'
-    assert_file_contains /usr/local/bin/jan-greetd-session 'trap clear_activation_environment_on_exit EXIT'
-    assert_file_contains /usr/local/bin/jan-greetd-session 'terminate_session_tree TERM 143'
+    assert_executable /usr/local/bin/plasma-session
+    assert_executable /usr/local/bin/greetd-session
+    assert_file_contains /usr/local/bin/plasma-session '^exec /usr/local/bin/greetd-session wayland /usr/bin/startplasma-wayland$'
+    assert_file_contains /usr/local/bin/greetd-session 'trap clear_activation_environment_on_exit EXIT'
+    assert_file_contains /usr/local/bin/greetd-session 'terminate_session_tree TERM 143'
 }
 
 @test "old greetd VT services and configurations are gone" {

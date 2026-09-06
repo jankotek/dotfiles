@@ -19,8 +19,8 @@ load ../helpers
     pgrep -u jan xfdesktop
 }
 
-@test "jan-vm-resize-display-loop is running" {
-    pgrep -f jan-vm-resize-display-loop
+@test "vm-resize-display-loop is running" {
+    pgrep -f vm-resize-display-loop
 }
 
 @test "xfce4 helpers.rc sets terminal to terminator" {

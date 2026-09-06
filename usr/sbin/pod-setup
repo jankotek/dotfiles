@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
-# jan-pod-setup — Create a maximally restricted user + rootless podman pod
+# pod-setup — Create a maximally restricted user + rootless podman pod
 #                 as a systemd user service.
 #
-# Usage:  sudo jan-pod-setup <name>
+# Usage:  sudo pod-setup <name>
 #
 # The <name> becomes ALL of: username, home dir name, pod name, service name.
 # User home: /var/pod/<name>
-# Admin: jan-pod-manage <name> <command>
+# Admin: pod-manage <name> <command>
 #
 # Supports: Ubuntu 24.04 (AppArmor), openSUSE Tumbleweed (SELinux or AppArmor).
 #
@@ -153,7 +153,7 @@ require_shadow_writable_subid_files() {
     for subid_file in "$@"; do
         if ! subid_file_is_shadow_writable "$subid_file"; then
             echo "ERROR: ${subid_file} has an unterminated final record; shadow usermod cannot safely update it." >&2
-            echo "       Repair the database's final newline before running jan-pod-setup." >&2
+            echo "       Repair the database's final newline before running pod-setup." >&2
             return 1
         fi
     done
@@ -390,9 +390,9 @@ chmod 0440 "/etc/sudoers.d/deny-${NAME}"
 # Ensure matching subuid/subgid ranges exist (needed for rootless podman).
 # Lock a dedicated file rather than either account database: opening
 # /etc/subuid or /etc/subgid with `>` would truncate it before flock runs.
-# The shared lock serializes jan-pod-setup invocations so two pods cannot be
+# The shared lock serializes pod-setup invocations so two pods cannot be
 # allocated overlapping ranges.
-SUBID_LOCK_DIR=/run/jan-pod-setup
+SUBID_LOCK_DIR=/run/pod-setup
 install -d -o root -g root -m 0700 "$SUBID_LOCK_DIR"
 SUBID_LOCK_FILE="${SUBID_LOCK_DIR}/subids.lock"
 (
@@ -908,7 +908,7 @@ for g in wheel sudo; do
 done
 
 PROC_HIDEPID="/etc/systemd/system/proc-hidepid.service"
-# Always rewrite — re-running jan-pod-setup picks up admin-group changes
+# Always rewrite — re-running pod-setup picks up admin-group changes
 # (e.g. user installs `wheel` package between runs).
 cat > "$PROC_HIDEPID" <<HIDEPID
 [Unit]
@@ -971,7 +971,7 @@ systemd-tmpfiles --create "/etc/tmpfiles.d/podman-${NAME}.conf" 2>/dev/null || t
 
 run_as_user "systemctl --user daemon-reload"
 run_as_user "systemctl --user enable --now ${SERVICE_NAME}" || \
-    echo "NOTE: service start may fail until images are pulled. Run: jan-pod-manage ${NAME} upgrade"
+    echo "NOTE: service start may fail until images are pulled. Run: pod-manage ${NAME} upgrade"
 
 # ---------- summary ----------
 
@@ -1008,12 +1008,12 @@ cat <<EOF
     tmpfiles.conf       -> /etc/tmpfiles.d/podman-${NAME}.conf
 
   Admin commands (run as root):
-    jan-pod-manage ${NAME} shell       # bash shell as the pod user
-    jan-pod-manage ${NAME} status      # pod + container + service status
-    jan-pod-manage ${NAME} upgrade     # pull images + restart
-    jan-pod-manage ${NAME} recreate    # reload Quadlet + restart
-    jan-pod-manage ${NAME} logs        # follow journald logs
-    jan-pod-manage ${NAME} exec ${NAME}-app sh   # exec into container
+    pod-manage ${NAME} shell       # bash shell as the pod user
+    pod-manage ${NAME} status      # pod + container + service status
+    pod-manage ${NAME} upgrade     # pull images + restart
+    pod-manage ${NAME} recreate    # reload Quadlet + restart
+    pod-manage ${NAME} logs        # follow journald logs
+    pod-manage ${NAME} exec ${NAME}-app sh   # exec into container
 
 ================================================================
 EOF

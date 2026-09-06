@@ -3,7 +3,7 @@
 
 set -Eeuo pipefail
 
-usage() { echo "Usage: jan-vm-reset [--yes] VM BASE_VM"; }
+usage() { echo "Usage: vm-reset [--yes] VM BASE_VM"; }
 assume_yes=0
 if [[ ${1:-} == --yes ]]; then
     assume_yes=1

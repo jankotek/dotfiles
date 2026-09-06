@@ -52,7 +52,7 @@ require_free_space() {
 
 if [[ ${1:-} == '--help' ]]; then
     cat <<'EOF'
-Usage: jan-setup-kernel-zbook [--force]
+Usage: setup-kernel-zbook [--force]
 
 Options:
   --force         Rebuild and reinstall even when this exact custom kernel

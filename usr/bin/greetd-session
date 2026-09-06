@@ -159,7 +159,7 @@ readonly SESSION_RUNTIME_DIR=$EXPECTED_RUNTIME_DIR
 if [[ ${1:-} == "$INSIDE_X_FLAG" ]]; then
     (( $# == 2 )) || die "invalid internal X11 session invocation"
     readonly argv_file=$2
-    if [[ $argv_file != "$SESSION_RUNTIME_DIR"/jan-greetd-session.argv.* \
+    if [[ $argv_file != "$SESSION_RUNTIME_DIR"/greetd-session.argv.* \
         || ! -f $argv_file \
         || -L $argv_file \
         || ! -O $argv_file ]]; then
@@ -185,7 +185,7 @@ case $session_type in
         shift
         ;;
     *)
-        die "usage: jan-greetd-session {wayland|x11} COMMAND [ARG ...]"
+        die "usage: greetd-session {wayland|x11} COMMAND [ARG ...]"
         ;;
 esac
 (( $# > 0 )) || die "no $session_type session command was supplied"
@@ -194,7 +194,7 @@ esac
 # Holding this non-blocking lock for the session lifetime prevents a second VT
 # from redirecting newly activated GUI processes to a different display.
 umask 077
-readonly session_lock="$SESSION_RUNTIME_DIR/jan-greetd-session.lock"
+readonly session_lock="$SESSION_RUNTIME_DIR/greetd-session.lock"
 exec {session_lock_fd}> "$session_lock"
 if ! /usr/bin/flock -n "$session_lock_fd"; then
     die "another graphical session is already active for user $(id -un)"
@@ -218,7 +218,7 @@ fi
 # openSUSE's startx flattens its client arguments into shell words. Preserve
 # the desktop entry's exact argv (including embedded whitespace) in a private,
 # NUL-delimited runtime file and pass only its whitespace-free name to xinit.
-argv_file=$(mktemp "$SESSION_RUNTIME_DIR/jan-greetd-session.argv.XXXXXX")
+argv_file=$(mktemp "$SESSION_RUNTIME_DIR/greetd-session.argv.XXXXXX")
 readonly argv_file
 printf '%s\0' "$@" > "$argv_file"
 set +e
