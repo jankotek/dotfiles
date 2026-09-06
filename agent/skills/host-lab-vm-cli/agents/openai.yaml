@@ -1,0 +1,4 @@
+interface:
+  display_name: "Host Lab VM CLI"
+  short_description: "Bootstrap and control local VMs through QGA"
+  default_prompt: "Use $host-lab-vm-cli to bootstrap and inspect a local CLI VM."

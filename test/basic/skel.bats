@@ -7,6 +7,16 @@ load ../helpers
     assert_dir "$OPT_JAN/skel/home"
     assert_file "$OPT_JAN/skel/home/.config/git/config"
     assert_executable "$OPT_JAN/skel/home/.local/bin/autostart.sh"
+    local dir
+    for dir in \
+        skel/home/.agents/skills \
+        skel/home/.claude/skills \
+        skel/home/.grok/skills \
+        skel/home/.pi/agent/skills; do
+        [[ -d $OPT_JAN/$dir && ! -L $OPT_JAN/$dir ]]
+        [[ $(readlink -- "$OPT_JAN/$dir/host-lab-vm-cli") == /opt/jan/agent/skills/host-lab-vm-cli ]]
+        [[ $(readlink -- "$OPT_JAN/$dir/host-lab-vm-gui") == /opt/jan/agent/skills/host-lab-vm-gui ]]
+    done
 }
 
 @test "curated defaults use safe paths and desktop scoping" {
@@ -156,9 +166,12 @@ load ../helpers
     while IFS= read -r -d '' source; do
         relative=${source#"$OPT_JAN/skel/home/"}
         installed=$destination/$relative
-        [[ -e $installed ]]
+        [[ -e $installed || -L $installed ]]
         [[ $(stat -c %U:%G "$installed") == root:root ]]
-        if [[ -f $source ]]; then
+        if [[ -L $source ]]; then
+            [[ -L $installed ]]
+            [[ $(readlink -- "$source") == "$(readlink -- "$installed")" ]]
+        elif [[ -f $source ]]; then
             cmp "$source" "$installed"
             [[ $(stat -c %a "$source") == "$(stat -c %a "$installed")" ]]
         fi

@@ -63,11 +63,55 @@ assert_command() {
     fi
 }
 
+# Assert a command is not in PATH. Must not use a bare `! command` in callers:
+# bash set -e does not abort when a negated command returns non-zero.
+assert_command_absent() {
+    local cmd="$1"
+    if command -v "$cmd" >/dev/null; then
+        echo "unexpected command: $cmd" >&2
+        return 1
+    fi
+}
+
 # Assert string is found in file
 assert_file_contains() {
     local file="$1" pattern="$2"
-    if ! grep -q "$pattern" "$file"; then
+    if ! grep -q -e "$pattern" -- "$file"; then
         echo "expected '$pattern' in $file" >&2
         return 1
     fi
+}
+
+# Assert pattern is absent. Must not use a bare `! grep` in callers: bash
+# set -e does not abort when a negated command returns non-zero.
+# grep exit 1 is "no match" (success here); any other non-zero is an error.
+assert_file_not_contains() {
+    local file="$1" pattern="$2" status=0
+    grep -Eq -e "$pattern" -- "$file" || status=$?
+    if (( status == 0 )); then
+        echo "unexpected '$pattern' in $file" >&2
+        return 1
+    fi
+    if (( status != 1 )); then
+        echo "grep failed ($status) for '$pattern' in $file" >&2
+        return 1
+    fi
+}
+
+# Reject markdown links whose destinations are not absolute paths or URIs.
+assert_no_relative_markdown_links() {
+    local file="$1"
+    local link dest
+    local links=()
+    mapfile -t links < <(grep -oE '\[[^]]+\]\([^)]+\)' -- "$file" || true)
+    for link in "${links[@]}"; do
+        dest=${link#*']('}
+        dest=${dest%')'}
+        dest=${dest%%[[:space:]]*}
+        [[ -n $dest ]] || continue
+        [[ $dest == /* ]] && continue
+        [[ $dest == *://* ]] && continue
+        echo "relative markdown link '$dest' in $file" >&2
+        return 1
+    done
 }

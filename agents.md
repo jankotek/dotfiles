@@ -11,19 +11,29 @@ Personal dotfiles and system provisioning repo. Checked out at `/opt/jan` on tar
 
 | Path | Purpose | Deployment |
 |------|---------|------------|
-| `skel/home/` | Canonical user dotfiles and new-user defaults | `rsync` to existing homes; installed into `/etc/skel` |
+| `skel/home/` | Canonical user dotfiles and new-user defaults | Installed into `/etc/skel`; VM provisioners also sync it into disposable VM homes |
 | `home-root/` | Root dotfiles | Non-deleting `rsync` to `/root` |
 | `usr/bin/` | User utilities | Symlinked into `/usr/local/bin` |
 | `usr/sbin/` | Admin scripts (run as root) | Symlinked into `/usr/local/sbin` |
 | `usr/share/` | Fonts, icons, themes, cursors | Symlinked into `/usr/local/share` |
 | `dist/` | Bundled theme assets (xfwm, cursors) | Referenced by themes |
 | `setup/` | Per-machine provisioning scripts | Run once on fresh install |
+| `agent/skills/` | Canonical skill packages (repo-specific and general) | Not scanned by harnesses; source of truth |
+| `.agents/skills/` | Codex/Grok/Pi shared discovery | Real directory of per-skill symlinks into `agent/skills/` |
+| `.claude/skills/` | Claude Code discovery | Same per-skill symlink shape |
+| `.grok/skills/` | Grok native discovery | Same per-skill symlink shape |
+| `.pi/skills/` | Pi project discovery | Same per-skill symlink shape |
+
 
 ## Key conventions
 
 - `usr/` is symlinked into `/usr/local` (not copied) — file paths must work as symlinks
-- `skel/home/` is the single source for user dotfiles; sync it without `--delete`
-  so provisioning never removes personal data
+- `skel/home/` is the single source for user dotfiles. Host provisioning only
+  installs `/etc/skel`; VM provisioners sync it without `--delete` into their
+  disposable VM homes
+- New homes get real `~/.agents/skills`, `~/.claude/skills`, `~/.grok/skills`,
+  and `~/.pi/agent/skills` directories of per-skill links to
+  `/opt/jan/agent/skills/<name>`
 - Scripts in `usr/sbin/` are prefixed `jan-` for namespacing (e.g. `jan-upgrade`, `jan-install-chrome`)
 - `jan-update-opt` downloads portable tools into `/opt/` with `.version` file tracking
 - `jan-upgrade` is distro-agnostic: handles zypper (openSUSE), dnf (Fedora), apt (Ubuntu)

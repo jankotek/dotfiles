@@ -34,14 +34,16 @@ test/test-vm-xub26-deploy.sh       # clone xub26 -> setup/vm-xub26 -> test -> de
 | `packages.bats` | KDE apps (kdenlive, kdiff3, kfind, krename, krita, kstars, ksystemlog, ktorrent, kwrite, filelight, partitionmanager), virt tools (virt-manager, virt-install, virt-viewer, podman, lima), dev tools (go, maven, java, yq) |
 | `strix-halo.bats` | AMD Strix Halo GPU params: amdgpu.gttsize, iommu=pt, amd_iommu=on, amdgpu.noretry=0, GTT >= 110GB, fixed VRAM <= 512MB. Skips on non-Strix Halo systems |
 
-### vm/ — XFCE/X11/Xubuntu VM only
+### vm/ — VM tests
 
 | File | What it checks |
 |------|---------------|
 | `dotfiles.bats` | Deployed dotfiles: .bashrc (EDITOR, VISUAL, starship), fish config, .profile (GTK_THEME), git config (name, email, defaultBranch), user-dirs (lowercase folders) |
 | `xfce.bats` | xfce4-session, Xorg, autologin (xfce4-panel + xfdesktop running as jan), jan-vm-resize-display-loop running, terminator config (font, fish, titlebar), rofi, XFCE panel/xfwm4/xsettings XML, autostart entry, desktop shortcuts |
 | `agents.bats` | Running inside VM, spice-vdagent installed + service enabled + process running as jan, spice-vdagentd running, qemu-guest-agent installed + enabled |
-| `system.bats` | /opt/jan/usr symlinked into /usr/local, core GUI tools installed, home owned by jan with 0700, automatic APT updates disabled, unwanted packages removed, systemd-networkd/resolved active with NetworkManager removed, tty11-root enabled |
+| `system.bats` | /opt/jan/usr symlinked into /usr/local, core GUI tools installed, home owned by jan with 0700, automatic APT updates disabled, unwanted packages removed, tty11-root enabled |
+| `network.bats` | Portable VM networking: DHCP configuration with a live IPv4 address/default route, working DNS through systemd-resolved, and NetworkManager removed/masked |
+| `provisioned-home.bats` | Canonical skeleton applied to the detected primary VM user with correct ownership, including real `~/.agents/skills`, `~/.claude/skills`, `~/.grok/skills`, and `~/.pi/agent/skills` directories of per-skill links to `/opt/jan/agent/skills/<name>` |
 
 ### utils/ — fixture checks and manual integration tests
 

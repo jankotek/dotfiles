@@ -186,27 +186,6 @@ PICTURES=media/pic
 VIDEOS=media/video
 EOF
 
-
-# Preserve the original pre-provisioning home once. A fixed staging destination
-# keeps repeated and interrupted runs bounded; an interrupted copy is rebuilt.
-jan_home_backup=/var/backups/jan-home-before-vm-xub26
-jan_home_backup_stage=${jan_home_backup}.partial
-jan_home_backup_payload=$jan_home_backup/home/jan
-jan_home_backup_marker=$jan_home_backup/.complete
-if [[ ! -e "$jan_home_backup_marker" ]]; then
-    rm -rf -- "$jan_home_backup_stage"
-    install -d -o root -g root -m 0700 "$jan_home_backup_stage/home/jan"
-    rsync -aHAXSx --numeric-ids --delete /home/jan/ "$jan_home_backup_stage/home/jan/"
-    chown root:root "$jan_home_backup_stage" "$jan_home_backup_stage/home"
-    chmod 0700 "$jan_home_backup_stage" "$jan_home_backup_stage/home"
-    touch "$jan_home_backup_stage/.complete"
-    rm -rf -- "$jan_home_backup"
-    mv "$jan_home_backup_stage" "$jan_home_backup"
-elif [[ ! -d "$jan_home_backup_payload" ]]; then
-    echo "ERROR: home-backup marker exists but $jan_home_backup_payload is missing" >&2
-    exit 1
-fi
-
 # Sync repo dotfiles into /home/jan and /root.
 #
 # Note: NO --delete. With --delete, rsync removes anything in the destination
@@ -245,7 +224,7 @@ XDG_PICTURES_DIR="$HOME/media/pic"
 XDG_VIDEOS_DIR="$HOME/media/video"
 EOF
     chown "$user":"$group" "$home_dir/.config/user-dirs.dirs"
-    su - "$user" -c 'rm -rf ~/Desktop ~/Documents ~/Downloads ~/Music ~/Pictures ~/Public ~/Templates ~/Videos'
+    su - "$user" -c 'rmdir ~/Desktop ~/Documents ~/Downloads ~/Music ~/Pictures ~/Public ~/Templates ~/Videos 2>/dev/null || true'
 }
 
 configure-user-dirs jan users /home/jan

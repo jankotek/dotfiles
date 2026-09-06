@@ -5,6 +5,8 @@
 # systemd-networkd checks from the VM suite.
 #
 # Usage: ./test-vm-baseweed-deploy.sh [--keep]
+#   BASE_VM=name       Override the base domain (default: baseweed)
+#   BASE_DISK=path     Override its qcow2 disk path
 #
 set -euo pipefail
 
@@ -17,14 +19,16 @@ BASE_VM="${BASE_VM:-baseweed}"
 BASE_DISK="${BASE_DISK:-$HOME/.local/share/libvirt/images/${BASE_VM}.qcow2}"
 IMAGES_DIR="$HOME/.local/share/libvirt/images"
 
-VM_NAME="weedtest-$(date +%y%m%d-%H%M)"
+VM_NAME="weedtest-$(date +%y%m%d-%H%M%S)-$$"
 VM_DISK="$IMAGES_DIR/${VM_NAME}.qcow2"
 
 KEEP=0
 [[ "${1:-}" == "--keep" ]] && KEEP=1
+VM_DISK_CREATED=0
+VM_DEFINED=0
 
 cleanup() {
-    if [[ $KEEP -eq 1 ]]; then
+    if [[ $KEEP -eq 1 && ( $VM_DEFINED -eq 1 || $VM_DISK_CREATED -eq 1 ) ]]; then
         echo ""
         echo "=== VM '$VM_NAME' kept for debugging ==="
         echo "  virsh -c qemu:///session console $VM_NAME"
@@ -32,32 +36,61 @@ cleanup() {
         echo "  Remove: virsh -c qemu:///session destroy $VM_NAME; virsh -c qemu:///session undefine $VM_NAME; rm $VM_DISK"
         return
     fi
-    echo ""
-    echo "=== Cleaning up ==="
-    virsh -c qemu:///session destroy "$VM_NAME" 2>/dev/null || true
-    virsh -c qemu:///session undefine "$VM_NAME" 2>/dev/null || true
-    rm -f "$VM_DISK"
-    echo "Removed VM '$VM_NAME' and disk overlay"
+    if [[ $VM_DEFINED -eq 1 || $VM_DISK_CREATED -eq 1 ]]; then
+        echo ""
+        echo "=== Cleaning up ==="
+        if [[ $VM_DEFINED -eq 1 ]]; then
+            virsh -c qemu:///session destroy "$VM_NAME" 2>/dev/null || true
+            virsh -c qemu:///session undefine "$VM_NAME" 2>/dev/null || true
+        fi
+        if [[ $VM_DISK_CREATED -eq 1 ]]; then
+            rm -f -- "$VM_DISK"
+        fi
+        echo "Removed resources created for '$VM_NAME'"
+    fi
 }
 trap cleanup EXIT
 
 echo "=== Creating test VM: $VM_NAME (Tumbleweed) ==="
+echo "Base VM: $BASE_VM"
+echo "Base disk: $BASE_DISK"
 
-BASE_STATE=$(virsh -c qemu:///session domstate "$BASE_VM" 2>/dev/null || echo "unknown")
+if ! virsh -c qemu:///session dominfo "$BASE_VM" >/dev/null 2>&1; then
+    echo "ERROR: base VM not found: $BASE_VM" >&2
+    exit 1
+fi
+if [[ ! -f "$BASE_DISK" ]]; then
+    echo "ERROR: base disk not found: $BASE_DISK" >&2
+    exit 1
+fi
+if virsh -c qemu:///session dominfo "$VM_NAME" >/dev/null 2>&1 || [[ -e "$VM_DISK" ]]; then
+    echo "ERROR: generated disposable VM name already exists: $VM_NAME" >&2
+    exit 1
+fi
+
+BASE_STATE=$(virsh -c qemu:///session domstate "$BASE_VM")
 if [[ "$BASE_STATE" == "running" ]]; then
     echo "Base VM '$BASE_VM' is running — shutting it down for cloning..."
     virsh -c qemu:///session shutdown "$BASE_VM"
-    for i in $(seq 1 60); do
+    for _ in {1..60}; do
         [[ "$(virsh -c qemu:///session domstate "$BASE_VM" 2>/dev/null)" == "shut off" ]] && break
         sleep 1
     done
     if [[ "$(virsh -c qemu:///session domstate "$BASE_VM" 2>/dev/null)" != "shut off" ]]; then
-        virsh -c qemu:///session destroy "$BASE_VM"
+        echo "ERROR: base VM did not shut down; refusing to force-stop it: $BASE_VM" >&2
+        exit 1
     fi
 fi
+if [[ "$(virsh -c qemu:///session domstate "$BASE_VM")" != "shut off" ]]; then
+    echo "ERROR: base VM must be shut off: $BASE_VM" >&2
+    exit 1
+fi
+
+BASE_XML=$(virsh -c qemu:///session dumpxml "$BASE_VM" --inactive)
 
 echo "Creating overlay disk..."
 qemu-img create -f qcow2 -b "$BASE_DISK" -F qcow2 "$VM_DISK"
+VM_DISK_CREATED=1
 
 # Tumbleweed defaults to SELinux enforcing with a strict qemu-guest-agent
 # domain (`virt_qemu_ga_t`) that blocks the agent from running mount,
@@ -68,7 +101,7 @@ echo "Setting SELinux to permissive on clone..."
 virt-customize -q -a "$VM_DISK" \
     --edit '/etc/selinux/config:s/^SELINUX=enforcing/SELINUX=permissive/'
 
-XML=$(virsh -c qemu:///session dumpxml "$BASE_VM" --inactive)
+XML=$BASE_XML
 XML=$(echo "$XML" | sed '/<uuid>/d')
 XML=$(echo "$XML" | sed "s|<name>$BASE_VM</name>|<name>$VM_NAME</name>|")
 XML=$(echo "$XML" | sed "s|$BASE_DISK|$VM_DISK|")
@@ -101,8 +134,25 @@ XML=$(echo "$XML" | awk -v extra="$EXTRA_FS" '
     { print }
 ')
 
+require_clone_xml() {
+    local pattern=$1
+    local description=$2
+    if ! grep -Fq "$pattern" <<<"$XML"; then
+        echo "ERROR: clone XML is missing $description" >&2
+        exit 1
+    fi
+}
+require_clone_xml '<memoryBacking>' 'memoryBacking required by virtiofs'
+require_clone_xml "<source type='memfd'/>" 'memfd memory backing'
+require_clone_xml "<access mode='shared'/>" 'shared memory access'
+require_clone_xml "<driver type='virtiofs'/>" 'virtiofs driver'
+require_clone_xml "<target dir='opt-jan'/>" 'opt-jan virtiofs target'
+require_clone_xml "<source file='$VM_DISK'/>" \
+    'disposable disk source (BASE_DISK must match the base domain XML)'
+
 echo "Defining VM..."
 echo "$XML" | virsh -c qemu:///session define /dev/stdin
+VM_DEFINED=1
 
 echo "Starting VM..."
 "$VM_WAIT" "$VM_NAME"
@@ -126,10 +176,10 @@ echo "=== Re-mounting /opt/jan after reboot ==="
 "$VM_EXEC" "$VM_NAME" "mkdir -p /opt/jan && mountpoint -q /opt/jan || /usr/bin/mount -t virtiofs opt-jan /opt/jan"
 
 echo ""
-echo "=== Running basic/ bats suite ==="
+echo "=== Running basic and portable network bats suites ==="
 set +e
 "$VM_EXEC" "$VM_NAME" \
-    "OPT_JAN=/opt/jan bats /opt/jan/test/basic/ && bats --filter 'systemd-networkd|systemd-resolved|NetworkManager' /opt/jan/test/vm/system.bats"
+    "OPT_JAN=/opt/jan bats /opt/jan/test/basic/ /opt/jan/test/vm/network.bats /opt/jan/test/vm/provisioned-home.bats"
 TEST_EXIT=$?
 set -e
 

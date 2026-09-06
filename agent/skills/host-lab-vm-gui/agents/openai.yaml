@@ -1,0 +1,4 @@
+interface:
+  display_name: "Host Lab VM GUI"
+  short_description: "Capture and automate local VM desktops"
+  default_prompt: "Use $host-lab-vm-gui to inspect and interact with a local VM desktop."

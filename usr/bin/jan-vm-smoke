@@ -20,7 +20,7 @@ vm=$1
 "$script_dir/vm-exec" "$vm" --argv systemd-detect-virt --quiet
 "$script_dir/vm-exec" "$vm" --argv systemctl is-active --quiet systemd-networkd.service
 "$script_dir/vm-exec" "$vm" --argv systemctl is-active --quiet systemd-resolved.service
-"$script_dir/vm-exec" "$vm" 'find /run/systemd/netif/leases -type f -size +0c -print -quit | grep -q .'
+"$script_dir/vm-exec" "$vm" "ip -4 address show scope global | grep -q 'inet '"
 "$script_dir/vm-exec" "$vm" 'ip route show default | grep -q .'
 "$script_dir/vm-exec" "$vm" --argv getent hosts example.com
 "$script_dir/vm-exec" "$vm" --argv systemctl is-active --quiet qemu-guest-agent.service

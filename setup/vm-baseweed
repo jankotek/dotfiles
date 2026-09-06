@@ -84,29 +84,31 @@ VIDEOS=media/video
 EOF
 
 # ---------- Sync canonical skeleton home (NO --delete) ----------
-# Detect the primary unprivileged user — Tumbleweed VMs are seeded under
-# different names depending on how the image was bootstrapped. Common cases
-# are 'jan' (this repo's convention) or 'tumbleweed' (default openSUSE
-# installer). Bail out if neither exists.
-
+# Select only regular login accounts rooted directly under /home. Prefer jan
+# when it is one of those valid accounts; otherwise require an unambiguous one.
+mapfile -t HOME_USERS < <(getent passwd | awk -F: '
+    $3 >= 1000 && $3 < 65534 &&
+    $6 ~ "^/home/[^/]+/?$" &&
+    $7 !~ /(nologin|false)$/ { print $1 }
+')
 HOME_USER=""
-for u in jan admin tumbleweed opensuse playai; do
-    if id "$u" &>/dev/null; then
-        HOME_USER="$u"
+for user in "${HOME_USERS[@]}"; do
+    if [[ $user == jan ]]; then
+        HOME_USER=jan
         break
     fi
 done
-if [[ -z "$HOME_USER" ]]; then
-    echo "ERROR: no candidate user found (tried: jan admin tumbleweed opensuse playai)" >&2
-    exit 1
+if [[ -z $HOME_USER ]]; then
+    if (( ${#HOME_USERS[@]} != 1 )); then
+        echo "ERROR: expected exactly one regular user under /home; found: ${HOME_USERS[*]:-(none)}" >&2
+        exit 1
+    fi
+    HOME_USER=${HOME_USERS[0]}
 fi
 HOME_GROUP=$(id -gn "$HOME_USER")
 HOME_DIR=$(getent passwd "$HOME_USER" | cut -d: -f6)
+[[ -d "$HOME_DIR" ]] || { echo "ERROR: home directory does not exist: $HOME_DIR" >&2; exit 1; }
 echo "==> Syncing canonical skeleton home to ${HOME_DIR} (user=${HOME_USER})"
-
-# Backup before sync (timestamped, kept until manually removed).
-cp -a "$HOME_DIR" "${HOME_DIR}-backup-$(date +%Y-%m-%d-%H%M)" 2>/dev/null || true
-chmod 0700 "${HOME_DIR}-backup-"* 2>/dev/null || true
 
 # Sync without --delete: dotfiles deploy, user data survives.
 rsync -a /opt/jan/skel/home/ "${HOME_DIR}/"
@@ -134,7 +136,7 @@ XDG_PICTURES_DIR="$HOME/media/pic"
 XDG_VIDEOS_DIR="$HOME/media/video"
 EOF
     chown "$user":"$group" "$home_dir/.config/user-dirs.dirs"
-    su - "$user" -c 'rm -rf ~/Desktop ~/Documents ~/Downloads ~/Music ~/Pictures ~/Public ~/Templates ~/Videos'
+    su - "$user" -c 'rmdir ~/Desktop ~/Documents ~/Downloads ~/Music ~/Pictures ~/Public ~/Templates ~/Videos 2>/dev/null || true'
 }
 
 configure-user-dirs "$HOME_USER" "$HOME_GROUP" "$HOME_DIR"

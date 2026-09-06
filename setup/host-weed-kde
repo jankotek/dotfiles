@@ -11,7 +11,7 @@
 #   - masks services we replace or don't use (sddm, fwupd, ...)
 #   - leaves tty1 stock; sets up agetty on tty2-10 and CLI-started Plasma
 #   - runs the cross-distro jan-* helpers
-#   - applies the curated skeleton WITHOUT --delete (user data survives re-runs)
+#   - installs curated defaults into /etc/skel without touching existing homes
 #
 # Idempotent: safe to re-run. Run as root from a checkout, e.g.
 #   sudo /opt/jan/setup/host-weed-kde
@@ -177,94 +177,9 @@ PICTURES=media/pic
 VIDEOS=media/video
 EOF
 
-# ---------- Apply curated user skeleton (NO --delete) ----------
-# Detect the primary unprivileged user. openSUSE's installer-created account
-# is commonly adam on these hosts, so prefer it before legacy repo defaults.
-
-HOME_USER=""
-for u in adam jan playai opensuse tumbleweed; do
-    if id "$u" &>/dev/null; then
-        HOME_USER="$u"
-        break
-    fi
-done
-if [[ -z "$HOME_USER" ]]; then
-    echo "ERROR: no candidate user found (tried: adam jan playai opensuse tumbleweed)" >&2
-    exit 1
-fi
-HOME_GROUP=$(id -gn "$HOME_USER")
-HOME_DIR=$(getent passwd "$HOME_USER" | cut -d: -f6)
-echo "==> Applying curated user defaults to ${HOME_DIR} (user=${HOME_USER})"
-
-# Refuse to make an unexpectedly large full-home backup. This applies to the
-# selected primary account (normally adam), not to every directory under /home.
-HOME_SIZE_KIB=$(du -skx -- "$HOME_DIR" | awk '{print $1}')
-readonly HOME_BACKUP_MAX_KIB=102400
-if (( HOME_SIZE_KIB > HOME_BACKUP_MAX_KIB )); then
-    echo "ERROR: ${HOME_DIR} is larger than 100 MiB (${HOME_SIZE_KIB} KiB); refusing full-home backup" >&2
-    echo "Move large user data elsewhere or back it up manually, then rerun." >&2
-    exit 1
-fi
-
-# Back up the complete existing home before replacing any managed template.
-# Fail before deployment if the backup cannot be made.
-HOME_BACKUP="${HOME_DIR}-backup-$(date +%Y-%m-%d-%H%M%S)-$$"
-echo "==> Backing up ${HOME_DIR} to ${HOME_BACKUP}"
-cp -a -- "$HOME_DIR" "$HOME_BACKUP"
-chmod 0700 "$HOME_BACKUP"
-
-# Apply the same curated payload installed into /etc/skel. It is a superset of
-# the same canonical skeleton used for new accounts. No --delete: personal
-# files outside the managed paths survive.
-rsync -a --chown="${HOME_USER}:${HOME_GROUP}" "${REPO_DIR}/skel/home/" "${HOME_DIR}/"
-[[ -d "${REPO_DIR}/home-root" ]] && rsync -r "${REPO_DIR}/home-root/" /root/
-
-# Fix ownership BEFORE the su below, otherwise the freshly-synced (root-owned)
-# dotfiles aren't readable by the user and their login shell errors out
-# sourcing ~/.profile.
-chmod 0755 /home
-chmod 0700 "$HOME_DIR" /root
-chown "$HOME_USER":"$HOME_GROUP" -R "$HOME_DIR"
-
-configure-user-dirs() {
-    local user=$1
-    local group=$2
-    local home_dir=$3
-
-    su - "$user" -c 'mkdir -p ~/desk ~/down ~/doc ~/doc/templates ~/media/share ~/media/music ~/media/pic ~/media/video'
-    install -d -o "$user" -g "$group" "$home_dir/.config"
-    cat > "$home_dir/.config/user-dirs.dirs" <<'EOF'
-XDG_DESKTOP_DIR="$HOME/desk"
-XDG_DOWNLOAD_DIR="$HOME/down"
-XDG_TEMPLATES_DIR="$HOME/doc/templates"
-XDG_PUBLICSHARE_DIR="$HOME/media/share"
-XDG_DOCUMENTS_DIR="$HOME/doc"
-XDG_MUSIC_DIR="$HOME/media/music"
-XDG_PICTURES_DIR="$HOME/media/pic"
-XDG_VIDEOS_DIR="$HOME/media/video"
-EOF
-    chown "$user":"$group" "$home_dir/.config/user-dirs.dirs"
-    su - "$user" -c '
-        migrate_dir() {
-            src=$1
-            dst=$2
-            [ -d "$src" ] || return 0
-            mkdir -p "$dst"
-            find "$src" -mindepth 1 -maxdepth 1 -exec mv -n -t "$dst" {} +
-            rmdir "$src" 2>/dev/null || true
-        }
-        migrate_dir ~/Desktop ~/desk
-        migrate_dir ~/Documents ~/doc
-        migrate_dir ~/Downloads ~/down
-        migrate_dir ~/Music ~/media/music
-        migrate_dir ~/Pictures ~/media/pic
-        migrate_dir ~/Public ~/media/share
-        migrate_dir ~/Templates ~/doc/templates
-        migrate_dir ~/Videos ~/media/video
-    '
-}
-
-configure-user-dirs "$HOME_USER" "$HOME_GROUP" "$HOME_DIR"
+# Existing host homes are intentionally unmanaged. The canonical skeleton was
+# installed into /etc/skel above and is applied only when a user is created.
+# Backups and changes to an existing user's dotfiles are separate manual tasks.
 
 systemctl daemon-reload
 
