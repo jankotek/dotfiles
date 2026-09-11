@@ -40,6 +40,7 @@ fixture-only; see [test/README.md](test/README.md) for details.
 ## Utilities
 
 - `host-doctor` — read-only host/VM health summary
+- `kernel-zbook-build` — build and install the custom openSUSE ZBook kernel with AMD ISP4 capture; run as root from the newest official kernel-default
 - `dotfiles-diff [USER|HOME|--skel]` — preview canonical skeleton changes
 - `verified-download URL OUTPUT [SHA256]` — resumable aria2 download with optional verification
 - `vm-smoke VM` — quick QGA, DHCP, DNS, and service checks
