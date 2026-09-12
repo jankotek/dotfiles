@@ -5,8 +5,7 @@
 set -euo pipefail
 
 REPO="ggerganov/whisper.cpp"
-cd "$(dirname "${BASH_SOURCE[0]}")"
-OUT_DIR="${OUT_DIR:-models/whisper-large-v3}"
+OUT_DIR="${OUT_DIR:-whisper-large-v3}"
 HF_TOKEN="${HF_TOKEN:-${HUGGING_FACE_HUB_TOKEN:-}}"
 CONNECTIONS="${ARIA_CONNECTIONS:-16}"
 

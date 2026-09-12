@@ -5,8 +5,7 @@
 set -euo pipefail
 
 REPO="meta-models/Muse-Glimmer-30B-GGUF"
-cd "$(dirname "${BASH_SOURCE[0]}")"
-OUT_DIR="${OUT_DIR:-models/Muse-Glimmer-30B}"
+OUT_DIR="${OUT_DIR:-Muse-Glimmer-30B}"
 HF_TOKEN="${HF_TOKEN:-${HUGGING_FACE_HUB_TOKEN:-}}"
 CONNECTIONS="${ARIA_CONNECTIONS:-16}"
 
@@ -75,8 +74,9 @@ echo "    -m $OUT_DIR/Muse-Glimmer-30B-KQuant-Dynamic-Q4_K_XL.gguf \\"
 echo "    --mmproj $OUT_DIR/mmproj-Muse-Glimmer-30B-Q4_K_M.gguf \\"
 echo "    --spec-draft-model $OUT_DIR/dflash-Muse-Glimmer-30B-Q4_K_M.gguf \\"
 echo "    --spec-type draft-dflash --spec-draft-n-max 3 \\"
+echo "    --spec-draft-type-k bf16 --spec-draft-type-v bf16 \\"
 echo "    --device Vulkan0 -ngl 99 --sleep-idle-seconds 300 \\"
-echo "    --parallel 4 --jinja -c 327680 \\"
+echo "    --parallel 4 --jinja -c 327680 -ctk bf16 -ctv bf16 \\"
 echo "    --temp 1.0 --top-p 0.95 --top-k 64 --min-p 0 \\"
 echo "    --host 127.0.0.1 --port 8080"
 echo

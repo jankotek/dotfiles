@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-# Download Qwen3.8-27B 16-bit GGUFs for llama.cpp via aria2c.
+# Download Qwen3.8-27B BF16 GGUFs for llama.cpp via aria2c.
 # Requires: aria2c, and HF_TOKEN or HUGGING_FACE_HUB_TOKEN in the environment.
 set -euo pipefail
 
 REPO="ggml-org/Qwen3.8-27B-GGUF"
-cd "$(dirname "${BASH_SOURCE[0]}")"
-OUT_DIR="${OUT_DIR:-models/Qwen3.8-27B}"
+OUT_DIR="${OUT_DIR:-Qwen3.8-27B}"
 HF_TOKEN="${HF_TOKEN:-${HUGGING_FACE_HUB_TOKEN:-}}"
 CONNECTIONS="${ARIA_CONNECTIONS:-16}"
 
@@ -68,13 +67,13 @@ for file in "${MODELS[@]}"; do
 done
 
 echo
-echo "Done. llama.cpp example:"
+echo "Done. llama.cpp BF16 example:"
 echo "  llama-server \\"
 echo "    -m $OUT_DIR/Qwen3.8-27B-BF16.gguf \\"
 echo "    --mmproj $OUT_DIR/mmproj-Qwen3.8-27B-BF16.gguf \\"
 echo "    --spec-draft-model $OUT_DIR/mtp-Qwen3.8-27B-BF16.gguf \\"
 echo "    --spec-type draft-mtp --spec-draft-n-max 3 \\"
-echo "    --parallel 1 --jinja -c 262144 -ngl 99 \\"
+echo "    --parallel 1 --jinja -c 262144 -ctk bf16 -ctv bf16 -ngl 99 \\"
 echo "    --reasoning on --reasoning-effort medium \\"
 echo "    --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0 \\"
 echo "    --presence-penalty 0 --repeat-penalty 1"

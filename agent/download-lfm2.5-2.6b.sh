@@ -4,8 +4,7 @@
 set -euo pipefail
 
 REPO="LiquidAI/LFM2.5-2.6B-GGUF"
-cd "$(dirname "${BASH_SOURCE[0]}")"
-OUT_DIR="${OUT_DIR:-models/LFM2.5-2.6B}"
+OUT_DIR="${OUT_DIR:-LFM2.5-2.6B}"
 HF_TOKEN="${HF_TOKEN:-${HUGGING_FACE_HUB_TOKEN:-}}"
 CONNECTIONS="${ARIA_CONNECTIONS:-16}"
 

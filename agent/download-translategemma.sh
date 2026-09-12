@@ -6,8 +6,7 @@
 # Requires: aria2c, and HF_TOKEN or HUGGING_FACE_HUB_TOKEN in the environment.
 set -euo pipefail
 
-cd "$(dirname "${BASH_SOURCE[0]}")"
-ROOT="${ROOT:-models}"
+ROOT="${ROOT:-.}"
 HF_TOKEN="${HF_TOKEN:-${HUGGING_FACE_HUB_TOKEN:-}}"
 CONNECTIONS="${ARIA_CONNECTIONS:-16}"
 

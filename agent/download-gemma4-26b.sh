@@ -4,8 +4,7 @@
 set -euo pipefail
 
 REPO="ggml-org/gemma-4-26B-A4B-it-GGUF"
-cd "$(dirname "${BASH_SOURCE[0]}")"
-OUT_DIR="${OUT_DIR:-models/gemma-4-26B-A4B}"
+OUT_DIR="${OUT_DIR:-gemma-4-26B-A4B}"
 HF_TOKEN="${HF_TOKEN:-${HUGGING_FACE_HUB_TOKEN:-}}"
 CONNECTIONS="${ARIA_CONNECTIONS:-16}"
 
