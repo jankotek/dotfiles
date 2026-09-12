@@ -92,6 +92,8 @@ EOF
 
 cp -f -s -r /opt/jan/usr/* /usr/local
 /opt/jan/setup/retire-path-util-names.sh
+/usr/local/sbin/install-chrome-vm
+/usr/local/sbin/install-brave-vm
 # cursors do not work in /usr/local/share/icons
 cp -f -s -r /usr/local/share/icons/DMZ* /usr/share/icons/
 cp -f -s -r /usr/local/share/icons/Rare* /usr/share/icons/

@@ -1,6 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
+# Installs Brave Origin (beta channel). The full Brave Browser package is no
+# longer managed by this repository.
+
 if [ "$EUID" -ne 0 ]; then
     echo "must run as root" >&2
     exit 1
@@ -23,23 +26,29 @@ EOF
 
 case $ID in
     opensuse-leap|opensuse-tumbleweed)
-        rpm --import https://brave-browser-rpm-release.s3.brave.com/brave-core.asc
-        zypper addrepo https://brave-browser-rpm-release.s3.brave.com/brave-browser.repo
+        rpm --import https://brave-browser-rpm-beta.s3.brave.com/brave-core-beta.asc
+        if ! zypper --non-interactive repos brave-browser-beta >/dev/null 2>&1; then
+            zypper addrepo \
+                https://brave-browser-rpm-beta.s3.brave.com/brave-browser-beta.repo
+        fi
         zypper --non-interactive --gpg-auto-import-keys ref
-        zypper --non-interactive install brave-browser
+        zypper --non-interactive install brave-origin-beta
         ;;
     fedora)
-        rpm --import https://brave-browser-rpm-release.s3.brave.com/brave-core.asc
-        dnf config-manager addrepo --from-repofile=https://brave-browser-rpm-release.s3.brave.com/brave-browser.repo
-        dnf install -y brave-browser
+        rpm --import https://brave-browser-rpm-beta.s3.brave.com/brave-core-beta.asc
+        dnf config-manager addrepo --overwrite \
+            --from-repofile=https://brave-browser-rpm-beta.s3.brave.com/brave-browser-beta.repo
+        dnf install -y brave-origin-beta
         ;;
     ubuntu|debian|mint)
-        apt update
-        apt install -y curl gnupg
-        curl -fsSL https://brave-browser-apt-release.s3.brave.com/brave-core.asc | gpg --dearmor -o /etc/apt/trusted.gpg.d/brave-browser-archive-keyring.gpg
-        echo "deb [arch=amd64 signed-by=/etc/apt/trusted.gpg.d/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main" > /etc/apt/sources.list.d/brave-browser-release.list
-        apt update
-        apt install -y brave-browser
+        apt-get update
+        apt-get install -y curl
+        curl -fsSLo /usr/share/keyrings/brave-browser-beta-archive-keyring.gpg \
+            https://brave-browser-apt-beta.s3.brave.com/brave-browser-beta-archive-keyring.gpg
+        curl -fsSLo /etc/apt/sources.list.d/brave-browser-beta.sources \
+            https://brave-browser-apt-beta.s3.brave.com/brave-browser.sources
+        apt-get update
+        apt-get install -y brave-origin-beta
         ;;
     *)
         echo "Unsupported distribution: $ID" >&2
@@ -48,4 +57,5 @@ case $ID in
 esac
 
 configure_chromium_sandbox_sysctl
-ln -sfn /usr/bin/brave-browser /usr/local/bin/brave
+ln -sfn /usr/bin/brave-origin-beta /usr/local/bin/brave
+echo "Brave Origin (beta) installed successfully"

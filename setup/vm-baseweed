@@ -28,6 +28,8 @@ source "${SETUP_DIR}/common-cli-packages.sh"
 
 cp -f -s -r /opt/jan/usr/* /usr/local
 /opt/jan/setup/retire-path-util-names.sh
+/usr/local/sbin/install-chrome-vm
+/usr/local/sbin/install-brave-vm
 
 # ---------- Package install ----------
 

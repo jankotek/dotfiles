@@ -1,0 +1,55 @@
+#!/bin/bash
+set -euo pipefail
+
+OPT_ROOT=${JAN_OPT_ROOT:-/opt}
+APPLICATION_DIR=${JAN_APPLICATION_DIR:-/usr/local/share/applications}
+BIN_DIR=${JAN_BIN_DIR:-/usr/local/bin}
+BROWSER_DIR="$OPT_ROOT/brave.com/brave-origin-beta"
+
+if [[ ! -d $BROWSER_DIR ]]; then
+    echo "Brave Origin is not present at $BROWSER_DIR; skipping VM integration"
+    exit 0
+fi
+if [[ ! -x $BROWSER_DIR/brave-origin-beta ]]; then
+    echo "Brave Origin launcher is missing or not executable: $BROWSER_DIR/brave-origin-beta" >&2
+    exit 1
+fi
+if [[ ! -f $BROWSER_DIR/product_logo_128_beta.png ]]; then
+    echo "Brave Origin icon is missing: $BROWSER_DIR/product_logo_128_beta.png" >&2
+    exit 1
+fi
+if [[ $EUID -ne 0 && ( $APPLICATION_DIR == /usr/local/share/applications \
+    || $BIN_DIR == /usr/local/bin ) ]]; then
+    echo "install-brave-vm must run as root" >&2
+    exit 1
+fi
+
+install -d -m 0755 "$APPLICATION_DIR" "$BIN_DIR"
+ln -sfn "$BROWSER_DIR/brave-origin-beta" "$BIN_DIR/brave"
+cat > "$APPLICATION_DIR/brave-origin.desktop" <<EOF
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Brave Origin
+GenericName=Web Browser
+Comment=Access the Internet
+Exec=$BROWSER_DIR/brave-origin-beta %U
+TryExec=$BROWSER_DIR/brave-origin-beta
+Icon=$BROWSER_DIR/product_logo_128_beta.png
+Terminal=false
+Categories=Network;WebBrowser;
+StartupNotify=true
+StartupWMClass=brave-origin-beta
+MimeType=application/pdf;text/html;text/xml;x-scheme-handler/http;x-scheme-handler/https;
+Actions=new-window;new-private-window;
+
+[Desktop Action new-window]
+Name=New Window
+Exec=$BROWSER_DIR/brave-origin-beta
+
+[Desktop Action new-private-window]
+Name=New Private Window
+Exec=$BROWSER_DIR/brave-origin-beta --incognito
+EOF
+chmod 0644 "$APPLICATION_DIR/brave-origin.desktop"
+echo "Brave Origin VM desktop entry installed"

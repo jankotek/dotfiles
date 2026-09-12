@@ -1,0 +1,55 @@
+#!/bin/bash
+set -euo pipefail
+
+OPT_ROOT=${JAN_OPT_ROOT:-/opt}
+APPLICATION_DIR=${JAN_APPLICATION_DIR:-/usr/local/share/applications}
+BIN_DIR=${JAN_BIN_DIR:-/usr/local/bin}
+BROWSER_DIR="$OPT_ROOT/google/chrome"
+
+if [[ ! -d $BROWSER_DIR ]]; then
+    echo "Chrome is not present at $BROWSER_DIR; skipping VM integration"
+    exit 0
+fi
+if [[ ! -x $BROWSER_DIR/google-chrome ]]; then
+    echo "Chrome launcher is missing or not executable: $BROWSER_DIR/google-chrome" >&2
+    exit 1
+fi
+if [[ ! -f $BROWSER_DIR/product_logo_128.png ]]; then
+    echo "Chrome icon is missing: $BROWSER_DIR/product_logo_128.png" >&2
+    exit 1
+fi
+if [[ $EUID -ne 0 && ( $APPLICATION_DIR == /usr/local/share/applications \
+    || $BIN_DIR == /usr/local/bin ) ]]; then
+    echo "install-chrome-vm must run as root" >&2
+    exit 1
+fi
+
+install -d -m 0755 "$APPLICATION_DIR" "$BIN_DIR"
+ln -sfn "$BROWSER_DIR/google-chrome" "$BIN_DIR/chrome"
+cat > "$APPLICATION_DIR/google-chrome.desktop" <<EOF
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Google Chrome
+GenericName=Web Browser
+Comment=Access the Internet
+Exec=$BROWSER_DIR/google-chrome %U
+TryExec=$BROWSER_DIR/google-chrome
+Icon=$BROWSER_DIR/product_logo_128.png
+Terminal=false
+Categories=Network;WebBrowser;
+StartupNotify=true
+StartupWMClass=google-chrome
+MimeType=application/pdf;text/html;text/xml;x-scheme-handler/http;x-scheme-handler/https;
+Actions=new-window;new-private-window;
+
+[Desktop Action new-window]
+Name=New Window
+Exec=$BROWSER_DIR/google-chrome
+
+[Desktop Action new-private-window]
+Name=New Incognito Window
+Exec=$BROWSER_DIR/google-chrome --incognito
+EOF
+chmod 0644 "$APPLICATION_DIR/google-chrome.desktop"
+echo "Chrome VM desktop entry installed"

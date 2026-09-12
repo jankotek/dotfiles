@@ -60,6 +60,8 @@ retired_sbin=(
     jan-ubuntu-remove-older-kernel
     jan-update-opt
     jan-upgrade
+    install-brave-origin
+    install-vivaldi
     vm-cleanup
 )
 

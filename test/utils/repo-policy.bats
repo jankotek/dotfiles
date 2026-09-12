@@ -40,6 +40,29 @@ load ../helpers
         'products/releases[?]code=IIC&'
 }
 
+@test "browser installers manage Origin and VM integration only" {
+    [[ -x $OPT_JAN/usr/sbin/install-brave ]]
+    [[ -x $OPT_JAN/usr/sbin/install-brave-vm ]]
+    [[ -x $OPT_JAN/usr/sbin/install-chrome-vm ]]
+    [[ ! -e $OPT_JAN/usr/sbin/install-brave-origin ]]
+    [[ ! -e $OPT_JAN/usr/sbin/install-vivaldi ]]
+    assert_file_contains "$OPT_JAN/usr/sbin/install-brave" 'brave-origin-beta'
+    assert_file_contains "$OPT_JAN/usr/sbin/install-brave" \
+        'zypper --non-interactive repos brave-browser-beta'
+    assert_file_contains "$OPT_JAN/usr/sbin/install-brave" \
+        'dnf config-manager addrepo --overwrite'
+    assert_file_not_contains "$OPT_JAN/usr/sbin/install-brave" \
+        'apt install -y brave-browser$'
+    assert_file_contains "$OPT_JAN/setup/retire-path-util-names.sh" \
+        '^[[:space:]]*install-brave-origin$'
+    assert_file_contains "$OPT_JAN/setup/retire-path-util-names.sh" \
+        '^[[:space:]]*install-vivaldi$'
+    for script in setup/vm-xub26 setup/vm-baseweed; do
+        assert_file_contains "$OPT_JAN/$script" '^/usr/local/sbin/install-chrome-vm$'
+        assert_file_contains "$OPT_JAN/$script" '^/usr/local/sbin/install-brave-vm$'
+    done
+}
+
 @test "provisioning and update scripts do not manage Ollama" {
     if grep -Riw ollama \
         "$OPT_JAN/setup" \

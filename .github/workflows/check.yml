@@ -36,6 +36,7 @@ jobs:
       - name: Run fixture-only unit tests
         run: |
           OPT_JAN="$GITHUB_WORKSPACE" bats \
+            test/utils/browser-vm.bats \
             test/utils/pod-subid-allocation.bats \
             test/utils/repo-policy.bats \
             test/utils/update-opt-idea-upgrade.bats
