@@ -33,6 +33,13 @@ load ../helpers
         'assert_command fresh'
 }
 
+@test "portable updater uses the unified IntelliJ IDEA release feed" {
+    assert_file_contains "$OPT_JAN/usr/sbin/host-optupdate" \
+        'products/releases[?]code=IIU&latest=true&type=release'
+    assert_file_not_contains "$OPT_JAN/usr/sbin/host-optupdate" \
+        'products/releases[?]code=IIC&'
+}
+
 @test "provisioning and update scripts do not manage Ollama" {
     if grep -Riw ollama \
         "$OPT_JAN/setup" \
