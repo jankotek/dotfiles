@@ -37,7 +37,8 @@ jobs:
         run: |
           OPT_JAN="$GITHUB_WORKSPACE" bats \
             test/utils/pod-subid-allocation.bats \
-            test/utils/repo-policy.bats
+            test/utils/repo-policy.bats \
+            test/utils/update-opt-idea-upgrade.bats
 
   portable-tools:
     runs-on: ubuntu-latest
