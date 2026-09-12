@@ -5,6 +5,12 @@ setup() {
     MODELS_INI="$OPT_JAN/agent/llama-models.ini"
 }
 
+teardown() {
+    if [[ -n "${TEST_TEMP:-}" ]]; then
+        rm -rf -- "$TEST_TEMP"
+    fi
+}
+
 preset() {
     local name="$1"
     awk -v section="[$name]" '
@@ -37,6 +43,55 @@ preset() {
 
     run grep -F '"mtp-Qwen3.8-27B-BF16.gguf"' "$OPT_JAN/agent/download-qwen3.8-27b.sh"
     [ "$status" -eq 0 ]
+}
+
+@test "single Qwen embedding downloader creates all Q8_0 model directories" {
+    TEST_TEMP="$(mktemp -d)"
+    mkdir -p "$TEST_TEMP/bin" "$TEST_TEMP/models"
+    cat > "$TEST_TEMP/bin/aria2c" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+dest_dir=
+output=
+for argument in "$@"; do
+    case "$argument" in
+        --dir=*) dest_dir="${argument#--dir=}" ;;
+        --out=*) output="${argument#--out=}" ;;
+    esac
+done
+[[ -n "$dest_dir" && -n "$output" ]]
+mkdir -p "$dest_dir"
+printf fixture > "$dest_dir/$output"
+EOF
+    chmod +x "$TEST_TEMP/bin/aria2c"
+
+    run env \
+        PATH="$TEST_TEMP/bin:$PATH" \
+        HF_TOKEN=fixture-token \
+        ROOT="$TEST_TEMP/models" \
+        "$OPT_JAN/agent/download-qwen3-embedding-q8.sh"
+    [ "$status" -eq 0 ]
+
+    for size in 0.6B 4B 8B; do
+        [ -s "$TEST_TEMP/models/Qwen3-Embedding-${size}-GGUF-Q8_0/Qwen3-Embedding-${size}-Q8_0.gguf" ]
+    done
+}
+
+@test "Qwen embedding presets use Q8_0 weights and last-token pooling" {
+    local size output
+    for size in 0.6B 4B 8B; do
+        run preset "Qwen3-Embedding-${size}-Q8_0"
+        [ "$status" -eq 0 ]
+        [[ "$output" == *"model = /var/models/Qwen3-Embedding-${size}-GGUF-Q8_0/Qwen3-Embedding-${size}-Q8_0.gguf"* ]]
+        [[ "$output" == *"embedding = true"* ]]
+        [[ "$output" == *"pooling = last"* ]]
+        [[ "$output" == *"parallel = 4"* ]]
+        [[ "$output" == *"ctx-size = 32768"* ]]
+        [[ "$output" == *"batch-size = 8192"* ]]
+        [[ "$output" == *"ubatch-size = 8192"* ]]
+        [[ "$output" == *"cache-type-k = bf16"* ]]
+        [[ "$output" == *"cache-type-v = bf16"* ]]
+    done
 }
 
 @test "Qwen BF16 router preset remains available" {

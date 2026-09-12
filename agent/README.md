@@ -23,3 +23,13 @@ ROOT=/data /opt/jan/agent/download-translategemma.sh
 
 The completed directories can be copied to `/var/models` on the inference
 machine. `llama-models.ini` uses that fixed serving location.
+
+Download all three Qwen3 text-embedding sizes in Q8_0 with one command:
+
+```bash
+cd /var/models
+/opt/jan/agent/download-qwen3-embedding-q8.sh
+```
+
+This creates quant-specific directories for the 0.6B, 4B, and 8B models. Set
+`ROOT` to place all three beneath a different directory.
