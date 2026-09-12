@@ -21,7 +21,7 @@ test/test-vm-xub26-deploy.sh       # clone xub26 -> setup/vm-xub26 -> test -> de
 
 | File | What it checks |
 |------|---------------|
-| `cli.bats` | Common CLI tools: git, curl, aria2c, mc, htop, fish, nano, ncdu, rg, starship, iotop, powertop, pwgen, telnet, jdupes, just, bats, zim, JetBrains Mono font |
+| `cli.bats` | Common CLI tools: git, curl, aria2c, mc, htop, fish, nano, ncdu, rg, starship, Fresh Editor, iotop, powertop, pwgen, telnet, jdupes, just, bats, zim, JetBrains Mono font |
 | `optjan.bats` | `/opt/jan` directory structure, key scripts exist in repo |
 | `zswap.bats` | zswap enabled with zstd compressor in boot params and at runtime |
 
@@ -53,7 +53,8 @@ be run as root.
 
 | File | What it checks |
 |------|---------------|
-| `update-opt.bats` | Downloads Herdr, Codex, Grok, Pi, and Claude Code into temporary `JAN_OPT` trees; verifies native binaries, publisher checksums, version tracking, and idempotent re-runs (network-heavy) |
+| `update-opt.bats` | Downloads Herdr, Codex, Grok, Pi, Claude Code, Obsidian, and Fresh Editor into temporary `JAN_OPT` trees; verifies native binaries, publisher checksums, version tracking, and idempotent re-runs (network-heavy) |
+| `update-opt-all.bats` | Runs the complete default `host-optupdate` installation and verifies every expected executable, including all Corretto JDKs (CI-only; very network-heavy) |
 | `utilities.bats` | Fixture checks for utility help, dotfile dry-runs, missing-user guidance, and atomic verified downloads |
 | `repo-policy.bats` | Fast, fixture-only checks for canonical dotfiles, error traps, download policy, and provisioning safety limits |
 | `pod-subid-allocation.bats` | Fixture-only unit tests for non-overlapping subordinate UID/GID allocation; does not require root |

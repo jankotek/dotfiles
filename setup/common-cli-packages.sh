@@ -11,6 +11,7 @@ readonly -a JAN_COMMON_CLI_PACKAGES=(
     aria2
     powertop
     fish
+    starship
     iotop
     ncdu
     nano

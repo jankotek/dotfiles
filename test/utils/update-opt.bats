@@ -128,3 +128,49 @@ load ../helpers
     [[ "$status" -eq 0 ]]
     [[ "$output" == *"Claude Code already at version $version"* ]]
 }
+
+@test "host-optupdate selects a Linux Obsidian release and tracks it" {
+    local target="$BATS_TEST_TMPDIR/opt"
+    mkdir -p "$target"
+
+    run env JAN_OPT="$target" "$OPT_JAN/usr/sbin/host-optupdate" obsidian
+    if [[ "$status" -ne 0 ]]; then
+        echo "$output" >&2
+    fi
+    [[ "$status" -eq 0 ]]
+    [[ -x "$target/bin/obsidian" ]]
+    [[ -s "$target/obsidian/.version" ]]
+    [[ -s "$target/obsidian/.installed-sha256" ]]
+    [[ "$output" == *"sha256 verified"* ]]
+
+    local version
+    version=$(<"$target/obsidian/.version")
+    run env JAN_OPT="$target" "$OPT_JAN/usr/sbin/host-optupdate" obsidian
+    [[ "$status" -eq 0 ]]
+    [[ "$output" == *"Obsidian already at version $version"* ]]
+}
+
+@test "host-optupdate installs and tracks Fresh Editor" {
+    local target="$BATS_TEST_TMPDIR/opt"
+    mkdir -p "$target"
+
+    run env JAN_OPT="$target" "$OPT_JAN/usr/sbin/host-optupdate" fresh
+    if [[ "$status" -ne 0 ]]; then
+        echo "$output" >&2
+    fi
+    [[ "$status" -eq 0 ]]
+    [[ -x "$target/bin/fresh" ]]
+    [[ -s "$target/.versions/fresh" ]]
+    [[ -s "$target/.versions/fresh.sha256" ]]
+    [[ ! -e "$target/fresh-editor" ]]
+    [[ "$output" == *"sha256 verified"* ]]
+
+    run "$target/bin/fresh" --version
+    [[ "$status" -eq 0 ]]
+
+    local version
+    version=$(<"$target/.versions/fresh")
+    run env JAN_OPT="$target" "$OPT_JAN/usr/sbin/host-optupdate" fresh
+    [[ "$status" -eq 0 ]]
+    [[ "$output" == *"Fresh Editor already at version $version"* ]]
+}

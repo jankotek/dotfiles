@@ -298,14 +298,6 @@ install_nushell() {
     download_and_extract "Nushell" "nushell" "$url" "$version" 1 "$sum" "nu"
 }
 
-install_starship() {
-    local version=$(github_api https://api.github.com/repos/starship/starship/releases/latest | grep -oP '"tag_name": "\K[^"]+')
-    local url="https://github.com/starship/starship/releases/download/${version}/starship-x86_64-unknown-linux-musl.tar.gz"
-    local sum=$(fetch_checksum "${url}.sha256")
-    [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for Starship"; return 1; }
-    download_and_extract "Starship" "starship" "$url" "$version" 0 "$sum" "starship"
-}
-
 install_herdr() {
     local release version arch file url sum
     release=$(github_api https://api.github.com/repos/ogulcancelik/herdr/releases/latest)
@@ -488,11 +480,64 @@ install_grok() {
 }
 
 install_obsidian() {
-    # Obsidian publishes no checksums in its release assets — unverified.
-    local version=$(github_api https://api.github.com/repos/obsidianmd/obsidian-releases/releases/latest | grep -oP '"tag_name": "\K[^"]+' | sed 's/^v//')
-    local url="https://github.com/obsidianmd/obsidian-releases/releases/download/v${version}/obsidian-${version}.tar.gz"
-    download_and_extract "Obsidian" "obsidian" "$url" "$version" 1 "" "obsidian"
+    # Some Obsidian releases are mobile-only, so the repository's /latest
+    # endpoint is not necessarily the latest Linux desktop release.
+    local releases url file version sum suffix
+    releases=$(github_api \
+        'https://api.github.com/repos/obsidianmd/obsidian-releases/releases?per_page=20')
+
+    case "$(uname -m)" in
+        x86_64|amd64) suffix= ;;
+        aarch64|arm64) suffix=-arm64 ;;
+        *)
+            echo "✗ Obsidian does not publish a Linux archive for architecture $(uname -m)"
+            return 1
+            ;;
+    esac
+
+    url=$(grep -oP '"browser_download_url"\s*:\s*"\K[^"]+' <<<"$releases" \
+        | grep -E "/obsidian-[0-9]+\.[0-9]+\.[0-9]+${suffix}\.tar\.gz$" \
+        | head -1 || true)
+    [ -n "$url" ] || { echo "✗ Failed to find a recent Obsidian Linux archive"; return 1; }
+
+    file=${url##*/}
+    version=${file#obsidian-}
+    version=${version%${suffix}.tar.gz}
+    sum=$(github_asset_sha256 "$releases" "$file" || true)
+    [[ "$sum" =~ ^[0-9a-f]{64}$ ]] || {
+        echo "✗ Failed to fetch checksum for Obsidian"
+        return 1
+    }
+
+    download_and_extract "Obsidian" "obsidian" "$url" "$version" 1 "$sum" "obsidian"
     create_desktop_file "obsidian" "Obsidian" "$BASE_DIR/obsidian/obsidian --no-sandbox" "$BASE_DIR/obsidian/resources/icon.png" "Obsidian Notes"
+}
+
+install_fresh() {
+    local release tag version arch file url sum
+    release=$(github_api https://api.github.com/repos/sinelaw/fresh/releases/latest)
+    tag=$(github_release_tag "$release" || true)
+    version=${tag#v}
+
+    case "$(uname -m)" in
+        x86_64|amd64) arch=x86_64 ;;
+        aarch64|arm64) arch=aarch64 ;;
+        *)
+            echo "✗ Fresh Editor does not publish a Linux binary for architecture $(uname -m)"
+            return 1
+            ;;
+    esac
+
+    file="fresh-editor-${arch}-unknown-linux-musl.tar.gz"
+    url="https://github.com/sinelaw/fresh/releases/download/${tag}/${file}"
+    sum=$(fetch_checksum "${url}.sha256" "$file")
+    [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+ && "$sum" =~ ^[0-9a-f]{64}$ ]] || {
+        echo "✗ Failed to fetch release/checksum info for Fresh Editor"
+        return 1
+    }
+
+    download_single_binary "Fresh Editor" "fresh" "$url" "$version" "$sum" "" \
+        "${file%.tar.gz}/fresh"
 }
 
 install_corretto() {
@@ -641,11 +686,13 @@ EOF
 }
 
 # expected is the publisher checksum. fallback_url is used for Grok's mirror.
+# archive_member optionally extracts one file from a .tar.gz into the final
+# binary path; this keeps mostly-static tools such as Fresh as one-file installs.
 download_single_binary() (
     set -e
     set -o pipefail
     local name=$1 binary=$2 url=$3 version=$4 expected=${5:-}
-    local fallback_url=${6:-} used_fallback=0
+    local fallback_url=${6:-} archive_member=${7:-} used_fallback=0
     local version_file="$BASE_DIR/.versions/$binary"
     local digest_file="$BASE_DIR/.versions/$binary.sha256"
     local current_version="" lock_fd temp_file
@@ -664,7 +711,7 @@ download_single_binary() (
     make_shared_directory "$BASE_DIR/bin"
     make_shared_directory "$BASE_DIR/.versions"
     temp_file=$(mktemp "$BASE_DIR/bin/.${binary}.staging.XXXXXX")
-    trap 'rm -f "$temp_file" "$temp_file.aria2"' EXIT
+    trap 'rm -f "$temp_file" "$temp_file.aria2" "$temp_file.extracted"' EXIT
     if ! download_file "$url" "$temp_file"; then
         [ -n "$fallback_url" ] || return 1
         echo "→ Primary download failed; trying publisher fallback"
@@ -680,6 +727,15 @@ download_single_binary() (
         verify_file "$temp_file" "$expected"
     elif [ -z "$expected" ]; then
         echo "  ⚠ $name: publisher provides no checksum — installing unverified"
+    fi
+    if [ -n "$archive_member" ]; then
+        if ! tar -xOzf "$temp_file" "$archive_member" > "$temp_file.extracted"; then
+            echo "✗ $name archive does not contain expected executable: $archive_member"
+            return 1
+        fi
+        [ -s "$temp_file.extracted" ] \
+            || { echo "✗ Extracted $name executable is empty"; return 1; }
+        mv -fT "$temp_file.extracted" "$temp_file"
     fi
     [ -s "$temp_file" ] || { echo "✗ Downloaded $name executable is empty"; return 1; }
     chmod 0755 "$temp_file"
@@ -806,7 +862,7 @@ install_ffmpeg() {
 }
 
 # Default install set; pass tool names as arguments to install a subset.
-ALL_TOOLS=(idea nushell starship herdr codex grok pi claude obsidian gradle maven
+ALL_TOOLS=(idea nushell herdr codex grok pi claude obsidian fresh gradle maven
            kubectl kind k9s helm stern skaffold jq yq ffmpeg corretto_all)
 
 if [ $# -gt 0 ]; then
@@ -832,7 +888,6 @@ chmod 0755 "$BASE_DIR/bin"
 [ -f "$BASE_DIR/gradle/bin/gradle" ] && ln -sf "$BASE_DIR/gradle/bin/gradle" "$BASE_DIR/bin/gradle"
 [ -f "$BASE_DIR/maven/bin/mvn" ] && ln -sf "$BASE_DIR/maven/bin/mvn" "$BASE_DIR/bin/mvn"
 [ -f "$BASE_DIR/nushell/nu" ] && ln -sf "$BASE_DIR/nushell/nu" "$BASE_DIR/bin/nu"
-[ -f "$BASE_DIR/starship/starship" ] && ln -sf "$BASE_DIR/starship/starship" "$BASE_DIR/bin/starship"
 [ -f "$BASE_DIR/k9s/k9s" ] && ln -sf "$BASE_DIR/k9s/k9s" "$BASE_DIR/bin/k9s"
 [ -f "$BASE_DIR/helm/helm" ] && ln -sf "$BASE_DIR/helm/helm" "$BASE_DIR/bin/helm"
 [ -f "$BASE_DIR/stern/stern" ] && ln -sf "$BASE_DIR/stern/stern" "$BASE_DIR/bin/stern"

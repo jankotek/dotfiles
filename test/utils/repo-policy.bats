@@ -22,6 +22,17 @@ load ../helpers
     assert_file_contains "$OPT_JAN/usr/sbin/host-optupdate" 'download_file "\$url"'
 }
 
+@test "default CLI provisioning installs Starship and updates Fresh through opt" {
+    assert_file_contains "$OPT_JAN/setup/common-cli-packages.sh" \
+        '^[[:space:]]*starship$'
+    assert_file_contains "$OPT_JAN/usr/sbin/host-optupdate" \
+        '^ALL_TOOLS=.* fresh '
+    assert_file_contains "$OPT_JAN/usr/sbin/host-optupdate" \
+        'download_single_binary "Fresh Editor" "fresh"'
+    assert_file_contains "$OPT_JAN/test/basic/cli.bats" \
+        'assert_command fresh'
+}
+
 @test "provisioning and update scripts do not manage Ollama" {
     if grep -Riw ollama \
         "$OPT_JAN/setup" \

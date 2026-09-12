@@ -117,7 +117,7 @@ apt-get update
 apt-get install -y \
   terminator rofi mousepad arandr dconf-cli \
   xfce4-fsguard-plugin xfce4-systemload-plugin xfce4-taskmanager \
-  links "${JAN_COMMON_CLI_PACKAGES[@]}" iftop sshpass starship \
+  links "${JAN_COMMON_CLI_PACKAGES[@]}" iftop sshpass \
   fonts-jetbrains-mono fonts-terminus console-setup \
   xdotool systemd-resolved
 

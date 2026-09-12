@@ -51,6 +51,10 @@ load ../helpers
     assert_command starship
 }
 
+@test "Fresh Editor is installed" {
+    assert_command fresh
+}
+
 @test "iotop is installed" {
     assert_executable /usr/sbin/iotop
 }
