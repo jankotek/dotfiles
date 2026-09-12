@@ -1,0 +1,270 @@
+#!/bin/bash
+# Apply the laptop's power policy once. No event hooks or saved settings.
+set -euo pipefail
+
+CPU_ROOT=/sys/devices/system/cpu/cpufreq
+POWER_ROOT=/sys/class/power_supply
+LID_ROOT=/proc/acpi/button/lid
+DRY_RUN=0
+ALLOW_SUSPEND=1
+LOCK_FILE=${LOCK_FILE:-/run/laptop-power.lock}
+LOCK_WAIT_SECONDS=${LOCK_WAIT_SECONDS:-5}
+STATE_FILE=${STATE_FILE:-/run/laptop-power.state}
+
+fail() { echo "laptop-power: $*" >&2; return 1; }
+
+detect_power() {
+    local supply type online battery=0 offline=0 discharging=0
+    for supply in "$POWER_ROOT"/*; do
+        [[ -f $supply/type ]] || continue
+        # Ignore batteries and supplies belonging to peripherals.
+        if [[ -f $supply/scope && $(< "$supply/scope") == Device ]]; then
+            continue
+        fi
+        type=$(< "$supply/type")
+        if [[ $type == Battery ]]; then
+            [[ ! -f $supply/present || $(< "$supply/present") == 1 ]] || continue
+            battery=1
+            if [[ -f $supply/status && $(< "$supply/status") == Discharging ]]; then
+                discharging=1
+            fi
+        elif [[ -f $supply/online ]]; then
+            online=$(< "$supply/online")
+            if [[ $online == 1 ]]; then
+                echo ac
+                return
+            elif [[ $online == 0 ]]; then
+                offline=1
+            fi
+        fi
+    done
+    if (( battery && (offline || discharging) )); then
+        echo battery
+    else
+        fail 'Cannot determine the power source; no changes applied.'
+    fi
+}
+
+detect_lid() {
+    local state value closed=0 unknown=0
+    for state in "$LID_ROOT"/*/state; do
+        [[ -f $state ]] || continue
+        value=$(< "$state")
+        case $value in
+            *open*) echo open; return ;;
+            *closed*) closed=1 ;;
+            *) unknown=1 ;;
+        esac
+    done
+    if (( closed && !unknown )); then
+        echo closed
+    else
+        fail 'Cannot determine lid state; no changes applied.'
+    fi
+}
+
+detect_battery_capacity() {
+    local supply type capacity
+    for supply in "$POWER_ROOT"/*; do
+        [[ -f $supply/type ]] || continue
+        if [[ -f $supply/scope && $(< "$supply/scope") == Device ]]; then
+            continue
+        fi
+        type=$(< "$supply/type")
+        [[ $type == Battery ]] || continue
+        [[ ! -f $supply/present || $(< "$supply/present") == 1 ]] || continue
+        # This policy intentionally uses only the first present system battery.
+        [[ -f $supply/capacity ]] || return 1
+        capacity=$(< "$supply/capacity")
+        [[ $capacity =~ ^[0-9]+$ ]] || return 1
+        capacity=$(( 10#$capacity ))
+        (( capacity <= 100 )) || return 1
+        echo "$capacity"
+        return
+    done
+    return 1
+}
+
+request_frequency() {
+    printf '%s\n' "$2" > "$1"
+}
+
+wait_frequency() {
+    local path=$1 value=$2 actual attempt
+    # CPUFreq sysfs writes update a QoS request; a queued kernel worker updates
+    # the visible policy limits. An immediate read can still show the old value.
+    # Do not keep rewriting: wait up to two seconds for this request to settle.
+    for (( attempt=0; attempt<=40; attempt++ )); do
+        actual=$(< "$path")
+        [[ $actual != "$value" ]] || return 0
+        (( attempt == 40 )) || sleep 0.05
+    done
+    fail "$path requested $value, still reads $actual after 2 seconds; policy only partially applied (check other power managers or driver constraints)."
+}
+
+write_frequency() {
+    request_frequency "$1" "$2" || return 1
+    wait_frequency "$1" "$2"
+}
+
+acquire_lock() {
+    exec 9>"$LOCK_FILE"
+    flock -x -w "$LOCK_WAIT_SECONDS" 9 || {
+        fail "Another invocation still holds $LOCK_FILE after $LOCK_WAIT_SECONDS seconds."
+        return 1
+    }
+}
+
+record_state_change() {
+    local new_state=$1 details=$2 old_state=unknown message
+    [[ -f $STATE_FILE ]] && read -r old_state < "$STATE_FILE"
+    [[ $old_state == "$new_state" ]] && return
+
+    message="State changed: $old_state -> $new_state; $details"
+    logger --tag laptop-power -- "$message" || \
+        echo "laptop-power: Could not write to the system log." >&2
+    printf '%s\n' "$new_state" > "$STATE_FILE"
+}
+
+apply_policy() {
+    local source lid=unused mode profile quota policy minimum maximum account uid capacity
+    local -A quota_users=()
+    local -A target_min=() target_max=()
+    local -a policies accounts=()
+    source=$(detect_power) || return 1
+    if [[ $source == battery ]] && (( ALLOW_SUSPEND )) && \
+            capacity=$(detect_battery_capacity) && (( capacity < 10 )); then
+        echo "Battery is at ${capacity}%; suspending because it is below 10%."
+        if (( DRY_RUN )); then
+            echo 'Would suspend.'
+        else
+            systemctl suspend || return 1
+            record_state_change low-battery-suspend "battery ${capacity}%; suspend requested"
+        fi
+        return
+    fi
+    if [[ $source == ac ]]; then
+        mode=ac; profile=balanced; quota=
+    else
+        lid=$(detect_lid) || return 1
+        profile=power-saver
+        if [[ $lid == closed ]]; then
+            mode=backpack; quota=20%
+        else
+            mode='battery-open'; quota=
+        fi
+    fi
+
+    policies=("$CPU_ROOT"/policy*)
+    [[ -d ${policies[0]} ]] || { fail 'No CPU frequency policies found.'; return 1; }
+    for policy in "${policies[@]}"; do
+        minimum=$(< "$policy/cpuinfo_min_freq")
+        maximum=$(< "$policy/cpuinfo_max_freq")
+        [[ $minimum =~ ^[0-9]+$ && $maximum =~ ^[0-9]+$ ]] || return 1
+        if [[ $mode == backpack ]] && (( minimum > 625000 || maximum < 625000 )); then
+            fail "$policy does not support the requested 625 MHz cap."
+            return 1
+        fi
+    done
+
+    # The original laptop uses jan for workloads. Fleet machines also use
+    # play1..play10 or lab1..lab10. Missing accounts are expected and ignored.
+    for account in jan play{1..10} lab{1..10}; do
+        uid=$(id -u "$account" 2>/dev/null) || continue
+        accounts+=("$account")
+        quota_users[$account]=$uid
+    done
+
+    echo "Mode: $mode; profile: $profile; managed app quota each: ${quota:-unlimited}; session quotas: unlimited"
+    if (( DRY_RUN )); then
+        if [[ $mode == backpack ]]; then
+            echo "Would set all ${#policies[@]} CPU policies to 625000 kHz minimum and maximum."
+        else
+            echo "Would reset all ${#policies[@]} CPU policies to the selected profile's hardware frequency range."
+        fi
+        return
+    fi
+
+    # Select the profile first: it may change boost and cpuinfo_max_freq.
+    powerprofilesctl set "$profile" || return 1
+    for policy in "${policies[@]}"; do
+        minimum=$(< "$policy/cpuinfo_min_freq")
+        maximum=$(< "$policy/cpuinfo_max_freq")
+        if [[ $mode == backpack ]]; then
+            minimum=625000
+            maximum=625000
+        fi
+        # Lower the existing floor before lowering the ceiling. The final
+        # minimum write also supports restoring a higher minimum safely.
+        target_min[$policy]=$minimum
+        target_max[$policy]=$maximum
+        write_frequency "$policy/scaling_min_freq" "$(< "$policy/cpuinfo_min_freq")" || return 1
+        write_frequency "$policy/scaling_max_freq" "$maximum" || return 1
+        write_frequency "$policy/scaling_min_freq" "$minimum" || return 1
+    done
+    # Remove the parent quota so it cannot indirectly throttle adam.
+    systemctl set-property --runtime user.slice CPUQuota= || return 1
+    # Remove this script's former whole-session quotas. Apply the budget only
+    # to applications, leaving session.slice (KWin, Plasma, audio) unrestricted.
+    # Current terminal-launched agents and QEMU processes are in app.slice.
+    for account in "${accounts[@]}"; do
+        uid=${quota_users[$account]}
+        systemctl set-property --runtime "user-$uid.slice" CPUQuota= || return 1
+        if systemctl is-active --quiet "user@$uid.service"; then
+            systemctl --user --machine="$account@.host" set-property --runtime app.slice "CPUQuota=$quota" || return 1
+        else
+            echo "$account: user manager inactive; app quota skipped (run again after login)."
+        fi
+    done
+    # Recheck the whole set after quota changes, catching later drift as well.
+    for policy in "${policies[@]}"; do
+        wait_frequency "$policy/scaling_min_freq" "${target_min[$policy]}" || return 1
+        wait_frequency "$policy/scaling_max_freq" "${target_max[$policy]}" || return 1
+    done
+    record_state_change "$mode" "power=$source; lid=$lid; profile=$profile; managed app quota=${quota:-unlimited}"
+    echo 'Applied.'
+}
+
+main() {
+    case ${1:-} in
+        --help|-h)
+            cat <<'EOF'
+Usage: laptop-power [--dry-run]
+
+Apply once, based on the current power source and lid:
+  AC                 balanced profile, normal frequency range, no managed quotas
+  Battery, lid open  power-saver profile, normal frequency range, no managed quotas
+  Battery, lid shut  power-saver profile, 625 MHz cap, 20% per managed app.slice
+
+Run as root to apply. --dry-run reads state without changing anything.
+While on battery, a reported capacity below 10% suspends the laptop. The
+installer uses --no-suspend internally while a sleep transition is in progress.
+Managed accounts are existing jan, play1..play10, and lab1..lab10 users. Quotas
+cover each app.slice separately, including applications, terminal-launched agents
+and VMs there. KWin, Plasma and audio in session.slice remain outside the quota,
+as do background.slice and other workload groups. Adam gets no quota from this
+script (the frequency cap still affects all CPUs). Every mode clears the shared
+user.slice quota and managed whole-user quotas; normal modes also clear their
+app quotas. Other existing quotas are untouched.
+Inactive user managers are skipped; run again after login to apply their quota.
+No previous settings are saved. This command installs no triggers itself;
+run install-laptop-power to install the timer and event hooks.
+EOF
+            return ;;
+        --dry-run) DRY_RUN=1 ;;
+        --no-suspend) ALLOW_SUSPEND=0 ;;
+        '') ;;
+        *) fail "Unknown argument: $1 (see --help)"; return 2 ;;
+    esac
+    (( $# <= 1 )) || { fail 'Too many arguments.'; return 2; }
+    if (( !DRY_RUN )); then
+        (( EUID == 0 )) || { fail 'Run with sudo, or use --dry-run.'; return 1; }
+        # Serialize manual invocations; nothing here schedules future runs.
+        acquire_lock || return 1
+    fi
+    apply_policy
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+    main "$@"
+fi

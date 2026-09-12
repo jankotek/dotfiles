@@ -1,0 +1,134 @@
+#!/bin/bash
+# Install periodic and event-driven laptop-power invocations.
+set -euo pipefail
+
+REPO_DIR=${REPO_DIR:-/opt/jan}
+SYSTEMD_DIR=${SYSTEMD_DIR:-/etc/systemd/system}
+ACPI_EVENTS_DIR=${ACPI_EVENTS_DIR:-/etc/acpi/events}
+UDEV_RULES_DIR=${UDEV_RULES_DIR:-/etc/udev/rules.d}
+POLICY_COMMAND="$REPO_DIR/usr/sbin/laptop-power"
+
+fail() { echo "install-laptop-power: $*" >&2; return 1; }
+
+ensure_acpid() {
+    command -v acpid &>/dev/null && return
+
+    echo 'Installing acpid for lid and AC-adapter events...'
+    if command -v zypper &>/dev/null; then
+        zypper --non-interactive install --no-recommends acpid
+    elif command -v apt-get &>/dev/null; then
+        DEBIAN_FRONTEND=noninteractive apt-get install -y acpid
+    else
+        fail 'acpid is required, and no supported package manager was found.'
+    fi
+}
+
+write_configuration() {
+    install -d -m 0755 "$SYSTEMD_DIR" "$ACPI_EVENTS_DIR" "$UDEV_RULES_DIR"
+
+    tee "$SYSTEMD_DIR/laptop-power.service" >/dev/null <<EOF
+[Unit]
+Description=Apply laptop power policy
+
+[Service]
+Type=oneshot
+ExecStart=$POLICY_COMMAND
+TimeoutStartSec=30s
+EOF
+
+    # Apply immediately, then verify the settled state after 30 seconds. A new
+    # hardware event restarts this sequence and therefore resets the delay.
+    tee "$SYSTEMD_DIR/laptop-power-event.service" >/dev/null <<EOF
+[Unit]
+Description=Apply and verify laptop power policy after hardware events
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStartPre=-$POLICY_COMMAND
+ExecStart=/usr/bin/sleep 30
+ExecStart=$POLICY_COMMAND
+TimeoutStartSec=60s
+EOF
+
+    tee "$SYSTEMD_DIR/laptop-power.timer" >/dev/null <<'EOF'
+[Unit]
+Description=Reapply laptop power policy every 10 minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=10min
+AccuracySec=30s
+Unit=laptop-power.service
+
+[Install]
+WantedBy=timers.target
+EOF
+
+    # Remain active only while sleep.target is wanted. ExecStart runs before
+    # suspend/hibernate and ExecStop runs when the target is released on resume.
+    tee "$SYSTEMD_DIR/laptop-power-sleep.service" >/dev/null <<EOF
+[Unit]
+Description=Apply laptop power policy before sleep and after wakeup
+DefaultDependencies=no
+Before=sleep.target
+StopWhenUnneeded=yes
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=-$POLICY_COMMAND --no-suspend
+ExecStop=-$POLICY_COMMAND --no-suspend
+TimeoutStartSec=15s
+TimeoutStopSec=15s
+
+[Install]
+WantedBy=sleep.target
+EOF
+
+    # acpid receives both lid-open/lid-close and firmware AC-adapter events.
+    # Restarting the debounce service makes the last event win.
+    tee "$ACPI_EVENTS_DIR/laptop-power" >/dev/null <<EOF
+event=^(button/lid|ac_adapter|battery).*
+action=/usr/bin/systemctl restart --no-block laptop-power-event.service
+EOF
+
+    # Some systems expose charger changes only as power_supply uevents.
+    tee "$UDEV_RULES_DIR/80-laptop-power.rules" >/dev/null <<'EOF'
+ACTION=="change", SUBSYSTEM=="power_supply", RUN+="/usr/bin/systemctl restart --no-block laptop-power-event.service"
+EOF
+
+    chmod 0644 \
+        "$SYSTEMD_DIR/laptop-power.service" \
+        "$SYSTEMD_DIR/laptop-power-event.service" \
+        "$SYSTEMD_DIR/laptop-power.timer" \
+        "$SYSTEMD_DIR/laptop-power-sleep.service" \
+        "$ACPI_EVENTS_DIR/laptop-power" \
+        "$UDEV_RULES_DIR/80-laptop-power.rules"
+}
+
+main() {
+    (( EUID == 0 )) || { fail 'Run as root.'; return 1; }
+    [[ -x $POLICY_COMMAND ]] || {
+        fail "$POLICY_COMMAND is missing or not executable; clone the repository into $REPO_DIR first."
+        return 1
+    }
+
+    ensure_acpid
+    write_configuration
+
+    systemctl daemon-reload
+    udevadm control --reload-rules
+    systemctl enable --now acpid.service
+    systemctl reload-or-restart acpid.service
+    systemctl enable laptop-power-sleep.service
+    systemctl enable --now laptop-power.timer
+    systemctl start laptop-power.service
+
+    echo 'Laptop power automation installed.'
+    echo 'Check it with: systemctl status laptop-power.timer laptop-power.service'
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+    main "$@"
+fi
