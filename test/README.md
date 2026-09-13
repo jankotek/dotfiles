@@ -55,9 +55,10 @@ be run as root.
 |------|---------------|
 | `browser-vm.bats` | Offline fixtures for shared `/opt` Chrome and Brave Origin desktop/PATH integration, including absent-browser no-op behavior |
 | `model-presets.bats` | Offline checks for caller-relative model downloads, Qwen generation/embedding presets, slot sizing, and Muse BF16 KV cache |
-| `update-opt.bats` | Downloads Herdr, Codex, Grok, Pi, Claude Code, Obsidian, and Fresh Editor into temporary `JAN_OPT` trees; verifies native binaries, publisher checksums, version tracking, and idempotent re-runs (network-heavy) |
-| `update-opt-all.bats` | Runs the complete default `host-optupdate` installation and verifies every expected executable, including all Corretto JDKs (CI-only; very network-heavy) |
+| `update-opt.bats` | Downloads Herdr, Mjolnir, Codex, Grok, Pi, Claude Code, Obsidian, and Fresh Editor into temporary `JAN_OPT` trees; verifies native binaries, publisher checksums, version tracking, and idempotent re-runs (network-heavy) |
+| `update-opt-all.bats` | Runs the complete default `optupdate` installation and verifies every expected executable, including the complete Mjolnir bundle and all Corretto JDKs (CI-only; very network-heavy) |
 | `update-opt-idea-upgrade.bats` | Uses a tiny offline fixture to verify upgrade from legacy Community IDEA, idempotence, stale-file removal, and preservation after checksum or activation failure |
+| `update-opt-mjolnir.bats` | Uses a tiny offline tar.gz fixture to verify the complete Mjolnir bundle, checksum/version tracking, idempotence, and repair of missing workers |
 | `utilities.bats` | Fixture checks for utility help, dotfile dry-runs, missing-user guidance, and atomic verified downloads |
 | `repo-policy.bats` | Fast, fixture-only checks for canonical dotfiles, error traps, download policy, and provisioning safety limits |
 | `pod-subid-allocation.bats` | Fixture-only unit tests for non-overlapping subordinate UID/GID allocation; does not require root |

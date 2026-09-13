@@ -12,8 +12,8 @@ load ../helpers
     assert_executable /usr/local/sbin/distro-upgrade
 }
 
-@test "host-optupdate is available via symlink" {
-    assert_executable /usr/local/sbin/host-optupdate
+@test "optupdate is available via symlink" {
+    assert_executable /usr/local/sbin/optupdate
 }
 
 @test "terminator is installed" {

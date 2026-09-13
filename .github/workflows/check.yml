@@ -40,7 +40,8 @@ jobs:
             test/utils/model-presets.bats \
             test/utils/pod-subid-allocation.bats \
             test/utils/repo-policy.bats \
-            test/utils/update-opt-idea-upgrade.bats
+            test/utils/update-opt-idea-upgrade.bats \
+            test/utils/update-opt-mjolnir.bats
 
   portable-tools:
     runs-on: ubuntu-latest

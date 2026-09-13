@@ -37,7 +37,7 @@ Personal dotfiles and system provisioning repo. Checked out at `/opt/jan` on tar
 - PATH commands in `usr/bin/` and `usr/sbin/` use domain-first kebab-case stems
   (`vm-gui`, `pod-setup`, `distro-upgrade`); no `jan-` brand prefix and no
   `.sh` suffix. Vendored binaries keep the upstream name (`starship`)
-- `host-optupdate` downloads portable tools into `/opt/` with `.version` file tracking
+- `optupdate` downloads portable tools into `/opt/` with `.version` file tracking
 - `distro-upgrade` is distro-agnostic: handles zypper (openSUSE), dnf (Fedora), apt (Ubuntu)
 - Setup scripts must check `systemd-detect-virt` before doing VM-specific operations
 - Shell configs exist for both bash (`.bashrc`) and fish (`config.fish`) — keep them in sync

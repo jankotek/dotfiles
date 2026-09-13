@@ -74,7 +74,7 @@ run_idea_update() {
         FIXTURE_DOWNLOAD_LOG="$FIXTURE_DOWNLOAD_LOG" \
         FIXTURE_MV_FAILURE_LOG="$FIXTURE_MV_FAILURE_LOG" \
         FAIL_IDEA_ACTIVATION="${FAIL_IDEA_ACTIVATION:-0}" \
-        "$OPT_JAN/usr/sbin/host-optupdate" idea
+        "$OPT_JAN/usr/sbin/optupdate" idea
 }
 
 @test "existing Community install upgrades to unified IntelliJ IDEA" {

@@ -22,6 +22,7 @@ retired_bin=(
 
 retired_sbin=(
     create-cleanup-service.sh
+    host-optupdate
     jan-console-font
     jan-console-font-apply
     jan-console-framebuffer

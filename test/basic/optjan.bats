@@ -27,8 +27,8 @@ load ../helpers
     assert_executable "$OPT_JAN/usr/sbin/distro-upgrade"
 }
 
-@test "host-optupdate script exists in repo" {
-    assert_executable "$OPT_JAN/usr/sbin/host-optupdate"
+@test "optupdate script exists in repo" {
+    assert_executable "$OPT_JAN/usr/sbin/optupdate"
 }
 
 @test "/home is 0755" {

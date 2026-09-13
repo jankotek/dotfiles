@@ -18,25 +18,32 @@ load ../helpers
 
 @test "aria2 is installed and used for artifact downloads" {
     assert_file_contains "$OPT_JAN/setup/common-cli-packages.sh" '^[[:space:]]*aria2$'
-    assert_file_contains "$OPT_JAN/usr/sbin/host-optupdate" 'command -v aria2c'
-    assert_file_contains "$OPT_JAN/usr/sbin/host-optupdate" 'download_file "\$url"'
+    assert_file_contains "$OPT_JAN/usr/sbin/optupdate" 'command -v aria2c'
+    assert_file_contains "$OPT_JAN/usr/sbin/optupdate" 'download_file "\$url"'
+}
+
+@test "portable updater uses the canonical optupdate command name" {
+    [[ -x "$OPT_JAN/usr/sbin/optupdate" ]]
+    [[ ! -e "$OPT_JAN/usr/sbin/host-optupdate" ]]
+    assert_file_contains "$OPT_JAN/setup/retire-path-util-names.sh" \
+        '^[[:space:]]*host-optupdate$'
 }
 
 @test "default CLI provisioning installs Starship and updates Fresh through opt" {
     assert_file_contains "$OPT_JAN/setup/common-cli-packages.sh" \
         '^[[:space:]]*starship$'
-    assert_file_contains "$OPT_JAN/usr/sbin/host-optupdate" \
+    assert_file_contains "$OPT_JAN/usr/sbin/optupdate" \
         '^ALL_TOOLS=.* fresh '
-    assert_file_contains "$OPT_JAN/usr/sbin/host-optupdate" \
+    assert_file_contains "$OPT_JAN/usr/sbin/optupdate" \
         'download_single_binary "Fresh Editor" "fresh"'
     assert_file_contains "$OPT_JAN/test/basic/cli.bats" \
         'assert_command fresh'
 }
 
 @test "portable updater uses the unified IntelliJ IDEA release feed" {
-    assert_file_contains "$OPT_JAN/usr/sbin/host-optupdate" \
+    assert_file_contains "$OPT_JAN/usr/sbin/optupdate" \
         'products/releases[?]code=IIU&latest=true&type=release'
-    assert_file_not_contains "$OPT_JAN/usr/sbin/host-optupdate" \
+    assert_file_not_contains "$OPT_JAN/usr/sbin/optupdate" \
         'products/releases[?]code=IIC&'
 }
 
