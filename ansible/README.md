@@ -39,7 +39,8 @@ ansible/
   vars/Debian.yml        selected by ansible_facts.os_family
   vars/Suse.yml
   pilot.yml              the pilot play (hosts: lab-vm)
-  vm-helpers.yml         every migrated role, in the order the shell calls them
+  vm-helpers.yml         the roles the VM provisioners call, in their order
+  host-helpers.yml       the roles no VM provisioner calls (opt-in, separate)
   roles/console_font/
   roles/laptop_power/
   roles/pkg_safety/
@@ -50,8 +51,17 @@ ansible/
 
 `vm-helpers.yml` runs the roles in the order `setup/vm-xub26` and
 `setup/vm-baseweed` call the helpers, with `vm_networkd` last because it
-replaces the running network. Every role carries a tag, so
-`--tags console_font` or `--skip-tags laptop_power` select a subset.
+replaces the running network. It contains **only** what those provisioners
+call. Every role carries a tag, so `--tags console_font` or
+`--skip-tags vm_networkd` select a subset.
+
+`host-helpers.yml` holds the helpers no VM provisioner calls —
+`install-tty12-menu`, `install-tmp-clean`, `install-laptop-power` — and is a
+separate play, not a tag. A tag does not make an unconditionally included role
+opt-in: while `laptop_power` sat in the VM play, the documented default
+invocation always failed at its final `laptop-power.service` start (that
+command needs power/lid/CPU interfaces a lab guest does not have) and
+`vm_networkd` never ran.
 
 Var files are named after the `os_family` fact (`Debian`, `Suse`), not after
 distribution names, because that is what `vars_files` resolves.
@@ -65,6 +75,7 @@ Always through the supervisor, as root, inside a disposable VM:
 /opt/jan/setup/bootstrap vm-helpers
 /opt/jan/setup/bootstrap vm-helpers --check --diff       # runtime must already be present
 /opt/jan/setup/bootstrap vm-helpers --tags console_font
+/opt/jan/setup/bootstrap host-helpers                    # opt-in, host-oriented
 ```
 
 `setup/bootstrap`:

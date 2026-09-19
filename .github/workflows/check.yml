@@ -93,4 +93,6 @@ jobs:
 
       - name: ansible-playbook --syntax-check
         working-directory: ansible
-        run: ansible-playbook -i inventory.yml --syntax-check pilot.yml
+        run: |
+          ansible-playbook -i inventory.yml --syntax-check \
+            pilot.yml vm-helpers.yml host-helpers.yml

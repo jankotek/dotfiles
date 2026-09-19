@@ -2,7 +2,7 @@
 #
 # setup/bootstrap — supervisor for the Ansible plays.
 #
-# Usage: setup/bootstrap pilot|vm-helpers|vm|host [--check] [--diff]
+# Usage: setup/bootstrap pilot|vm-helpers|host-helpers|vm|host [--check] [--diff]
 #                        [--tags LIST] [--skip-tags LIST] [-v|-vv|-vvv]
 #
 # Only the flags listed above are accepted; anything else exits 2. `vm` and
@@ -36,7 +36,7 @@ readonly COLLECTIONS_DIR=/usr/local/lib/opt-jan-collections
 readonly SUPPORTED_VIRT_TYPES=" kvm qemu "
 
 usage() {
-    echo "Usage: $0 pilot|vm-helpers|vm|host [--check] [--diff] [--tags LIST] [--skip-tags LIST] [-v|-vv|-vvv]" >&2
+    echo "Usage: $0 pilot|vm-helpers|host-helpers|vm|host [--check] [--diff] [--tags LIST] [--skip-tags LIST] [-v|-vv|-vvv]" >&2
     exit 2
 }
 
@@ -126,7 +126,7 @@ profile=$1
 shift
 
 case "$profile" in
-    pilot|vm-helpers|vm|host) ;;
+    pilot|vm-helpers|host-helpers|vm|host) ;;
     -h|--help) usage ;;
     *) echo "ERROR: unknown profile: $profile" >&2; usage ;;
 esac

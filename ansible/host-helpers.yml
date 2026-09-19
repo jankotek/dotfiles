@@ -1,0 +1,69 @@
+---
+# The helpers no VM provisioner calls: install-tty12-menu, install-tmp-clean
+# and install-laptop-power. setup/host-weed-kde calls install-tty12-menu; the
+# other two are run by hand on the machines that need them.
+#
+# They are a separate play precisely so the default VM invocation cannot pull
+# them in: laptop-power needs power/lid/CPU interfaces a lab guest does not
+# have, and its final start fails there exactly as the shell helper's does.
+# The helpers themselves are unchanged and still the supported path.
+#
+# The supervisor owns the qemu-guest-agent guard. This play only verifies the
+# inherited token and never touches qemu-guest-agent.service.
+
+- name: Host-oriented helper roles
+  hosts: lab-vm
+  gather_facts: true
+  vars_files:
+    - "vars/{{ ansible_facts.os_family }}.yml"
+
+  pre_tasks:
+    - name: Refuse to run outside a KVM/QEMU guest
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.virtualization_role == 'guest'
+          - ansible_facts.virtualization_type in ['kvm', 'qemu']
+        fail_msg: >-
+          this play only runs in a KVM/QEMU guest (role={{
+          ansible_facts.virtualization_role }},
+          type={{ ansible_facts.virtualization_type }})
+      tags: [always]
+
+    - name: Verify the guest-agent guard token inherited from the supervisor
+      ansible.builtin.command:
+        cmd: /usr/local/sbin/qga-guard verify {{ lookup('ansible.builtin.env', 'JAN_QGA_GUARD_TOKEN') | quote }}
+      changed_when: false
+      when: not ansible_check_mode
+      tags: [always]
+
+  tasks:
+    - name: The tty12 menu and the /tmp cleaner
+      ansible.builtin.include_role:
+        name: systemd_units
+        apply:
+          tags: [host_units]
+      vars:
+        systemd_units_list:
+          # install-tty12-menu starts it; a start never disturbs a running one.
+          - name: tty12-menu
+            kind: service
+            enable: true
+            start: true
+          # install-tmp-clean enables only; it runs at the next boot.
+          - name: tmp-clean
+            kind: service
+            enable: true
+            start: false
+      tags: [host_units]
+
+    - name: Laptop power automation
+      ansible.builtin.include_role:
+        name: laptop_power
+        apply:
+          tags: [laptop_power]
+      tags: [laptop_power]
+
+  post_tasks:
+    - name: Flush remaining handlers while still under the guard
+      ansible.builtin.meta: flush_handlers
+      tags: [always]

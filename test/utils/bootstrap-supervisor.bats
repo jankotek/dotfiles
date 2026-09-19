@@ -263,7 +263,7 @@ STUB
 
 @test "every accepted profile has a playbook, and vm-helpers is the VM one" {
     local profile
-    for profile in pilot vm-helpers; do
+    for profile in pilot vm-helpers host-helpers; do
         assert_file "$OPT_JAN/ansible/$profile.yml"
         assert_file_contains "$OPT_JAN/setup/bootstrap" "$profile"
     done

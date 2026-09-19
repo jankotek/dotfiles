@@ -3,11 +3,15 @@
 # provisioners call them. This play exists to compare the roles against the
 # helpers; the helpers themselves are unchanged and still the supported path.
 #
-# Order follows setup/vm-xub26 and setup/vm-baseweed: units, console font,
-# package safety, XDG directories, and systemd-networkd last, after every
-# network-dependent step has finished. install-tty12-menu, install-tmp-clean
-# and install-laptop-power are not called by the VM provisioners, so their
-# roles sit between those two groups and carry their own tags.
+# This play contains exactly what setup/vm-xub26 and setup/vm-baseweed call,
+# in their order: units, console font, package safety, XDG directories, and
+# systemd-networkd last, after every network-dependent step has finished.
+#
+# install-tty12-menu, install-tmp-clean and install-laptop-power are NOT
+# called by the VM provisioners and live in host-helpers.yml. A tag does not
+# make an unconditionally included role opt-in, and laptop_power in particular
+# needs power/lid/CPU interfaces a lab guest does not have, so including it
+# here made the default invocation fail before networking ever ran.
 #
 # The supervisor owns the qemu-guest-agent guard. This play only verifies the
 # inherited token and never touches qemu-guest-agent.service.
@@ -81,34 +85,6 @@
           tags: [xdg]
       tags: [xdg]
 
-    # Host-oriented helpers, not called by the VM provisioners.
-    - name: The tty12 menu and the /tmp cleaner
-      ansible.builtin.include_role:
-        name: systemd_units
-        apply:
-          tags: [host_units]
-      vars:
-        systemd_units_list:
-          # install-tty12-menu starts it; a start never disturbs a running one.
-          - name: tty12-menu
-            kind: service
-            enable: true
-            start: true
-          # install-tmp-clean enables only; it runs at the next boot.
-          - name: tmp-clean
-            kind: service
-            enable: true
-            start: false
-      tags: [host_units]
-
-    - name: Laptop power automation
-      ansible.builtin.include_role:
-        name: laptop_power
-        apply:
-          tags: [laptop_power]
-      tags: [laptop_power]
-
-    # Last, as in the shell provisioners: this replaces the running network.
     - name: Networking through systemd-networkd
       ansible.builtin.include_role:
         name: vm_networkd
