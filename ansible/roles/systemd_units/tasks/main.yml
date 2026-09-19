@@ -1,16 +1,30 @@
 ---
 # Replaces the "write a unit file, daemon-reload, enable" installers in
-# usr/sbin (install-tty11-root first). One template per unit, service and timer
-# kinds, and an explicit activation policy per unit.
+# usr/sbin. One template per unit, service and timer kinds, and an explicit
+# enable and start policy per unit.
+#
+# Schema, all keys required except `remove`:
+#   name:    unit name without suffix
+#   kind:    service | timer
+#   enable:  true -> systemctl enable; false -> enablement is not touched
+#            (units without an [Install] section, such as laptop-power.service
+#            and laptop-power-event.service, must use false)
+#   start:   true -> systemctl start (never restart; console units must not be
+#            pulled out from under a live login)
+#   remove:  optional list of retired unit filenames this unit supersedes;
+#            each is disabled and stopped before its file is deleted
 
-- name: Every managed unit must declare name, kind and start explicitly
+- name: Every managed unit must declare name, kind, enable and start explicitly
   ansible.builtin.assert:
     that:
       - item.name is defined
       - item.kind is defined
       - item.kind in ['service', 'timer']
+      - item.enable is defined
+      - item.enable is boolean
       - item.start is defined
       - item.start is boolean
+      - item.remove is not defined or item.remove is sequence
     fail_msg: "invalid systemd_units_list entry: {{ item }}"
   loop: "{{ systemd_units_list }}"
   loop_control:
@@ -28,13 +42,35 @@
   register: systemd_units_present
   check_mode: false
 
-- name: Remove retired units superseded by a managed unit
-  ansible.builtin.file:
+- name: Inspect the retired units
+  ansible.builtin.stat:
     path: "/etc/systemd/system/{{ item.1 }}"
-    state: absent
   loop: "{{ systemd_units_list | subelements('remove', skip_missing=True) }}"
   loop_control:
     label: "{{ item.1 }}"
+  register: systemd_units_retired
+  check_mode: false
+
+# Ordering matters: a retired unit is disabled and stopped while systemd still
+# knows about it, and only then is its file removed. Deleting the file first
+# would leave a running process and a dangling wants-link behind.
+- name: Disable and stop the retired units
+  ansible.builtin.systemd_service:
+    name: "{{ item.item.1 }}"
+    enabled: false
+    state: stopped
+  loop: "{{ systemd_units_retired.results }}"
+  loop_control:
+    label: "{{ item.item.1 }}"
+  when: item.stat.exists
+
+- name: Remove the retired unit files
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ item.item.1 }}"
+    state: absent
+  loop: "{{ systemd_units_retired.results }}"
+  loop_control:
+    label: "{{ item.item.1 }}"
   notify: Reload systemd for opt-jan managed units
 
 - name: Install unit files
@@ -58,20 +94,27 @@
 - name: Report the enable and start deferred to a real run
   ansible.builtin.debug:
     msg: >-
-      {{ item.item.name }}.{{ item.item.kind }} would be enabled{{
-      ' and started' if item.item.start else '' }} once the unit file exists
+      {{ item.item.name }}.{{ item.item.kind }} would be
+      {{ ['enabled' if item.item.enable else None, 'started' if item.item.start else None]
+         | reject('none') | list | join(' and ') | default('left alone', true) }}
+      once the unit file exists
   loop: "{{ systemd_units_present.results }}"
   loop_control:
     label: "{{ item.item.name }}.{{ item.item.kind }}"
   when: ansible_check_mode and not item.stat.exists
   changed_when: true
 
-- name: Enable units, and start only those whose policy says so
+# `enable: false` means "do not touch enablement", not "disable": a unit
+# without an [Install] section cannot be enabled or disabled, and the shell
+# helpers never disable the units they install.
+- name: Enable and start units according to their policy
   ansible.builtin.systemd_service:
     name: "{{ item.item.name }}.{{ item.item.kind }}"
-    enabled: true
+    enabled: "{{ true if item.item.enable else omit }}"
     state: "{{ 'started' if item.item.start else omit }}"
   loop: "{{ systemd_units_present.results }}"
   loop_control:
     label: "{{ item.item.name }}.{{ item.item.kind }}"
-  when: not (ansible_check_mode and not item.stat.exists)
+  when:
+    - item.item.enable or item.item.start
+    - not (ansible_check_mode and not item.stat.exists)

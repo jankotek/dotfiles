@@ -1,0 +1,11 @@
+[Unit]
+Description=Reapply laptop power policy every 10 minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=10min
+AccuracySec=30s
+Unit=laptop-power.service
+
+[Install]
+WantedBy=timers.target

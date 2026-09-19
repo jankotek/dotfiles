@@ -1,0 +1,10 @@
+[Unit]
+Description=Apply and verify laptop power policy after hardware events
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStartPre=-{{ laptop_power_command }}
+ExecStart=/usr/bin/sleep 30
+ExecStart={{ laptop_power_command }}
+TimeoutStartSec=60s

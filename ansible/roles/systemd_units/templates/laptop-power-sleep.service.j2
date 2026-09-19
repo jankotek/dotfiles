@@ -1,0 +1,16 @@
+[Unit]
+Description=Apply laptop power policy before sleep and after wakeup
+DefaultDependencies=no
+Before=sleep.target
+StopWhenUnneeded=yes
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=-{{ laptop_power_command }} --no-suspend
+ExecStop=-{{ laptop_power_command }} --no-suspend
+TimeoutStartSec=15s
+TimeoutStopSec=15s
+
+[Install]
+WantedBy=sleep.target

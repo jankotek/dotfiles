@@ -1,0 +1,10 @@
+[Unit]
+Description=Re-apply Terminus console font
+After=systemd-vconsole-setup.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/console-font-apply
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,21 @@
+[Unit]
+Description=Menu and info on TTY12
+
+[Service]
+ExecStart=/usr/local/sbin/tty12-menu
+TTYPath=/dev/tty12
+Type=simple
+User=root
+StandardInput=tty-force
+StandardOutput=tty
+StandardError=tty
+Type=idle
+Restart=always
+RestartSec=0
+KillMode=control-group
+IgnoreSIGPIPE=no
+TimeoutStopSec=90
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target

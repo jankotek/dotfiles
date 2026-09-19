@@ -1,0 +1,14 @@
+[Unit]
+Description=Clear /tmp folder on boot
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/find /tmp -mindepth 1 -xdev -delete
+RemainAfterExit=yes
+ProtectSystem=strict
+ReadWritePaths=/tmp
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=sysinit.target

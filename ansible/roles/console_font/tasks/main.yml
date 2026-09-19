@@ -1,0 +1,93 @@
+---
+# Mirrors usr/sbin/console-font: install the Terminus console font, point
+# vconsole.conf (and console-setup on the Debian family) at it, and enable a
+# oneshot that re-applies it at boot. Deliberately never runs setfont or
+# resets a live virtual console.
+
+- name: Install the console font packages
+  ansible.builtin.package:
+    name: "{{ console_font_packages }}"
+    state: present
+
+- name: Look for the Terminus console font files
+  ansible.builtin.find:
+    paths: "{{ console_font_dirs }}"
+    patterns: "{{ console_font_candidates | map('regex_replace', '^(.*)$', '*\\1*') | list }}"
+    recurse: true
+    file_type: any
+  register: console_font_found
+  check_mode: false
+
+# Same selection rule as the helper's `find ... | grep -q "$f"` loop: first
+# candidate whose name appears anywhere in a found path wins, else the
+# fallback.
+- name: Choose the console font
+  ansible.builtin.set_fact:
+    console_font_name: "{{ (console_font_candidates | select('in', _console_font_paths) | list
+                            + [console_font_fallback]) | first }}"
+  vars:
+    _console_font_paths: "{{ console_font_found.files | map(attribute='path') | join(' ') }}"
+
+- name: Stat the retired console-font unit
+  ansible.builtin.stat:
+    path: "/etc/systemd/system/{{ console_font_retired_unit }}"
+  register: console_font_retired_stat
+  check_mode: false
+
+- name: Disable and stop the retired console-font unit
+  ansible.builtin.systemd_service:
+    name: "{{ console_font_retired_unit }}"
+    enabled: false
+    state: stopped
+  when: console_font_retired_stat.stat.exists
+
+- name: Remove the retired console-font files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ console_font_retired_files }}"
+  notify: Reload systemd after console-font cleanup
+
+- name: Install the boot-time re-apply script
+  ansible.builtin.template:
+    src: console-font-apply.j2
+    dest: /usr/local/sbin/console-font-apply
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Point vconsole.conf at the chosen font
+  ansible.builtin.template:
+    src: vconsole.conf.j2
+    dest: /etc/vconsole.conf
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Stat the Debian-family console-setup defaults
+  ansible.builtin.stat:
+    path: /etc/default/console-setup
+  register: console_font_console_setup
+  check_mode: false
+
+# The helper only rewrites this file when the distribution already ships it.
+- name: Configure console-setup
+  ansible.builtin.template:
+    src: console-setup.j2
+    dest: /etc/default/console-setup
+    owner: root
+    group: root
+    mode: "0644"
+  when: console_font_console_setup.stat.exists
+
+- name: Install and enable the console-font unit
+  ansible.builtin.include_role:
+    name: systemd_units
+  vars:
+    systemd_units_list:
+      # The helper enables but never starts it: applying a font to a live
+      # virtual console can disturb the maintenance login running the setup.
+      - name: console-font
+        kind: service
+        enable: true
+        start: false

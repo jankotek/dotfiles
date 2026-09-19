@@ -1,0 +1,11 @@
+[Unit]
+Description=VM cleanup
+Before=shutdown.target graphical.target
+
+[Service]
+ExecStart=/usr/local/sbin/guest-cleanup
+Type=oneshot
+User=root
+
+[Install]
+WantedBy=default.target

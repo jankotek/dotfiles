@@ -1,0 +1,5 @@
+#!/bin/sh
+# Re-apply terminus font to vconsole.conf if it was overwritten
+grep -q "FONT={{ console_font_name }}" /etc/vconsole.conf 2>/dev/null && exit 0
+sed -i "s/^FONT=.*/FONT={{ console_font_name }}/" /etc/vconsole.conf 2>/dev/null ||     echo "FONT={{ console_font_name }}" >> /etc/vconsole.conf
+setfont {{ console_font_name }} 2>/dev/null || true

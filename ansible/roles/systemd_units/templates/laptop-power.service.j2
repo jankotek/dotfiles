@@ -1,0 +1,7 @@
+[Unit]
+Description=Apply laptop power policy
+
+[Service]
+Type=oneshot
+ExecStart={{ laptop_power_command }}
+TimeoutStartSec=30s

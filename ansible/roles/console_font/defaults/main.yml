@@ -1,0 +1,20 @@
+---
+# Mirrors usr/sbin/console-font. Candidate order is significant: the helper
+# takes the first name that appears anywhere under the console font
+# directories, and falls back to ter-v18b when none is found.
+console_font_candidates:
+  - ter-v18b
+  - ter-v18n
+  - ter-118b
+  - ter-118n
+console_font_fallback: ter-v18b
+console_font_dirs:
+  - /usr/share/kbd/consolefonts
+  - /usr/lib/kbd/consolefonts
+  - /usr/share/consolefonts
+console_font_keymap: us
+# Names written by checkouts predating the kebab-case rename.
+console_font_retired_unit: jan-console-font.service
+console_font_retired_files:
+  - /etc/systemd/system/jan-console-font.service
+  - /usr/local/sbin/jan-console-font-apply

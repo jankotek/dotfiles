@@ -43,6 +43,7 @@
           # run can ever pull a live root console out from under a session.
           - name: tty11-root
             kind: service
+            enable: true
             start: false
 
   post_tasks:
