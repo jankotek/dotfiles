@@ -5,9 +5,10 @@ This tree is a **pilot**, not the provisioning path. `setup/host-weed-kde`,
 and remain the supported way to provision a host or a VM. Nothing here is
 called by them, by the bats suites, or by the deploy harnesses.
 
-It exists to answer one question from the migration plan: do two real roles in
-Ansible cost less to maintain than the shell they replace, and is the change
-report useful? The two roles cover work that is duplicated today:
+It exists to answer one question from the migration plan: do these roles cost
+less to maintain than the shell they mirror, and is the change report useful?
+Each role is measured against the helper it mirrors, and every role has been
+compared against that helper on a pair of disposable Tumbleweed clones.
 
 - `roles/xdg_user_dirs` — the `/etc/xdg/user-dirs.defaults` heredoc that
   appears verbatim in three scripts, and the `configure-user-dirs()` function
@@ -15,8 +16,17 @@ report useful? The two roles cover work that is duplicated today:
   `setup/vm-baseweed`'s semantics: regular login accounts rooted directly under
   `/home`, prefer `jan`, otherwise require exactly one, fail on ambiguity.
 - `roles/systemd_units` — the "write a unit file, daemon-reload, enable"
-  installers. The first unit is `tty11-root`, with the unit text taken
-  byte-for-byte from `usr/sbin/install-tty11-root`.
+  installers (`install-tty11-root`, `install-tty12-menu`,
+  `install-guest-cleanup`, `install-tmp-clean`, the `console-font` unit and the
+  four `install-laptop-power` units). Every unit text is byte-identical to what
+  its installer writes. Each entry declares `enable` and `start` explicitly and
+  may list retired units it supersedes, which are disabled and stopped before
+  their files are removed.
+- `roles/console_font` — `usr/sbin/console-font`.
+- `roles/pkg_safety` — `usr/sbin/setup-pkg-safety`.
+- `roles/vm_networkd` — `usr/sbin/setup-vm-networkd`.
+- `roles/laptop_power` — `usr/sbin/install-laptop-power` (the `laptop-power`
+  policy engine itself stays bash).
 
 ## Layout
 
@@ -29,9 +39,19 @@ ansible/
   vars/Debian.yml        selected by ansible_facts.os_family
   vars/Suse.yml
   pilot.yml              the pilot play (hosts: lab-vm)
-  roles/xdg_user_dirs/
+  vm-helpers.yml         every migrated role, in the order the shell calls them
+  roles/console_font/
+  roles/laptop_power/
+  roles/pkg_safety/
   roles/systemd_units/
+  roles/vm_networkd/
+  roles/xdg_user_dirs/
 ```
+
+`vm-helpers.yml` runs the roles in the order `setup/vm-xub26` and
+`setup/vm-baseweed` call the helpers, with `vm_networkd` last because it
+replaces the running network. Every role carries a tag, so
+`--tags console_font` or `--skip-tags laptop_power` select a subset.
 
 Var files are named after the `os_family` fact (`Debian`, `Suse`), not after
 distribution names, because that is what `vars_files` resolves.
@@ -42,7 +62,9 @@ Always through the supervisor, as root, inside a disposable VM:
 
 ```bash
 /opt/jan/setup/bootstrap pilot
-/opt/jan/setup/bootstrap pilot --check --diff     # requires the runtime already present
+/opt/jan/setup/bootstrap vm-helpers
+/opt/jan/setup/bootstrap vm-helpers --check --diff       # runtime must already be present
+/opt/jan/setup/bootstrap vm-helpers --tags console_font
 ```
 
 `setup/bootstrap`:
@@ -106,6 +128,13 @@ not-yet-existing unit.
   probes, because the command itself never runs there.
 - The `systemd_units` handler is named for its role so a future role adding a
   reload handler cannot collide with it; handler names are global in a play.
+- Every role is included with `apply: { tags: [...] }`. Tags on a plain
+  `include_role` apply to the include task only, so `--tags console_font` would
+  select the include and then skip every task inside it.
+- Two tasks are honestly non-convergent, and so is the shell they mirror:
+  `guest-cleanup.service` is a `Type=oneshot` without `RemainAfterExit` that
+  `install-guest-cleanup` starts on every run, and `laptop-power.service` is
+  the same shape. Expect `changed=1` per such unit on a converged run.
 - Ansible caches, logs and collections stay off `/opt/jan`.
 
 ## CI
