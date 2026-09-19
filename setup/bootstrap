@@ -2,11 +2,12 @@
 #
 # setup/bootstrap — supervisor for the Ansible plays.
 #
-# Usage: setup/bootstrap pilot|vm|host [ansible-playbook args...]
+# Usage: setup/bootstrap pilot|vm-helpers|vm|host [--check] [--diff]
+#                        [--tags LIST] [--skip-tags LIST] [-v|-vv|-vvv]
 #
-# Phase 0 ships pilot.yml only; `vm` and `host` are accepted names so callers
-# and documentation do not have to change later, but they fail until the
-# corresponding play exists.
+# Only the flags listed above are accepted; anything else exits 2. `vm` and
+# `host` are accepted profile names so callers and documentation do not have to
+# change later, but they fail until the corresponding play exists.
 #
 # The supervisor is the only process that acquires or releases the QEMU
 # guest-agent guard. Ansible tasks are short-lived subprocesses, so the guard
@@ -35,88 +36,73 @@ readonly COLLECTIONS_DIR=/usr/local/lib/opt-jan-collections
 readonly SUPPORTED_VIRT_TYPES=" kvm qemu "
 
 usage() {
-    echo "Usage: $0 pilot|vm|host [ansible-playbook args...]" >&2
+    echo "Usage: $0 pilot|vm-helpers|vm|host [--check] [--diff] [--tags LIST] [--skip-tags LIST] [-v|-vv|-vvv]" >&2
     exit 2
 }
 
-# ---------- check-mode detection ----------
+valid_tag_list() {
+    [[ -n $1 && $1 != *[!a-zA-Z0-9_,-]* ]]
+}
+
+# ---------- argument handling ----------
 #
-# The supervisor and ansible-playbook must never disagree about check mode: a
-# missed --check would acquire the guard and install packages during what the
-# caller believes is a preview. Short options cluster (`-CD`, `-vvC`), so the
-# whole forwarded argument vector is classified here, and any form that cannot
-# be classified is rejected before a single byte is mutated.
+# The supervisor forwards a fixed, known set of flags and rejects everything
+# else with exit 2. An allowlist turns check-mode detection from a parsing
+# problem into a lookup, so the supervisor and ansible-playbook cannot disagree
+# about whether a run is a preview.
 #
-# Sets JAN_BOOTSTRAP_CHECK_MODE to 0 or 1. Returns 2 on an unclassifiable
-# argument.
+# Sets JAN_BOOTSTRAP_CHECK_MODE and JAN_BOOTSTRAP_PLAYBOOK_ARGS.
 
-# ansible-playbook short options that consume the rest of the cluster (or the
-# next argument) as their value.
-readonly SHORT_OPTS_WITH_VALUE="cefilMtTu"
-# Long options that consume the following argument as their value when they are
-# not written in --opt=value form.
-readonly LONG_OPTS_WITH_VALUE=" --inventory --inventory-file --limit --tags --skip-tags --extra-vars --module-path --forks --start-at-task --vault-id --vault-password-file --private-key --key-file --user --connection --timeout --ssh-common-args --ssh-extra-args --sftp-extra-args --scp-extra-args --become-method --become-user --become-password-file --connection-password-file --vault-ids "
-
-classify_playbook_args() {
-    local arg rest ch i
-    local expect_value=0
-
+parse_supervisor_args() {
+    local arg value
     JAN_BOOTSTRAP_CHECK_MODE=0
+    JAN_BOOTSTRAP_PLAYBOOK_ARGS=()
 
-    for arg in "$@"; do
-        if (( expect_value )); then
-            expect_value=0
-            continue
-        fi
-
+    while (( $# )); do
+        arg=$1
+        shift
         case "$arg" in
-            --check)
+            --check|-C)
                 JAN_BOOTSTRAP_CHECK_MODE=1
+                JAN_BOOTSTRAP_PLAYBOOK_ARGS+=(--check)
                 ;;
-            --check=*|--)
-                echo "ERROR: unsupported argument form: $arg" >&2
-                return 2
+            --diff|-D)
+                JAN_BOOTSTRAP_PLAYBOOK_ARGS+=(--diff)
                 ;;
-            --*=*)
+            -v|-vv|-vvv)
+                JAN_BOOTSTRAP_PLAYBOOK_ARGS+=("$arg")
                 ;;
-            --*)
-                if [[ $LONG_OPTS_WITH_VALUE == *" $arg "* ]]; then
-                    expect_value=1
+            --tags|-t|--skip-tags)
+                if (( $# == 0 )); then
+                    echo "ERROR: $arg needs a tag list" >&2
+                    return 2
                 fi
+                value=$1
+                shift
+                if ! valid_tag_list "$value"; then
+                    echo "ERROR: invalid tag list for $arg: $value" >&2
+                    return 2
+                fi
+                if [[ $arg == -t ]]; then
+                    arg=--tags
+                fi
+                JAN_BOOTSTRAP_PLAYBOOK_ARGS+=("$arg" "$value")
                 ;;
-            -?*)
-                rest=${arg#-}
-                for (( i = 0; i < ${#rest}; i++ )); do
-                    ch=${rest:i:1}
-                    if [[ $ch != [a-zA-Z] ]]; then
-                        echo "ERROR: unsupported short-option cluster: $arg" >&2
-                        return 2
-                    fi
-                    if [[ $ch == C ]]; then
-                        JAN_BOOTSTRAP_CHECK_MODE=1
-                    fi
-                    if [[ $SHORT_OPTS_WITH_VALUE == *"$ch"* ]]; then
-                        # The remainder of the cluster is this option's value.
-                        # An empty remainder means the value is the next arg.
-                        if (( i + 1 >= ${#rest} )); then
-                            expect_value=1
-                        fi
-                        break
-                    fi
-                done
+            --tags=*|--skip-tags=*)
+                value=${arg#*=}
+                if ! valid_tag_list "$value"; then
+                    echo "ERROR: invalid tag list for ${arg%%=*}: $value" >&2
+                    return 2
+                fi
+                JAN_BOOTSTRAP_PLAYBOOK_ARGS+=("${arg%%=*}" "$value")
                 ;;
             *)
-                echo "ERROR: unexpected positional argument: $arg" >&2
-                echo "       setup/bootstrap forwards options only; the playbook is chosen by the profile." >&2
+                echo "ERROR: unsupported argument: $arg" >&2
+                echo "       supported: --check|-C --diff|-D --tags|-t LIST --skip-tags LIST -v -vv -vvv" >&2
                 return 2
                 ;;
         esac
     done
-
-    if (( expect_value )); then
-        echo "ERROR: trailing option is missing its value" >&2
-        return 2
-    fi
     return 0
 }
 
@@ -125,7 +111,7 @@ profile=$1
 shift
 
 case "$profile" in
-    pilot|vm|host) ;;
+    pilot|vm-helpers|vm|host) ;;
     -h|--help) usage ;;
     *) echo "ERROR: unknown profile: $profile" >&2; usage ;;
 esac
@@ -142,9 +128,10 @@ readonly ANSIBLE_DIR
 PLAYBOOK="$ANSIBLE_DIR/$profile.yml"
 readonly PLAYBOOK
 
-classify_playbook_args "$@" || exit 2
+parse_supervisor_args "$@" || exit 2
 check_mode=$JAN_BOOTSTRAP_CHECK_MODE
 readonly check_mode
+playbook_args=("${JAN_BOOTSTRAP_PLAYBOOK_ARGS[@]}")
 
 if [[ ! -f $PLAYBOOK ]]; then
     echo "ERROR: no playbook for profile '$profile' in this phase: $PLAYBOOK" >&2
@@ -154,6 +141,7 @@ fi
 # ---------- guard ownership ----------
 
 guard_token=
+inherited_guard=0
 
 restore_guest_agent() {
     # qga-guard unmasks but never enables or starts the agent; the caller
@@ -180,6 +168,9 @@ release_guard() {
             fi
         fi
     fi
+    if (( inherited_guard )); then
+        echo "==> Inherited guard lease left with its owner; not restoring the agent here"
+    fi
     # The play's exit status wins; an agent failure only surfaces when the
     # play itself succeeded.
     exit "$rc"
@@ -198,18 +189,35 @@ if [[ $profile != host ]]; then
 fi
 
 # qga-guard must be on PATH before anything else happens. This is the same
-# symlink farm the shell provisioners lay down first. It is a real mutation of
-# /usr/local, so check mode skips it: the play's guard-verify task is skipped
-# in check mode and therefore does not need qga-guard on PATH.
+# symlink farm plus retired-name cleanup that every shell provisioner lays down
+# first. It is a real mutation of /usr/local, so check mode skips it: the
+# play's guard-verify task is skipped in check mode and therefore does not need
+# qga-guard on PATH.
 if (( check_mode )); then
     echo "==> --check: not writing the /usr/local symlink farm, not acquiring the"
     echo "    guest-agent guard, and not installing anything"
 else
     cp -f -s -r "$REPO_DIR/usr/"* /usr/local
+    "$REPO_DIR/setup/retire-path-util-names.sh"
+
     if [[ $profile != host ]]; then
-        echo "==> Acquiring the QEMU guest-agent guard"
-        guard_token=$(/usr/local/sbin/qga-guard acquire "$$")
-        export JAN_QGA_GUARD_TOKEN=$guard_token
+        # Nested-owner contract, as setup/vm-xub26 implements it: when an outer
+        # supervisor already owns the lease it stays the owner, and this run
+        # only proves the inherited token is still valid. guard_token stays
+        # empty, so the EXIT trap neither releases the lease nor restores the
+        # agent - that is the outer owner's job.
+        if [[ -n ${JAN_QGA_GUARD_TOKEN:-} ]]; then
+            echo "==> Verifying the inherited QEMU guest-agent guard lease"
+            if ! /usr/local/sbin/qga-guard verify "$JAN_QGA_GUARD_TOKEN"; then
+                echo "ERROR: inherited JAN_QGA_GUARD_TOKEN is not a live lease" >&2
+                exit 1
+            fi
+            inherited_guard=1
+        else
+            echo "==> Acquiring the QEMU guest-agent guard"
+            guard_token=$(/usr/local/sbin/qga-guard acquire "$$")
+            export JAN_QGA_GUARD_TOKEN=$guard_token
+        fi
     fi
 fi
 
@@ -321,7 +329,7 @@ fi
 export ANSIBLE_CONFIG="$ANSIBLE_DIR/ansible.cfg"
 cd "$ANSIBLE_DIR"
 
-echo "==> ansible-playbook -c local -i inventory.yml -l $limit_host $profile.yml $*"
+echo "==> ansible-playbook -c local -i inventory.yml -l $limit_host $profile.yml ${playbook_args[*]}"
 echo "==> log: $log_file"
 
 # `pipefail` alone returns the RIGHTMOST nonzero status, so a failing tee would
@@ -329,8 +337,8 @@ echo "==> log: $log_file"
 # status win; a logging failure only surfaces when the play succeeded. Either
 # way the EXIT trap releases the guard and preserves the status chosen here.
 set +e
-ansible-playbook -c local -i inventory.yml -l "$limit_host" "$profile.yml" "$@" \
-    2>&1 | tee "$log_file"
+ansible-playbook -c local -i inventory.yml -l "$limit_host" "$profile.yml" \
+    ${playbook_args[@]+"${playbook_args[@]}"} 2>&1 | tee "$log_file"
 pipe_status=("${PIPESTATUS[@]}")
 set -e
 

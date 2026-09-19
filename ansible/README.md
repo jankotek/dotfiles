@@ -50,13 +50,16 @@ Always through the supervisor, as root, inside a disposable VM:
 1. validates root and, for VM profiles, that `systemd-detect-virt --vm`
    reports `kvm` or `qemu` — the same allowlist the play asserts, enforced
    before any mutation;
-2. classifies the forwarded `ansible-playbook` arguments so the supervisor and
-   Ansible can never disagree about check mode (`--check`, `-C`, and any short
-   cluster containing `C` such as `-CD` or `-vvC`), rejecting argument forms it
-   cannot classify;
-3. lays down the `usr/` → `/usr/local` symlink farm so `qga-guard` is on PATH;
+2. accepts only `--check`/`-C`, `--diff`/`-D`, `--tags`/`-t LIST`,
+   `--skip-tags LIST` and `-v`/`-vv`/`-vvv`, and exits 2 on anything else, so
+   the supervisor and Ansible can never disagree about check mode;
+3. lays down the `usr/` → `/usr/local` symlink farm and runs
+   `setup/retire-path-util-names.sh`, exactly as the shell provisioners do;
 4. acquires the guest-agent guard with its own `$$` **before any package
-   work** and exports `JAN_QGA_GUARD_TOKEN`;
+   work** and exports `JAN_QGA_GUARD_TOKEN` — or, when
+   `JAN_QGA_GUARD_TOKEN` is already set, only verifies the inherited lease and
+   leaves ownership (and the agent restore) with the outer supervisor, which is
+   `setup/vm-ub26-xfce`'s nested-owner contract;
 5. installs `python3` + `ansible-core` (+ `python3-apt` on the Debian family)
    with `--no-install-recommends` / `--no-recommends`;
 6. compares every collection named in `requirements.yml` against the installed
