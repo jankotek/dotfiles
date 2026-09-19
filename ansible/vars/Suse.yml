@@ -19,3 +19,6 @@ desktop_font_packages:
 vm_networkd_nm_packages:
   - NetworkManager
   - NetworkManager-tui
+
+# setup/vm-baseweed chmods only the primary home private; vm-xub26 does all.
+skel_private_all_homes: false

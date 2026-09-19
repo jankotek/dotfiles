@@ -27,3 +27,7 @@ vm_networkd_nm_packages:
 # vm-baseweed removes nothing. Paths are relative to the primary home.
 skel_home_absent_paths:
   - .cache/sessions
+
+# setup/vm-xub26 chmods every /home/* private; vm-baseweed touches only the
+# primary home.
+skel_private_all_homes: true

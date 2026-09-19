@@ -4,9 +4,12 @@
 # absent, fail when the tree exists but its launcher or icon does not, then
 # link the launcher into PATH and install the desktop entry.
 
+# follow: true everywhere the shell's [[ -d ]]/[[ -f ]] would follow links:
+# a symlinked tree or icon is a valid installed browser.
 - name: Look for the browser trees
   ansible.builtin.stat:
     path: "{{ item.dir }}"
+    follow: true
   loop: "{{ browser_vm_browsers }}"
   loop_control:
     label: "{{ item.dir }}"
@@ -35,6 +38,7 @@
 - name: Check the browser icons
   ansible.builtin.stat:
     path: "{{ item.dir }}/{{ item.icon }}"
+    follow: true
   loop: "{{ browser_vm_present }}"
   loop_control:
     label: "{{ item.icon }}"
@@ -54,6 +58,8 @@
   loop_control:
     label: "{{ item.0.item.name }}"
 
+# The helpers return before install -d when the tree is absent, so an
+# absent-browser run must not touch the shared directories at all.
 - name: Create the applications and bin directories
   ansible.builtin.file:
     path: "{{ item }}"
@@ -64,6 +70,30 @@
   loop:
     - "{{ browser_vm_applications_dir }}"
     - "{{ browser_vm_bin_dir }}"
+  when: browser_vm_present | length > 0
+
+# A real directory at the link path is the one case where file+force and
+# `ln -sfn` diverge: Ansible would remove an empty directory where ln would
+# write inside it. Fail explicitly instead of either.
+- name: Check the existing link paths
+  ansible.builtin.stat:
+    path: "{{ browser_vm_bin_dir }}/{{ item.link }}"
+  loop: "{{ browser_vm_present }}"
+  loop_control:
+    label: "{{ item.link }}"
+  register: browser_vm_link_paths
+  check_mode: false
+
+- name: No link path may be a real directory
+  ansible.builtin.assert:
+    that:
+      - not item.stat.isdir | default(false)
+    fail_msg: >-
+      {{ item.item.link }}: {{ browser_vm_bin_dir }}/{{ item.item.link }} is a
+      directory; remove it or fix the browser tree before provisioning
+  loop: "{{ browser_vm_link_paths.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.link }}"
 
 - name: Link the browser launchers into PATH
   ansible.builtin.file:

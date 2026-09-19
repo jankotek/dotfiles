@@ -28,13 +28,21 @@ compared against that helper on a pair of disposable Tumbleweed clones.
   VM provisioners run: `rsync -a` into the primary home without `--delete`,
   `rsync -r` of `home-root/` into `/root`, the `/home` and `/root` modes,
   the recursive ownership repair, and the family-specific cleanup
-  (`~/.cache/sessions` on Debian only). Runs before `xdg_user_dirs` so the
-  synced `user-dirs.dirs` already exists when that role's template compares.
+  (`~/.cache/sessions` and all-homes privacy on Debian only). The home sync
+  excludes `.config/user-dirs.dirs`: the skeleton copy carries an
+  xdg-generated header the provisioners' `configure-user-dirs` overwrites
+  anyway, so `xdg_user_dirs` owns the home copy while `/etc/skel` keeps the
+  full skeleton file — the same end state the shell sequence produces. The
+  ownership repair runs with `follow: false` because skeleton symlinks (e.g.
+  `~/.agents/skills/*`) point into `/opt/jan`, matching `chown -R`'s physical
+  traversal; without it the repair would chown the checkout itself.
 - `roles/kernel_cmdline` — a `command:` wrapper around
   `usr/sbin/setup-kernel-tweaks`, which stays bash. The provisioners' `||
   echo WARNING non-fatal` becomes a visible play failure; rerun with
   `--skip-tags kernel` to proceed without it. `changed` follows the helper's
-  own "Already configured" output.
+  own "Already configured" output — on a guest whose GRUB setup takes the
+  helper's always-rewrite drop-in branch there is no converged path, so the
+  task truthfully keeps reporting changed there.
 - `roles/systemd_units` — the "write a unit file, daemon-reload, enable"
   installers (`install-tty11-root`, `install-tty12-menu`,
   `install-guest-cleanup`, `install-tmp-clean`, the `console-font` unit and the

@@ -4,9 +4,9 @@
 # require exactly one, fail on ambiguity.
 #
 # Shared by the roles that need the primary home (xdg_user_dirs, skel). It is
-# pulled in with a static import_role so the including role's tags propagate;
-# callers guard the import with `primary_user_name is not defined` so the discovery
-# runs at most once per play.
+# pulled in with a dynamic include_role guarded by `primary_user_name is not
+# defined` so discovery runs at most once per play; apply: tags: [always]
+# keeps the included tasks running under any caller tag selection.
 
 - name: Read the passwd database
   ansible.builtin.getent:

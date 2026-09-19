@@ -15,3 +15,7 @@ skel_empty_dirs: "{{ xdg_user_dirs_lowercase + ['media'] }}"
 # vm-xub26 removes ~/.cache/sessions; vm-baseweed removes nothing. The
 # per-family vars files set this.
 skel_home_absent_paths: []
+
+# Whether every /home/* is chmod 0700 (vm-xub26) or only the primary home
+# (vm-baseweed). The per-family vars files set this.
+skel_private_all_homes: false

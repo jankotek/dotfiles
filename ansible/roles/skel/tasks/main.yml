@@ -10,10 +10,13 @@
 # administrator override the repo replaces, but nothing the repo does not
 # manage (~/down, ~/doc, ~/.cache, ...) is ever removed.
 #
-# This role must run BEFORE xdg_user_dirs: the sync brings
-# .config/user-dirs.dirs from the skeleton, and the template task in
-# xdg_user_dirs then reports ok on identical content instead of rsync
-# re-copying over the template's mtime on every run.
+# This role runs BEFORE xdg_user_dirs, matching the provisioner call order.
+# The home sync excludes .config/user-dirs.dirs: the skeleton copy carries an
+# eight-line xdg-generated header the provisioner's configure-user-dirs
+# overwrites anyway, so syncing it would fight the xdg_user_dirs template on
+# every run. The exclusion keeps /etc/skel on the full skeleton file (it is
+# not excluded there, matching skel/install) while xdg_user_dirs owns the
+# home copy, exactly like the shell sequence.
 
 # Dynamic include for the same reason as xdg_user_dirs: `when` must gate the
 # include itself, and the inner apply: keeps the discovery running under any
@@ -33,20 +36,6 @@
     group: root
     mode: "0755"
 
-# synchronize does not support check mode, so the preview reports the pending
-# syncs instead of silently predicting no change.
-- name: Report the skeleton syncs deferred to a real run
-  ansible.builtin.debug:
-    msg: "{{ item.0 }} would be synchronised into {{ item.1 }} (no --delete)"
-  loop:
-    - ["{{ skel_source_dir }}/", /etc/skel]
-    - ["{{ skel_source_dir }}/", "{{ primary_user_home }}"]
-    - ["{{ skel_home_root_dir }}/", /root]
-  loop_control:
-    label: "{{ item.1 }}"
-  when: ansible_check_mode
-  changed_when: true
-
 # Before the sync: creating these after it would bump /etc/skel's mtime every
 # run, which the sync then "repairs" forever. With this order the directory
 # settles on the first run.
@@ -59,31 +48,41 @@
     mode: "0755"
   loop: "{{ skel_empty_dirs }}"
 
+# compress/delay_updates are synchronize defaults the shell's plain rsync
+# does not use; disabled for parity. (-F stays on: a .rsync-filter file in
+# skel/home would alter the sync, and none exists.)
 - name: Install the skeleton into /etc/skel
   ansible.posix.synchronize:
     src: "{{ skel_source_dir }}/"
     dest: /etc/skel
     delete: false
+    compress: false
+    delay_updates: false
     rsync_opts:
       - "--chown=root:root"
-  when: not ansible_check_mode
 
 # --no-owner/--no-group: the shell's `rsync -a` also propagates the checkout's
 # owner and group onto every managed file and then undoes it with `chown -R`.
 # Ownership policy lives in the "Repair ownership" task below, so the fight is
 # dropped at the source. -p is kept, so file modes are still enforced like the
 # shell's — including on the home directory itself, whose reset to the source
-# mode and repair to 0700 is the one residual change a converged run honestly
+# mode and repair to 0700 is the residual change a converged run honestly
 # reports, exactly as the shell performs it.
+#
+# --exclude keeps xdg_user_dirs the sole owner of ~/.config/user-dirs.dirs:
+# the skeleton file has an xdg-generated header the provisioner's
+# configure-user-dirs overwrites, so syncing it would fight the template.
 - name: Synchronise the skeleton into the primary home
   ansible.posix.synchronize:
     src: "{{ skel_source_dir }}/"
     dest: "{{ primary_user_home }}"
     delete: false
+    compress: false
+    delay_updates: false
     rsync_opts:
       - "--no-owner"
       - "--no-group"
-  when: not ansible_check_mode
+      - "--exclude=/.config/user-dirs.dirs"
 
 - name: Look for the root-home payload
   ansible.builtin.stat:
@@ -99,9 +98,9 @@
     delete: false
     archive: false
     recursive: true
-  when:
-    - not ansible_check_mode
-    - skel_home_root.stat.isdir | default(false)
+    compress: false
+    delay_updates: false
+  when: skel_home_root.stat.isdir | default(false)
 
 - name: Set home-root permissions
   ansible.builtin.file:
@@ -112,6 +111,7 @@
     - [/home, "0755"]
     - [/root, "0700"]
 
+# vm-xub26 chmods every /home/*; vm-baseweed touches only the primary home.
 - name: Enumerate the account homes
   ansible.builtin.find:
     paths: /home
@@ -119,6 +119,7 @@
     recurse: false
   register: skel_home_dirs
   check_mode: false
+  when: skel_private_all_homes
 
 - name: Every account home is private
   ansible.builtin.file:
@@ -128,7 +129,20 @@
   loop: "{{ skel_home_dirs.files | default([]) }}"
   loop_control:
     label: "{{ item.path }}"
+  when: skel_private_all_homes
 
+- name: The primary home is private
+  ansible.builtin.file:
+    path: "{{ primary_user_home }}"
+    state: directory
+    mode: "0700"
+  when: not skel_private_all_homes
+
+# follow: false is load-bearing, not cosmetic: the skeleton carries absolute
+# symlinks out of the home (e.g. ~/.agents/skills/* -> /opt/jan/agent/skills)
+# and recurse would otherwise chown those targets — the virtiofs checkout
+# itself. GNU chown -R uses physical (-P) traversal and only lchowns the
+# links, which is what this matches.
 - name: Repair ownership of the primary home
   ansible.builtin.file:
     path: "{{ primary_user_home }}"
@@ -136,6 +150,7 @@
     owner: "{{ primary_user_name }}"
     group: "{{ primary_user_group }}"
     recurse: true
+    follow: false
 
 - name: Remove family-specific stale paths from the primary home
   ansible.builtin.file:
