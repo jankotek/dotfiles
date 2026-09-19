@@ -1,24 +1,29 @@
 ---
-# Mirrors usr/sbin/setup-pkg-safety. Each entry is appended verbatim, in
-# order, to a file the helper appends to; `requires` names a command that must
-# be present for the file to be written at all.
+# Mirrors usr/sbin/setup-pkg-safety. `key` is the literal string the helper
+# greps for before deciding whether to touch the file at all; `lines` is the
+# block it appends, verbatim and in order, when that key is absent.
+# `requires` names a command that must be on PATH for the file to be managed.
 pkg_safety_files:
   - path: /etc/npmrc
+    key: "ignore-scripts=true"
     lines:
       - "# Supply chain safety: do not run install scripts"
       - "ignore-scripts=true"
   - path: /etc/pip.conf
+    key: "only-binary"
     lines:
       - "[global]"
       - "# Supply chain safety: refuse source distributions (no setup.py execution)"
       - "only-binary = :all:"
   - path: /etc/uv/uv.toml
     requires: uv
+    key: "only-binary"
     lines:
       - "# Supply chain safety: refuse source distributions"
       - "only-binary = true"
   - path: /etc/gemrc
     requires: gem
+    key: "no-document"
     lines:
       - "gem: --no-document"
 
