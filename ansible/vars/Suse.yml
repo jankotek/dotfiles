@@ -1,0 +1,16 @@
+---
+# Selected by ansible_facts.os_family == 'Suse' (openSUSE Tumbleweed).
+# Named after the os_family fact, not the distribution.
+os_profile: Suse
+
+# See vars/Debian.yml: installed by setup/bootstrap, not by the play.
+# Tumbleweed has no python3-apt equivalent; zypper needs no Python binding
+# because community.general.zypper drives the CLI.
+ansible_runtime_packages:
+  - python3
+  - ansible-core
+
+console_font_packages:
+  - terminus-bitmap-fonts
+desktop_font_packages:
+  - jetbrains-mono-fonts

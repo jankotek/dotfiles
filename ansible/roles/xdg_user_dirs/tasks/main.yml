@@ -1,0 +1,92 @@
+---
+# Replaces the three identical /etc/xdg/user-dirs.defaults heredocs in
+# setup/host-weed-kde, setup/vm-baseweed and setup/vm-xub26, plus the
+# configure-user-dirs() function duplicated between the two VM provisioners.
+
+- name: Discover the primary account
+  ansible.builtin.import_tasks: primary_user.yml
+
+- name: Install the system-wide lowercase XDG defaults
+  ansible.builtin.template:
+    src: user-dirs.defaults.j2
+    dest: /etc/xdg/user-dirs.defaults
+    owner: root
+    group: root
+    mode: "0644"
+
+# `.config` is appended here rather than kept in group_vars so the role never
+# depends on the skel role having created it first.
+- name: Create the lowercase XDG directories and .config in the primary home
+  ansible.builtin.file:
+    path: "{{ xdg_user_dirs_primary_home }}/{{ item }}"
+    state: directory
+    owner: "{{ xdg_user_dirs_primary_user }}"
+    group: "{{ xdg_user_dirs_primary_group }}"
+    mode: "0755"
+  loop: "{{ xdg_user_dirs_lowercase + ['.config'] }}"
+
+- name: Write the primary user's user-dirs.dirs
+  ansible.builtin.template:
+    src: user-dirs.dirs.j2
+    dest: "{{ xdg_user_dirs_primary_home }}/.config/user-dirs.dirs"
+    owner: "{{ xdg_user_dirs_primary_user }}"
+    group: "{{ xdg_user_dirs_primary_group }}"
+    mode: "0644"
+
+# `removes:` makes the module return without running rmdir when the directory
+# is already gone — but it still returns rc 0, so `changed_when: rc == 0` alone
+# would report a change on every converged run. The module returns
+# `start: null` when it did not run and a timestamp when it did, so
+# `start is not none` is the reliable "did this do anything" test for a real
+# run (`skipped` is not set on this path, and rc is 0 either way). rmdir is
+# then reported as changed only on rc 0, and only the expected "Directory not
+# empty" failure is suppressed — every other error still fails the play.
+# LC_ALL=C keeps that message match locale-independent.
+#
+# In check mode the command never runs at all, so `start` is always null and
+# this task alone would silently predict "no change" even for an empty
+# directory that a real run would remove. The two read-only probes below
+# supply that prediction instead; they are skipped outside check mode.
+- name: Remove the empty capitalised default directories
+  ansible.builtin.command:
+    cmd: rmdir -- {{ (xdg_user_dirs_primary_home ~ '/' ~ item) | quote }}
+    removes: "{{ xdg_user_dirs_primary_home }}/{{ item }}"
+  environment:
+    LC_ALL: C
+  loop: "{{ xdg_user_dirs_capitalised }}"
+  register: xdg_user_dirs_rmdir
+  changed_when: xdg_user_dirs_rmdir.start is not none and xdg_user_dirs_rmdir.rc == 0
+  failed_when: xdg_user_dirs_rmdir.start is not none
+    and xdg_user_dirs_rmdir.rc != 0
+    and 'not empty' not in xdg_user_dirs_rmdir.stderr
+
+- name: Find the capitalised default directories that still exist
+  ansible.builtin.find:
+    paths: "{{ xdg_user_dirs_primary_home }}"
+    patterns: "{{ xdg_user_dirs_capitalised }}"
+    file_type: directory
+    recurse: false
+  register: xdg_user_dirs_capitalised_found
+  check_mode: false
+  when: ansible_check_mode
+
+- name: Check whether each of them is empty
+  ansible.builtin.find:
+    paths: "{{ item.path }}"
+    file_type: any
+    hidden: true
+  loop: "{{ xdg_user_dirs_capitalised_found.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+  register: xdg_user_dirs_capitalised_contents
+  check_mode: false
+  when: ansible_check_mode
+
+- name: Report the capitalised directories a real run would remove
+  ansible.builtin.debug:
+    msg: "{{ item.item.path }} is empty and would be removed"
+  loop: "{{ xdg_user_dirs_capitalised_contents.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+  when: ansible_check_mode and item.matched | default(1) == 0
+  changed_when: true

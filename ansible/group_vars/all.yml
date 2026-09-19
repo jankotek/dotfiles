@@ -1,0 +1,118 @@
+---
+# Shared data for every opt-jan play.
+#
+# common_cli_packages is the YAML copy of the JAN_COMMON_CLI_PACKAGES array in
+# setup/common-cli-packages.sh. Both names resolve on Debian and Suse family
+# targets, so there is no per-family override for this list.
+common_cli_packages:
+  - mc
+  - htop
+  - git
+  - lazygit
+  - curl
+  - aria2
+  - powertop
+  - fish
+  - starship
+  - iotop
+  - ncdu
+  - nano
+  - mosh
+  - ripgrep
+  - rsync
+  - pwgen
+  - telnet
+  - jdupes
+  - just
+  - bats
+  - zim
+
+# /etc/xdg/user-dirs.defaults payload, byte-identical to the three heredocs in
+# setup/host-weed-kde, setup/vm-baseweed and setup/vm-xub26.
+xdg_user_dirs_defaults:
+  DESKTOP: desk
+  DOWNLOAD: down
+  DOCUMENTS: doc
+  TEMPLATES: doc/templates
+  PUBLICSHARE: media/share
+  MUSIC: media/music
+  PICTURES: media/pic
+  VIDEOS: media/video
+
+# Directories configure-user-dirs() creates in the primary home. `.config` is
+# deliberately NOT in this list: the xdg_user_dirs role appends it to the loop
+# itself (roles/xdg_user_dirs/tasks/main.yml) so the role never depends on the
+# skel role having run first, while this list stays a faithful copy of the
+# shell function's `mkdir -p` set.
+xdg_user_dirs_lowercase:
+  - desk
+  - down
+  - doc
+  - doc/templates
+  - media/share
+  - media/music
+  - media/pic
+  - media/video
+
+# setup/retire-path-util-names.sh, verbatim. Consumed by the optjan_usr role in
+# a later phase; kept here so the data has one home from the start.
+retired_bin:
+  - jan-clean-check
+  - jan-doctor
+  - jan-dotfiles-diff
+  - jan-download
+  - jan-greetd-session
+  - jan-plasma-session
+  - jan-start-xfce
+  - jan-vm-reset
+  - jan-vm-resize-display
+  - jan-vm-resize-display-loop
+  - jan-vm-smoke
+  - setup-pkg-largest
+  - simple-file-replace
+  - vm-start-and-wait
+
+retired_sbin:
+  - create-cleanup-service.sh
+  - host-optupdate
+  - jan-console-font
+  - jan-console-font-apply
+  - jan-console-framebuffer
+  - jan-create-lab-users
+  - jan-create-user
+  - jan-fix-virtman-scaling
+  - jan-host-monitors-fix-amdgpu
+  - jan-host-monitors-fix-edid
+  - jan-host-monitors-fix-groups
+  - jan-host-monitors-fix-kwin
+  - jan-install-brave
+  - jan-install-brave-origin
+  - jan-install-chrome
+  - jan-install-vivaldi
+  - jan-opensuse-weed-codecs
+  - jan-pod-destroy
+  - jan-pod-manage
+  - jan-pod-setup
+  - jan-qga-guard
+  - jan-randomize-user-passwords
+  - jan-scramble-user-password
+  - jan-setup-agetty
+  - jan-setup-greetd
+  - jan-setup-kernel-tweaks
+  - jan-setup-kernel-zbook
+  - jan-setup-pkg-safety
+  - jan-setup-strix-halo
+  - jan-setup-vm-networkd
+  - jan-sshd-cert-regenerate
+  - jan-sshd-disable-password-login
+  - jan-sshd-enable-root-login
+  - jan-systemd-tmp-clean
+  - jan-systemd-tty11-root
+  - jan-systemd-tty12-menu
+  - jan-systemd-vm-cleanup
+  - jan-ubuntu-remove-older-kernel
+  - jan-update-opt
+  - jan-upgrade
+  - install-brave-origin
+  - install-vivaldi
+  - vm-cleanup

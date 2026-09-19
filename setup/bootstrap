@@ -1,0 +1,347 @@
+#!/bin/bash
+#
+# setup/bootstrap — supervisor for the Ansible plays.
+#
+# Usage: setup/bootstrap pilot|vm|host [ansible-playbook args...]
+#
+# Phase 0 ships pilot.yml only; `vm` and `host` are accepted names so callers
+# and documentation do not have to change later, but they fail until the
+# corresponding play exists.
+#
+# The supervisor is the only process that acquires or releases the QEMU
+# guest-agent guard. Ansible tasks are short-lived subprocesses, so the guard
+# cannot be owned from inside a play (qga-guard keys the lease on owner PID
+# plus process start time, and its watchdog would release it mid-run). The
+# play verifies the inherited JAN_QGA_GUARD_TOKEN and never releases it.
+#
+# --check never installs software, never touches the guard, and never writes
+# to /usr/local. Run check mode only where the runtime already exists.
+
+set -Eeuo pipefail
+
+error_trap() {
+    local rc=$?
+    echo >&2 "${BASH_SOURCE[1]}:${BASH_LINENO[0]}: Command \`$BASH_COMMAND\` failed with exit code $rc"
+    exit "$rc"
+}
+trap error_trap ERR
+
+readonly LOG_DIR=/var/log/opt-jan
+# Off the /opt/jan share: it may be a writable virtiofs passthrough of the
+# host checkout, and guest-side installs must never write into it.
+readonly COLLECTIONS_DIR=/usr/local/lib/opt-jan-collections
+# systemd-detect-virt --vm values this pilot supports. The play asserts the
+# same set from ansible_facts as defence in depth.
+readonly SUPPORTED_VIRT_TYPES=" kvm qemu "
+
+usage() {
+    echo "Usage: $0 pilot|vm|host [ansible-playbook args...]" >&2
+    exit 2
+}
+
+# ---------- check-mode detection ----------
+#
+# The supervisor and ansible-playbook must never disagree about check mode: a
+# missed --check would acquire the guard and install packages during what the
+# caller believes is a preview. Short options cluster (`-CD`, `-vvC`), so the
+# whole forwarded argument vector is classified here, and any form that cannot
+# be classified is rejected before a single byte is mutated.
+#
+# Sets JAN_BOOTSTRAP_CHECK_MODE to 0 or 1. Returns 2 on an unclassifiable
+# argument.
+
+# ansible-playbook short options that consume the rest of the cluster (or the
+# next argument) as their value.
+readonly SHORT_OPTS_WITH_VALUE="cefilMtTu"
+# Long options that consume the following argument as their value when they are
+# not written in --opt=value form.
+readonly LONG_OPTS_WITH_VALUE=" --inventory --inventory-file --limit --tags --skip-tags --extra-vars --module-path --forks --start-at-task --vault-id --vault-password-file --private-key --key-file --user --connection --timeout --ssh-common-args --ssh-extra-args --sftp-extra-args --scp-extra-args --become-method --become-user --become-password-file --connection-password-file --vault-ids "
+
+classify_playbook_args() {
+    local arg rest ch i
+    local expect_value=0
+
+    JAN_BOOTSTRAP_CHECK_MODE=0
+
+    for arg in "$@"; do
+        if (( expect_value )); then
+            expect_value=0
+            continue
+        fi
+
+        case "$arg" in
+            --check)
+                JAN_BOOTSTRAP_CHECK_MODE=1
+                ;;
+            --check=*|--)
+                echo "ERROR: unsupported argument form: $arg" >&2
+                return 2
+                ;;
+            --*=*)
+                ;;
+            --*)
+                if [[ $LONG_OPTS_WITH_VALUE == *" $arg "* ]]; then
+                    expect_value=1
+                fi
+                ;;
+            -?*)
+                rest=${arg#-}
+                for (( i = 0; i < ${#rest}; i++ )); do
+                    ch=${rest:i:1}
+                    if [[ $ch != [a-zA-Z] ]]; then
+                        echo "ERROR: unsupported short-option cluster: $arg" >&2
+                        return 2
+                    fi
+                    if [[ $ch == C ]]; then
+                        JAN_BOOTSTRAP_CHECK_MODE=1
+                    fi
+                    if [[ $SHORT_OPTS_WITH_VALUE == *"$ch"* ]]; then
+                        # The remainder of the cluster is this option's value.
+                        # An empty remainder means the value is the next arg.
+                        if (( i + 1 >= ${#rest} )); then
+                            expect_value=1
+                        fi
+                        break
+                    fi
+                done
+                ;;
+            *)
+                echo "ERROR: unexpected positional argument: $arg" >&2
+                echo "       setup/bootstrap forwards options only; the playbook is chosen by the profile." >&2
+                return 2
+                ;;
+        esac
+    done
+
+    if (( expect_value )); then
+        echo "ERROR: trailing option is missing its value" >&2
+        return 2
+    fi
+    return 0
+}
+
+(( $# >= 1 )) || usage
+profile=$1
+shift
+
+case "$profile" in
+    pilot|vm|host) ;;
+    -h|--help) usage ;;
+    *) echo "ERROR: unknown profile: $profile" >&2; usage ;;
+esac
+
+if (( EUID != 0 )); then
+    echo "ERROR: setup/bootstrap must run as root" >&2
+    exit 1
+fi
+
+REPO_DIR="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+readonly REPO_DIR
+ANSIBLE_DIR="$REPO_DIR/ansible"
+readonly ANSIBLE_DIR
+PLAYBOOK="$ANSIBLE_DIR/$profile.yml"
+readonly PLAYBOOK
+
+classify_playbook_args "$@" || exit 2
+check_mode=$JAN_BOOTSTRAP_CHECK_MODE
+readonly check_mode
+
+if [[ ! -f $PLAYBOOK ]]; then
+    echo "ERROR: no playbook for profile '$profile' in this phase: $PLAYBOOK" >&2
+    exit 1
+fi
+
+# ---------- guard ownership ----------
+
+guard_token=
+
+restore_guest_agent() {
+    # qga-guard unmasks but never enables or starts the agent; the caller
+    # does, exactly as setup/vm-xub26 and setup/vm-ub26-xfce do today.
+    systemctl enable qemu-guest-agent.service || return
+    systemctl start qemu-guest-agent.service || return
+    systemctl is-enabled --quiet qemu-guest-agent.service || return
+    systemctl is-active --quiet qemu-guest-agent.service || return
+}
+
+release_guard() {
+    local rc=$? agent_rc=0
+    trap - EXIT ERR
+    if [[ -n $guard_token ]]; then
+        if ! /usr/local/sbin/qga-guard release "$guard_token"; then
+            echo "WARNING: failed to release the QEMU guest-agent guard; watchdog will retry" >&2
+        fi
+        guard_token=
+        restore_guest_agent || agent_rc=$?
+        if (( agent_rc != 0 )); then
+            echo "ERROR: qemu-guest-agent.service did not come back (rc=$agent_rc)" >&2
+            if (( rc == 0 )); then
+                rc=$agent_rc
+            fi
+        fi
+    fi
+    # The play's exit status wins; an agent failure only surfaces when the
+    # play itself succeeded.
+    exit "$rc"
+}
+trap release_guard EXIT
+
+# ---------- target validation (before any mutation) ----------
+
+if [[ $profile != host ]]; then
+    virt_type=$(systemd-detect-virt --vm 2>/dev/null || true)
+    if [[ $SUPPORTED_VIRT_TYPES != *" $virt_type "* ]]; then
+        echo "ERROR: the '$profile' profile needs a KVM/QEMU guest (systemd-detect-virt --vm said '${virt_type:-none}')" >&2
+        exit 1
+    fi
+    readonly virt_type
+fi
+
+# qga-guard must be on PATH before anything else happens. This is the same
+# symlink farm the shell provisioners lay down first. It is a real mutation of
+# /usr/local, so check mode skips it: the play's guard-verify task is skipped
+# in check mode and therefore does not need qga-guard on PATH.
+if (( check_mode )); then
+    echo "==> --check: not writing the /usr/local symlink farm, not acquiring the"
+    echo "    guest-agent guard, and not installing anything"
+else
+    cp -f -s -r "$REPO_DIR/usr/"* /usr/local
+    if [[ $profile != host ]]; then
+        echo "==> Acquiring the QEMU guest-agent guard"
+        guard_token=$(/usr/local/sbin/qga-guard acquire "$$")
+        export JAN_QGA_GUARD_TOKEN=$guard_token
+    fi
+fi
+
+# ---------- runtime ----------
+
+install_runtime() {
+    if command -v apt-get >/dev/null 2>&1; then
+        echo "==> Installing python3, python3-apt and ansible-core (apt)"
+        DEBIAN_FRONTEND=noninteractive apt-get update
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            python3 python3-apt ansible-core
+    elif command -v zypper >/dev/null 2>&1; then
+        echo "==> Installing python3 and ansible-core (zypper)"
+        zypper -n --gpg-auto-import-keys refresh
+        zypper -n install --no-recommends python3 ansible-core
+    else
+        echo "ERROR: unsupported distribution: no apt-get and no zypper" >&2
+        exit 1
+    fi
+}
+
+if ! command -v ansible-playbook >/dev/null 2>&1; then
+    if (( check_mode )); then
+        echo "ERROR: ansible-core is missing and --check does not install it" >&2
+        exit 1
+    fi
+    install_runtime
+fi
+command -v ansible-playbook >/dev/null 2>&1 || {
+    echo "ERROR: ansible-playbook is still missing after the runtime install" >&2
+    exit 1
+}
+
+# ---------- pinned collections ----------
+#
+# "The directory exists" is not "the pinned version is installed": a stale
+# base image or a half-finished galaxy run would pass that test. Compare the
+# MANIFEST.json version of every collection named in requirements.yml.
+
+required_collections() {
+    awk '
+        /^[[:space:]]*-[[:space:]]*name:[[:space:]]*/ { name = $NF; next }
+        /^[[:space:]]*version:[[:space:]]*/ {
+            version = $NF
+            gsub(/"/, "", version)
+            if (name != "") { print name, version; name = "" }
+        }
+    ' "$ANSIBLE_DIR/requirements.yml"
+}
+
+installed_collection_version() {
+    local fqcn=$1 manifest
+    manifest="$COLLECTIONS_DIR/ansible_collections/${fqcn%%.*}/${fqcn##*.}/MANIFEST.json"
+    [[ -r $manifest ]] || return 1
+    sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$manifest" | head -n 1
+}
+
+export ANSIBLE_COLLECTIONS_PATH=$COLLECTIONS_DIR
+
+collection_mismatches=()
+while read -r fqcn want; do
+    [[ -n $fqcn ]] || continue
+    if ! have=$(installed_collection_version "$fqcn"); then
+        collection_mismatches+=("$fqcn: required $want, not installed")
+    elif [[ $have != "$want" ]]; then
+        collection_mismatches+=("$fqcn: required $want, installed $have")
+    fi
+done < <(required_collections)
+
+if (( ${#collection_mismatches[@]} > 0 )); then
+    printf '%s\n' "==> Collection pins not satisfied in $COLLECTIONS_DIR:" >&2
+    printf '    %s\n' "${collection_mismatches[@]}" >&2
+    if (( check_mode )); then
+        echo "ERROR: --check does not install or repair collections" >&2
+        exit 1
+    fi
+    echo "==> Installing pinned collections into $COLLECTIONS_DIR"
+    install -d -m 0755 "$COLLECTIONS_DIR"
+    ansible-galaxy collection install --force \
+        -r "$ANSIBLE_DIR/requirements.yml" -p "$COLLECTIONS_DIR"
+
+    collection_mismatches=()
+    while read -r fqcn want; do
+        [[ -n $fqcn ]] || continue
+        if ! have=$(installed_collection_version "$fqcn"); then
+            collection_mismatches+=("$fqcn: required $want, still not installed")
+        elif [[ $have != "$want" ]]; then
+            collection_mismatches+=("$fqcn: required $want, still $have")
+        fi
+    done < <(required_collections)
+    if (( ${#collection_mismatches[@]} > 0 )); then
+        printf '    %s\n' "${collection_mismatches[@]}" >&2
+        echo "ERROR: collection pins could not be satisfied" >&2
+        exit 1
+    fi
+fi
+
+# ---------- run the play ----------
+
+install -d -m 0750 "$LOG_DIR"
+log_file="$LOG_DIR/$profile-$(date +%Y%m%d-%H%M%S).log"
+
+if [[ $profile == host ]]; then
+    limit_host=$(hostname -s)
+else
+    limit_host=lab-vm
+fi
+
+export ANSIBLE_CONFIG="$ANSIBLE_DIR/ansible.cfg"
+cd "$ANSIBLE_DIR"
+
+echo "==> ansible-playbook -c local -i inventory.yml -l $limit_host $profile.yml $*"
+echo "==> log: $log_file"
+
+# `pipefail` alone returns the RIGHTMOST nonzero status, so a failing tee would
+# mask the play's exit code. Capture PIPESTATUS instead and let the play's
+# status win; a logging failure only surfaces when the play succeeded. Either
+# way the EXIT trap releases the guard and preserves the status chosen here.
+set +e
+ansible-playbook -c local -i inventory.yml -l "$limit_host" "$profile.yml" "$@" \
+    2>&1 | tee "$log_file"
+pipe_status=("${PIPESTATUS[@]}")
+set -e
+
+play_rc=${pipe_status[0]}
+tee_rc=${pipe_status[1]:-0}
+
+if (( play_rc != 0 )); then
+    exit "$play_rc"
+elif (( tee_rc != 0 )); then
+    echo "ERROR: failed to write the run record $log_file (tee rc=$tee_rc)" >&2
+    exit "$tee_rc"
+fi
+
+# Falling off the end runs the EXIT trap with status 0.

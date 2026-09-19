@@ -1,0 +1,6 @@
+---
+# Each entry: { name, kind (service|timer), start (bool, required),
+#               remove (optional list of retired unit filenames) }
+# `start` is deliberately not defaulted: activation policy is a decision that
+# must be written down per unit, not inherited.
+systemd_units_list: []

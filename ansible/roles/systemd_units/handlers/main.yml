@@ -1,0 +1,10 @@
+---
+# Named for this role so a future role adding its own reload handler cannot
+# collide: handler names are global within a play.
+#
+# There is deliberately no "restart on template change" handler. Console units
+# (tty11-root, tty12-menu) must never be restarted underneath a live login, and
+# setup-agetty documents the same constraint for gettys.
+- name: Reload systemd for opt-jan managed units
+  ansible.builtin.systemd_service:
+    daemon_reload: true

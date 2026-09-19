@@ -1,0 +1,77 @@
+---
+# Replaces the "write a unit file, daemon-reload, enable" installers in
+# usr/sbin (install-tty11-root first). One template per unit, service and timer
+# kinds, and an explicit activation policy per unit.
+
+- name: Every managed unit must declare name, kind and start explicitly
+  ansible.builtin.assert:
+    that:
+      - item.name is defined
+      - item.kind is defined
+      - item.kind in ['service', 'timer']
+      - item.start is defined
+      - item.start is boolean
+    fail_msg: "invalid systemd_units_list entry: {{ item }}"
+  loop: "{{ systemd_units_list }}"
+  loop_control:
+    label: "{{ item.name | default('<unnamed>') }}"
+
+# Read-only, and deliberately runs in check mode: systemd_service refuses to
+# act on a unit whose file does not exist yet, so a fresh-guest preview has to
+# know which units the template task is only simulating.
+- name: Inspect the installed unit files
+  ansible.builtin.stat:
+    path: "/etc/systemd/system/{{ item.name }}.{{ item.kind }}"
+  loop: "{{ systemd_units_list }}"
+  loop_control:
+    label: "{{ item.name }}.{{ item.kind }}"
+  register: systemd_units_present
+  check_mode: false
+
+- name: Remove retired units superseded by a managed unit
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ item.1 }}"
+    state: absent
+  loop: "{{ systemd_units_list | subelements('remove', skip_missing=True) }}"
+  loop_control:
+    label: "{{ item.1 }}"
+  notify: Reload systemd for opt-jan managed units
+
+- name: Install unit files
+  ansible.builtin.template:
+    src: "{{ item.name }}.{{ item.kind }}.j2"
+    dest: "/etc/systemd/system/{{ item.name }}.{{ item.kind }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ systemd_units_list }}"
+  loop_control:
+    label: "{{ item.name }}.{{ item.kind }}"
+  notify: Reload systemd for opt-jan managed units
+
+- name: Reload systemd before enabling, so new units are visible
+  ansible.builtin.meta: flush_handlers
+
+# In check mode the template above only simulated the unit file, so systemd
+# does not know the unit and systemd_service would fail rather than predict.
+# Report the pending enable/start instead, and keep it visible in the recap.
+- name: Report the enable and start deferred to a real run
+  ansible.builtin.debug:
+    msg: >-
+      {{ item.item.name }}.{{ item.item.kind }} would be enabled{{
+      ' and started' if item.item.start else '' }} once the unit file exists
+  loop: "{{ systemd_units_present.results }}"
+  loop_control:
+    label: "{{ item.item.name }}.{{ item.item.kind }}"
+  when: ansible_check_mode and not item.stat.exists
+  changed_when: true
+
+- name: Enable units, and start only those whose policy says so
+  ansible.builtin.systemd_service:
+    name: "{{ item.item.name }}.{{ item.item.kind }}"
+    enabled: true
+    state: "{{ 'started' if item.item.start else omit }}"
+  loop: "{{ systemd_units_present.results }}"
+  loop_control:
+    label: "{{ item.item.name }}.{{ item.item.kind }}"
+  when: not (ansible_check_mode and not item.stat.exists)

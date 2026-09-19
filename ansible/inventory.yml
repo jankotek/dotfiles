@@ -1,0 +1,10 @@
+---
+# Named local hosts. `-i localhost,` would bypass this file and lose
+# group_vars/host_vars, so the supervisor always passes -i inventory.yml
+# plus -l <host>.
+all:
+  hosts:
+    lab-vm:
+      ansible_connection: local
+    zbook:
+      ansible_connection: local

@@ -1,0 +1,13 @@
+---
+# Capitalised directories the distro's own xdg-user-dirs creates on first
+# login. Removed only when empty, exactly like configure-user-dirs()'s
+# `rmdir ... 2>/dev/null || true`.
+xdg_user_dirs_capitalised:
+  - Desktop
+  - Documents
+  - Downloads
+  - Music
+  - Pictures
+  - Public
+  - Templates
+  - Videos

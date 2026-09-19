@@ -1,0 +1,14 @@
+---
+# Pinned to exact versions: ansible-core ships neither collection, and an
+# unpinned install would silently change module behaviour between VM builds.
+# setup/bootstrap compares every name here against the installed
+# MANIFEST.json, so the transitive dependency is pinned explicitly too rather
+# than being resolved afresh on each guest.
+collections:
+  - name: community.general
+    version: "13.4.0"
+  - name: ansible.posix
+    version: "2.2.2"
+  # Dependency of community.general; pinned so the installed set is reproducible.
+  - name: community.library_inventory_filtering_v1
+    version: "1.1.5"

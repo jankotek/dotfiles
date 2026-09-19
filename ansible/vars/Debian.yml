@@ -1,0 +1,19 @@
+---
+# Selected by ansible_facts.os_family == 'Debian' (Ubuntu/Xubuntu 26.04).
+# Named after the os_family fact, not the distribution.
+os_profile: Debian
+
+# What setup/bootstrap installs before the play can run. Listed here for
+# documentation and for a later base-image role; the supervisor installs them
+# in bash because they must exist before Ansible starts.
+ansible_runtime_packages:
+  - python3
+  - python3-apt
+  - ansible-core
+
+# Family-specific names for packages the VM merge (step 3) will need.
+console_font_packages:
+  - console-setup
+  - fonts-terminus
+desktop_font_packages:
+  - fonts-jetbrains-mono
