@@ -40,8 +40,23 @@ usage() {
     exit 2
 }
 
+# A tag list is a comma-separated list of non-empty names. A name must not
+# start with a dash, so `--tags --check` and `--tags=--check` are rejected here
+# rather than being handed to ansible-playbook as an opaque value after the
+# supervisor has already acquired the guard and installed packages.
+valid_tag_name() {
+    [[ -n $1 && $1 != -* && $1 != *[!a-zA-Z0-9_.-]* ]]
+}
+
 valid_tag_list() {
-    [[ -n $1 && $1 != *[!a-zA-Z0-9_,-]* ]]
+    local list=$1 tag
+    [[ -n $list ]] || return 1
+    while [[ $list == *,* ]]; do
+        tag=${list%%,*}
+        list=${list#*,}
+        valid_tag_name "$tag" || return 1
+    done
+    valid_tag_name "$list"
 }
 
 # ---------- argument handling ----------
@@ -143,6 +158,27 @@ fi
 guard_token=
 inherited_guard=0
 
+# Nested-owner contract, as setup/vm-xub26 implements it: when an outer
+# supervisor already owns the lease it stays the owner, and this run only
+# proves the inherited token is still valid. guard_token stays empty, so the
+# EXIT trap neither releases the lease nor restores the agent - that is the
+# outer owner's job.
+acquire_or_verify_guard() {
+    if [[ -n ${JAN_QGA_GUARD_TOKEN:-} ]]; then
+        echo "==> Verifying the inherited QEMU guest-agent guard lease"
+        if ! /usr/local/sbin/qga-guard verify "$JAN_QGA_GUARD_TOKEN"; then
+            echo "ERROR: inherited JAN_QGA_GUARD_TOKEN is not a live lease" >&2
+            return 1
+        fi
+        inherited_guard=1
+        return 0
+    fi
+
+    echo "==> Acquiring the QEMU guest-agent guard"
+    guard_token=$(/usr/local/sbin/qga-guard acquire "$$") || return 1
+    export JAN_QGA_GUARD_TOKEN=$guard_token
+}
+
 restore_guest_agent() {
     # qga-guard unmasks but never enables or starts the agent; the caller
     # does, exactly as setup/vm-xub26 and setup/vm-ub26-xfce do today.
@@ -201,23 +237,7 @@ else
     "$REPO_DIR/setup/retire-path-util-names.sh"
 
     if [[ $profile != host ]]; then
-        # Nested-owner contract, as setup/vm-xub26 implements it: when an outer
-        # supervisor already owns the lease it stays the owner, and this run
-        # only proves the inherited token is still valid. guard_token stays
-        # empty, so the EXIT trap neither releases the lease nor restores the
-        # agent - that is the outer owner's job.
-        if [[ -n ${JAN_QGA_GUARD_TOKEN:-} ]]; then
-            echo "==> Verifying the inherited QEMU guest-agent guard lease"
-            if ! /usr/local/sbin/qga-guard verify "$JAN_QGA_GUARD_TOKEN"; then
-                echo "ERROR: inherited JAN_QGA_GUARD_TOKEN is not a live lease" >&2
-                exit 1
-            fi
-            inherited_guard=1
-        else
-            echo "==> Acquiring the QEMU guest-agent guard"
-            guard_token=$(/usr/local/sbin/qga-guard acquire "$$")
-            export JAN_QGA_GUARD_TOKEN=$guard_token
-        fi
+        acquire_or_verify_guard || exit 1
     fi
 fi
 

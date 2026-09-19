@@ -60,6 +60,7 @@ be run as root.
 | `update-opt-idea-upgrade.bats` | Uses a tiny offline fixture to verify upgrade from legacy Community IDEA, idempotence, stale-file removal, and preservation after checksum or activation failure |
 | `update-opt-mjolnir.bats` | Uses a tiny offline tar.gz fixture to verify the complete Mjolnir bundle, checksum/version tracking, idempotence, and repair of missing workers |
 | `utilities.bats` | Fixture checks for utility help, dotfile dry-runs, missing-user guidance, and atomic verified downloads |
+| `bootstrap-supervisor.bats` | Fixture-only checks for `setup/bootstrap`: the argument allowlist (check-mode detection, tag-list validation, rejected forms), the play pipeline's status selection with the real ERR trap installed, and guard ownership including the inherited-lease branch. No root, no VM, no Ansible |
 | `repo-policy.bats` | Fast, fixture-only checks for canonical dotfiles, error traps, download policy, and provisioning safety limits |
 | `pod-subid-allocation.bats` | Fixture-only unit tests for non-overlapping subordinate UID/GID allocation; does not require root |
 | `pod-security.bats` | Creates a temporary pod user via `pod-setup`, verifies subordinate-ID preservation and matching UID/GID ranges plus all security hardening layers (nologin shell, locked password, nogroup, 0700 home, sudo denied, cron denied, filesystem ACLs, podman configs, linger, cgroup delegation, sysctl port restriction), then deletes everything |

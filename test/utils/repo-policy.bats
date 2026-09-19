@@ -201,7 +201,8 @@ load ../helpers
         setup/host-weed-kde \
         setup/vm-xub26 \
         setup/vm-baseweed \
-        setup/vm-ub26-xfce; do
+        setup/vm-ub26-xfce \
+        setup/bootstrap; do
         assert_file_contains "$OPT_JAN/$script" 'retire-path-util-names.sh'
     done
 }
