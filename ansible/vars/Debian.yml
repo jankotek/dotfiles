@@ -17,3 +17,8 @@ console_font_packages:
   - fonts-terminus
 desktop_font_packages:
   - fonts-jetbrains-mono
+
+# NetworkManager packages usr/sbin/setup-vm-networkd removes on this family.
+vm_networkd_nm_packages:
+  - network-manager
+  - network-manager-gnome

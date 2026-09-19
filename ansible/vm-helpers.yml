@@ -48,6 +48,11 @@
         name: pkg_safety
       tags: [pkg_safety]
 
+    - name: Networking through systemd-networkd
+      ansible.builtin.include_role:
+        name: vm_networkd
+      tags: [vm_networkd]
+
   post_tasks:
     - name: Flush remaining handlers while still under the guard
       ansible.builtin.meta: flush_handlers

@@ -1,0 +1,48 @@
+---
+# zypper half of usr/sbin/setup-vm-networkd.
+- name: Read the installed packages
+  ansible.builtin.package_facts:
+    manager: rpm
+
+- name: Remove NetworkManager
+  community.general.zypper:
+    name: "{{ vm_networkd_nm_packages | select('in', ansible_facts.packages) | list }}"
+    state: absent
+    clean_deps: true
+  when: vm_networkd_nm_packages | select('in', ansible_facts.packages) | list | length > 0
+
+# community.general has no zypper lock module, so the lock list is read as XML
+# and only the missing locks are added. rc 6 means "no locks defined".
+- name: Read the zypper package locks
+  ansible.builtin.command:
+    cmd: zypper --xmlout locks
+  register: vm_networkd_locks
+  changed_when: false
+  failed_when: vm_networkd_locks.rc not in [0, 6]
+  check_mode: false
+
+- name: Lock NetworkManager out of the repositories
+  ansible.builtin.command:
+    cmd: zypper -n addlock {{ item | quote }}
+  loop: "{{ vm_networkd_nm_packages }}"
+  when: ('<name>' ~ item ~ '</name>') not in (vm_networkd_locks.stdout | default(''))
+  changed_when: true
+
+- name: Read the unit inventory
+  ansible.builtin.service_facts:
+
+- name: Disable and stop wicked
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: false
+    state: stopped
+  loop: "{{ vm_networkd_wicked_units }}"
+  when: item in ansible_facts.services
+
+# Masked unconditionally, like the helper: the mask must be in place before
+# wicked could ever be installed, so it can never race networkd.
+- name: Mask wicked
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    masked: true
+  loop: "{{ vm_networkd_wicked_units }}"

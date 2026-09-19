@@ -1,0 +1,8 @@
+---
+# The helper restarts unconditionally; here the restart is tied to an actual
+# configuration change, and a separate task guarantees the units are running.
+- name: Restart VM networking
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: restarted
+  loop: "{{ vm_networkd_units }}"

@@ -14,3 +14,8 @@ console_font_packages:
   - terminus-bitmap-fonts
 desktop_font_packages:
   - jetbrains-mono-fonts
+
+# NetworkManager packages usr/sbin/setup-vm-networkd removes on this family.
+vm_networkd_nm_packages:
+  - NetworkManager
+  - NetworkManager-tui

@@ -1,0 +1,81 @@
+---
+# Mirrors usr/sbin/setup-vm-networkd: plain DHCP through systemd-networkd,
+# with NetworkManager removed, pinned or locked out, and systemd-resolved
+# owning /etc/resolv.conf.
+#
+# This role changes networking underneath the running system, so the play
+# calls it last, exactly where the shell provisioners call the helper.
+
+- name: Create the networkd configuration directory
+  ansible.builtin.file:
+    path: /etc/systemd/network
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Configure DHCP on every wired link
+  ansible.builtin.template:
+    src: 05-jan-wired.network.j2
+    dest: /etc/systemd/network/05-jan-wired.network
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart VM networking
+
+- name: Remove and block NetworkManager
+  ansible.builtin.include_tasks: "{{ ansible_facts.os_family }}.yml"
+
+- name: Read the unit inventory
+  ansible.builtin.service_facts:
+
+- name: Disable and stop NetworkManager
+  ansible.builtin.systemd_service:
+    name: NetworkManager.service
+    enabled: false
+    state: stopped
+  when: "'NetworkManager.service' in ansible_facts.services"
+
+# Masked unconditionally, like the helper: an image can keep the unit file
+# after the package is gone, and a reinstall must not race networkd.
+- name: Mask NetworkManager
+  ansible.builtin.systemd_service:
+    name: NetworkManager.service
+    masked: true
+
+- name: Unmask and enable networkd and resolved
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    masked: false
+    enabled: true
+  loop: "{{ vm_networkd_units }}"
+
+- name: Point resolv.conf at the resolved stub
+  ansible.builtin.file:
+    path: /etc/resolv.conf
+    src: "{{ vm_networkd_resolv_conf_target }}"
+    state: link
+    force: true
+    follow: false
+  notify: Restart VM networking
+
+- name: Apply the networking change before the play ends
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure networkd and resolved are running
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: started
+  loop: "{{ vm_networkd_units }}"
+
+- name: Re-read the unit inventory
+  ansible.builtin.service_facts:
+  when: not ansible_check_mode
+
+- name: Verify that networkd and resolved came up
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.services[item].state == 'running'
+    fail_msg: "{{ item }} is not running after configuring networkd"
+  loop: "{{ vm_networkd_units }}"
+  when: not ansible_check_mode

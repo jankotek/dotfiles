@@ -1,0 +1,17 @@
+---
+# apt half of usr/sbin/setup-vm-networkd. Static-checked only: no Xubuntu base
+# image exists in this lab, so this path has never been executed.
+- name: Purge NetworkManager
+  ansible.builtin.apt:
+    name: "{{ vm_networkd_nm_packages }}"
+    state: absent
+    purge: true
+    lock_timeout: 300
+
+- name: Pin NetworkManager out of the archive
+  ansible.builtin.template:
+    src: block-network-manager.pref.j2
+    dest: /etc/apt/preferences.d/block-network-manager.pref
+    owner: root
+    group: root
+    mode: "0644"

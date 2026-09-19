@@ -1,0 +1,9 @@
+---
+# Mirrors usr/sbin/setup-vm-networkd.
+vm_networkd_units:
+  - systemd-networkd.service
+  - systemd-resolved.service
+vm_networkd_wicked_units:
+  - wicked.service
+  - wicked-nanny.service
+vm_networkd_resolv_conf_target: /run/systemd/resolve/stub-resolv.conf
