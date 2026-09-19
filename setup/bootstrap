@@ -333,23 +333,38 @@ echo "==> ansible-playbook -c local -i inventory.yml -l $limit_host $profile.yml
 echo "==> log: $log_file"
 
 # `pipefail` alone returns the RIGHTMOST nonzero status, so a failing tee would
-# mask the play's exit code. Capture PIPESTATUS instead and let the play's
-# status win; a logging failure only surfaces when the play succeeded. Either
-# way the EXIT trap releases the guard and preserves the status chosen here.
-set +e
-ansible-playbook -c local -i inventory.yml -l "$limit_host" "$profile.yml" \
-    ${playbook_args[@]+"${playbook_args[@]}"} 2>&1 | tee "$log_file"
-pipe_status=("${PIPESTATUS[@]}")
-set -e
+# mask the play's exit code. PIPESTATUS has both, but reading it requires
+# reaching the line after the pipeline: `set +e` suppresses errexit and NOT the
+# ERR trap, and under `set -E` that trap fires on the failing pipeline and
+# exits with the pipeline's (tee's) status before the capture happens. So the
+# trap is lifted around the pipeline and re-installed straight after.
+run_playbook() {
+    local play_rc tee_rc
+    local -a pipe_status
 
-play_rc=${pipe_status[0]}
-tee_rc=${pipe_status[1]:-0}
+    trap - ERR
+    set +e
+    ansible-playbook -c local -i inventory.yml -l "$limit_host" "$profile.yml" \
+        ${playbook_args[@]+"${playbook_args[@]}"} 2>&1 | tee "$log_file"
+    pipe_status=("${PIPESTATUS[@]}")
+    set -e
+    trap error_trap ERR
 
-if (( play_rc != 0 )); then
-    exit "$play_rc"
-elif (( tee_rc != 0 )); then
-    echo "ERROR: failed to write the run record $log_file (tee rc=$tee_rc)" >&2
-    exit "$tee_rc"
-fi
+    play_rc=${pipe_status[0]}
+    tee_rc=${pipe_status[1]:-0}
+
+    # The play's status wins; a logging failure only surfaces when the play
+    # itself succeeded.
+    if (( play_rc != 0 )); then
+        return "$play_rc"
+    fi
+    if (( tee_rc != 0 )); then
+        echo "ERROR: failed to write the run record $log_file (tee rc=$tee_rc)" >&2
+        return "$tee_rc"
+    fi
+    return 0
+}
+
+run_playbook || exit "$?"
 
 # Falling off the end runs the EXIT trap with status 0.
