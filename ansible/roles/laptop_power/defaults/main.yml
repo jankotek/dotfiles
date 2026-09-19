@@ -1,0 +1,7 @@
+---
+# Mirrors usr/sbin/install-laptop-power. laptop-power itself stays bash: it is
+# a runtime policy engine, not a desired state.
+laptop_power_repo_dir: /opt/jan
+laptop_power_command: "{{ laptop_power_repo_dir }}/usr/sbin/laptop-power"
+laptop_power_acpi_events_dir: /etc/acpi/events
+laptop_power_udev_rules_dir: /etc/udev/rules.d

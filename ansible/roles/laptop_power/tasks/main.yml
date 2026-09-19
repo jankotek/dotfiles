@@ -1,0 +1,107 @@
+---
+# Mirrors usr/sbin/install-laptop-power: three services, one timer, an acpid
+# event and a udev rule that all invoke usr/sbin/laptop-power. The policy
+# engine itself stays bash.
+
+- name: Refuse to install without the policy command
+  ansible.builtin.stat:
+    path: "{{ laptop_power_command }}"
+  register: laptop_power_stat
+  check_mode: false
+
+- name: The policy command must exist and be executable
+  ansible.builtin.assert:
+    that:
+      - laptop_power_stat.stat.exists
+      - laptop_power_stat.stat.executable | default(false)
+    fail_msg: >-
+      {{ laptop_power_command }} is missing or not executable; clone the
+      repository into {{ laptop_power_repo_dir }} first
+
+- name: Install acpid
+  ansible.builtin.package:
+    name: acpid
+    state: present
+
+- name: Create the acpid and udev directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ laptop_power_acpi_events_dir }}"
+    - "{{ laptop_power_udev_rules_dir }}"
+
+# acpid receives lid and AC-adapter events; restarting the debounce service
+# makes the last event win.
+- name: Install the acpid event
+  ansible.builtin.template:
+    src: acpi-event.j2
+    dest: "{{ laptop_power_acpi_events_dir }}/laptop-power"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload acpid
+
+# Some systems expose charger changes only as power_supply uevents.
+- name: Install the udev rule
+  ansible.builtin.template:
+    src: udev-rule.j2
+    dest: "{{ laptop_power_udev_rules_dir }}/80-laptop-power.rules"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload the udev rules
+
+# In check mode the package above was only simulated, so systemd does not know
+# acpid and systemd_service would fail rather than predict. Same shape as the
+# deferred unit handling in the systemd_units role.
+- name: Read the unit inventory
+  ansible.builtin.service_facts:
+
+- name: Report the acpid enable and start deferred to a real run
+  ansible.builtin.debug:
+    msg: acpid.service would be enabled and started once the package is installed
+  when: ansible_check_mode and 'acpid.service' not in ansible_facts.services
+  changed_when: true
+
+- name: Enable acpid
+  ansible.builtin.systemd_service:
+    name: acpid.service
+    enabled: true
+    state: started
+  when: not (ansible_check_mode and 'acpid.service' not in ansible_facts.services)
+
+- name: Install the laptop-power units
+  ansible.builtin.import_role:
+    name: systemd_units
+  vars:
+    systemd_units_list:
+      # laptop-power.service and laptop-power-event.service have no [Install]
+      # section, so they can only be started, never enabled. The helper starts
+      # the first to apply the policy once and leaves the second to be
+      # triggered by acpid or udev.
+      #
+      # Order matches the helper's tail: enable the sleep hook, enable and
+      # start the timer, and only then apply the policy once. laptop-power
+      # exits non-zero on a machine with no battery, so on a VM that last
+      # start fails after everything has been installed - exactly as
+      # install-laptop-power does.
+      - name: laptop-power-event
+        kind: service
+        enable: false
+        start: false
+      - name: laptop-power-sleep
+        kind: service
+        enable: true
+        start: false
+      - name: laptop-power
+        kind: timer
+        enable: true
+        start: true
+      - name: laptop-power
+        kind: service
+        enable: false
+        start: true

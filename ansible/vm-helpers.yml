@@ -38,19 +38,82 @@
       tags: [always]
 
   tasks:
+    - name: Install the VM console and cleanup units
+      ansible.builtin.include_role:
+        name: systemd_units
+        apply:
+          tags: [units]
+      vars:
+        systemd_units_list:
+          # Boot-only, see ansible/README.md; install-tty11-root restarts.
+          - name: tty11-root
+            kind: service
+            enable: true
+            start: false
+          # install-guest-cleanup starts it immediately and supersedes the
+          # older vm-cleanup.service, which is disabled and stopped first.
+          - name: guest-cleanup
+            kind: service
+            enable: true
+            start: true
+            remove:
+              - vm-cleanup.service
+      tags: [units]
+
     - name: Console font
       ansible.builtin.include_role:
         name: console_font
+        apply:
+          tags: [console_font]
       tags: [console_font]
 
     - name: Package manager safety
       ansible.builtin.include_role:
         name: pkg_safety
+        apply:
+          tags: [pkg_safety]
       tags: [pkg_safety]
 
+    - name: Lowercase XDG user directories
+      ansible.builtin.include_role:
+        name: xdg_user_dirs
+        apply:
+          tags: [xdg]
+      tags: [xdg]
+
+    # Host-oriented helpers, not called by the VM provisioners.
+    - name: The tty12 menu and the /tmp cleaner
+      ansible.builtin.include_role:
+        name: systemd_units
+        apply:
+          tags: [host_units]
+      vars:
+        systemd_units_list:
+          # install-tty12-menu starts it; a start never disturbs a running one.
+          - name: tty12-menu
+            kind: service
+            enable: true
+            start: true
+          # install-tmp-clean enables only; it runs at the next boot.
+          - name: tmp-clean
+            kind: service
+            enable: true
+            start: false
+      tags: [host_units]
+
+    - name: Laptop power automation
+      ansible.builtin.include_role:
+        name: laptop_power
+        apply:
+          tags: [laptop_power]
+      tags: [laptop_power]
+
+    # Last, as in the shell provisioners: this replaces the running network.
     - name: Networking through systemd-networkd
       ansible.builtin.include_role:
         name: vm_networkd
+        apply:
+          tags: [vm_networkd]
       tags: [vm_networkd]
 
   post_tasks:

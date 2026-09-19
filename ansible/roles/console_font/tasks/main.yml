@@ -81,7 +81,7 @@
   when: console_font_console_setup.stat.exists
 
 - name: Install and enable the console-font unit
-  ansible.builtin.include_role:
+  ansible.builtin.import_role:
     name: systemd_units
   vars:
     systemd_units_list:
