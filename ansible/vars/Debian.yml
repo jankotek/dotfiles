@@ -22,3 +22,8 @@ desktop_font_packages:
 vm_networkd_nm_packages:
   - network-manager
   - network-manager-gnome
+
+# setup/vm-xub26 removes ~/.cache/sessions after the skeleton sync;
+# vm-baseweed removes nothing. Paths are relative to the primary home.
+skel_home_absent_paths:
+  - .cache/sessions

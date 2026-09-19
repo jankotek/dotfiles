@@ -10,11 +10,31 @@ less to maintain than the shell they mirror, and is the change report useful?
 Each role is measured against the helper it mirrors, and every role has been
 compared against that helper on a pair of disposable Tumbleweed clones.
 
-- `roles/xdg_user_dirs` — the `/etc/xdg/user-dirs.defaults` heredoc that
-  appears verbatim in three scripts, and the `configure-user-dirs()` function
-  copied between the two VM provisioners. Primary-account discovery uses
+- `roles/primary_user` — shared primary-account discovery with
   `setup/vm-baseweed`'s semantics: regular login accounts rooted directly under
   `/home`, prefer `jan`, otherwise require exactly one, fail on ambiguity.
+  Included dynamically (guarded by `primary_user_name is not defined`, inner
+  tasks tagged `always`) by the roles that need the primary home, so it runs
+  at most once per play.
+- `roles/browser_vm` — `install-chrome-vm` and `install-brave-vm` as one
+  data-driven role: a browser whose `/opt` tree is absent is skipped, a
+  broken tree (missing launcher or icon) fails, otherwise the launcher is
+  linked into `/usr/local/bin` and the desktop entry installed.
+- `roles/xdg_user_dirs` — the `/etc/xdg/user-dirs.defaults` heredoc that
+  appears verbatim in three scripts, and the `configure-user-dirs()` function
+  copied between the two VM provisioners.
+- `roles/skel` — `skel/install` (`skel/home` into `/etc/skel`, root:root,
+  plus the empty directories Git cannot retain) and the home-sync block both
+  VM provisioners run: `rsync -a` into the primary home without `--delete`,
+  `rsync -r` of `home-root/` into `/root`, the `/home` and `/root` modes,
+  the recursive ownership repair, and the family-specific cleanup
+  (`~/.cache/sessions` on Debian only). Runs before `xdg_user_dirs` so the
+  synced `user-dirs.dirs` already exists when that role's template compares.
+- `roles/kernel_cmdline` — a `command:` wrapper around
+  `usr/sbin/setup-kernel-tweaks`, which stays bash. The provisioners' `||
+  echo WARNING non-fatal` becomes a visible play failure; rerun with
+  `--skip-tags kernel` to proceed without it. `changed` follows the helper's
+  own "Already configured" output.
 - `roles/systemd_units` — the "write a unit file, daemon-reload, enable"
   installers (`install-tty11-root`, `install-tty12-menu`,
   `install-guest-cleanup`, `install-tmp-clean`, the `console-font` unit and the
@@ -47,9 +67,13 @@ ansible/
   pilot.yml              the pilot play (hosts: lab-vm)
   vm-helpers.yml         the roles the VM provisioners call, in their order
   host-helpers.yml       the roles no VM provisioner calls (opt-in, separate)
+  roles/browser_vm/
   roles/console_font/
+  roles/kernel_cmdline/
   roles/laptop_power/
   roles/pkg_safety/
+  roles/primary_user/
+  roles/skel/
   roles/systemd_units/
   roles/vm_networkd/
   roles/xdg_user_dirs/
@@ -58,7 +82,8 @@ ansible/
 `vm-helpers.yml` runs the roles in the order `setup/vm-xub26` and
 `setup/vm-baseweed` call the helpers, with `vm_networkd` last because it
 replaces the running network. It contains **only** what those provisioners
-call. Every role carries a tag, so `--tags console_font` or
+call — the apt/zypper install and purge lists themselves are not roles yet.
+Every role carries a tag, so `--tags console_font` or
 `--skip-tags vm_networkd` select a subset.
 
 `host-helpers.yml` holds the helpers no VM provisioner calls —
@@ -158,6 +183,17 @@ not-yet-existing unit.
   `guest-cleanup.service` is a `Type=oneshot` without `RemainAfterExit` that
   `install-guest-cleanup` starts on every run, and `laptop-power.service` is
   the same shape. Expect `changed=1` per such unit on a converged run.
+- The `skel` home sync reports two residual changes on a converged run:
+  `rsync -a` keeps `-p`, so it re-applies the source directory's mode to the
+  primary home and the 0700 policy task repairs it — the same reset+chmod
+  loop the provisioners perform silently. Owner and group propagation is
+  suppressed (`--no-owner --no-group`) because ownership policy lives in the
+  explicit repair task; without it every file fights `og` metadata updates
+  every run.
+- The `kernel_cmdline` role turns the provisioners' `|| echo WARNING
+  non-fatal` wrapper into a play failure: a broken tweak is visible, and
+  `--skip-tags kernel` is the explicit way to proceed without it. This is
+  the migration plan's replacement for the non-fatal call sites.
 - Ansible caches, logs and collections stay off `/opt/jan`.
 
 ## CI

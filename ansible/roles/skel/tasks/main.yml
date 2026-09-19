@@ -1,0 +1,144 @@
+---
+# Mirrors the skeleton payload handling in the VM provisioners:
+#   /opt/jan/skel/install            -> /etc/skel  (root:root, empty dirs)
+#   rsync -a skel/home/ $HOME/       -> primary home (no --delete, chown -R)
+#   rsync -r home-root/ /root        -> root home  (when the source exists)
+# plus the mode fixes (/home 0755, every home and /root 0700) and the
+# family-specific cleanup the provisioners apply afterwards.
+#
+# NO --delete anywhere, exactly like the shell: a same-path file is an
+# administrator override the repo replaces, but nothing the repo does not
+# manage (~/down, ~/doc, ~/.cache, ...) is ever removed.
+#
+# This role must run BEFORE xdg_user_dirs: the sync brings
+# .config/user-dirs.dirs from the skeleton, and the template task in
+# xdg_user_dirs then reports ok on identical content instead of rsync
+# re-copying over the template's mtime on every run.
+
+# Dynamic include for the same reason as xdg_user_dirs: `when` must gate the
+# include itself, and the inner apply: keeps the discovery running under any
+# tag selection. Runs at most once per play.
+- name: Discover the primary account
+  ansible.builtin.include_role:
+    name: primary_user
+    apply:
+      tags: [always]
+  when: primary_user_name is not defined
+
+- name: Ensure the skeleton destination exists
+  ansible.builtin.file:
+    path: /etc/skel
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# synchronize does not support check mode, so the preview reports the pending
+# syncs instead of silently predicting no change.
+- name: Report the skeleton syncs deferred to a real run
+  ansible.builtin.debug:
+    msg: "{{ item.0 }} would be synchronised into {{ item.1 }} (no --delete)"
+  loop:
+    - ["{{ skel_source_dir }}/", /etc/skel]
+    - ["{{ skel_source_dir }}/", "{{ primary_user_home }}"]
+    - ["{{ skel_home_root_dir }}/", /root]
+  loop_control:
+    label: "{{ item.1 }}"
+  when: ansible_check_mode
+  changed_when: true
+
+# Before the sync: creating these after it would bump /etc/skel's mtime every
+# run, which the sync then "repairs" forever. With this order the directory
+# settles on the first run.
+- name: Create the empty skeleton directories Git cannot retain
+  ansible.builtin.file:
+    path: "/etc/skel/{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ skel_empty_dirs }}"
+
+- name: Install the skeleton into /etc/skel
+  ansible.posix.synchronize:
+    src: "{{ skel_source_dir }}/"
+    dest: /etc/skel
+    delete: false
+    rsync_opts:
+      - "--chown=root:root"
+  when: not ansible_check_mode
+
+# --no-owner/--no-group: the shell's `rsync -a` also propagates the checkout's
+# owner and group onto every managed file and then undoes it with `chown -R`.
+# Ownership policy lives in the "Repair ownership" task below, so the fight is
+# dropped at the source. -p is kept, so file modes are still enforced like the
+# shell's — including on the home directory itself, whose reset to the source
+# mode and repair to 0700 is the one residual change a converged run honestly
+# reports, exactly as the shell performs it.
+- name: Synchronise the skeleton into the primary home
+  ansible.posix.synchronize:
+    src: "{{ skel_source_dir }}/"
+    dest: "{{ primary_user_home }}"
+    delete: false
+    rsync_opts:
+      - "--no-owner"
+      - "--no-group"
+  when: not ansible_check_mode
+
+- name: Look for the root-home payload
+  ansible.builtin.stat:
+    path: "{{ skel_home_root_dir }}"
+  register: skel_home_root
+  check_mode: false
+
+# The provisioners use plain `rsync -r` here, not -a.
+- name: Synchronise the root-home payload into /root
+  ansible.posix.synchronize:
+    src: "{{ skel_home_root_dir }}/"
+    dest: /root
+    delete: false
+    archive: false
+    recursive: true
+  when:
+    - not ansible_check_mode
+    - skel_home_root.stat.isdir | default(false)
+
+- name: Set home-root permissions
+  ansible.builtin.file:
+    path: "{{ item.0 }}"
+    state: directory
+    mode: "{{ item.1 }}"
+  loop:
+    - [/home, "0755"]
+    - [/root, "0700"]
+
+- name: Enumerate the account homes
+  ansible.builtin.find:
+    paths: /home
+    file_type: directory
+    recurse: false
+  register: skel_home_dirs
+  check_mode: false
+
+- name: Every account home is private
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    mode: "0700"
+  loop: "{{ skel_home_dirs.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Repair ownership of the primary home
+  ansible.builtin.file:
+    path: "{{ primary_user_home }}"
+    state: directory
+    owner: "{{ primary_user_name }}"
+    group: "{{ primary_user_group }}"
+    recurse: true
+
+- name: Remove family-specific stale paths from the primary home
+  ansible.builtin.file:
+    path: "{{ primary_user_home }}/{{ item }}"
+    state: absent
+  loop: "{{ skel_home_absent_paths }}"

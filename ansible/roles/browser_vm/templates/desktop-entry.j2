@@ -1,0 +1,23 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name={{ item.name }}
+GenericName=Web Browser
+Comment=Access the Internet
+Exec={{ item.dir }}/{{ item.binary }} %U
+TryExec={{ item.dir }}/{{ item.binary }}
+Icon={{ item.dir }}/{{ item.icon }}
+Terminal=false
+Categories=Network;WebBrowser;
+StartupNotify=true
+StartupWMClass={{ item.wm_class }}
+MimeType=application/pdf;text/html;text/xml;x-scheme-handler/http;x-scheme-handler/https;
+Actions=new-window;new-private-window;
+
+[Desktop Action new-window]
+Name=New Window
+Exec={{ item.dir }}/{{ item.binary }}
+
+[Desktop Action new-private-window]
+Name={{ item.private_name }}
+Exec={{ item.dir }}/{{ item.binary }} {{ item.private_arg }}

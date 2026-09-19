@@ -4,8 +4,10 @@
 # helpers; the helpers themselves are unchanged and still the supported path.
 #
 # This play contains exactly what setup/vm-xub26 and setup/vm-baseweed call,
-# in their order: units, console font, package safety, XDG directories, and
+# in their order: browser VM integration, the units, console font, kernel
+# cmdline, package safety, the skeleton homes, XDG directories, and
 # systemd-networkd last, after every network-dependent step has finished.
+# The package install/purge lists themselves are not roles yet.
 #
 # install-tty12-menu, install-tmp-clean and install-laptop-power are NOT
 # called by the VM provisioners and live in host-helpers.yml. A tag does not
@@ -42,6 +44,15 @@
       tags: [always]
 
   tasks:
+    # install-chrome-vm and install-brave-vm run right after the symlink
+    # farm in both provisioners, before any package work.
+    - name: Browser VM integration
+      ansible.builtin.include_role:
+        name: browser_vm
+        apply:
+          tags: [browser_vm]
+      tags: [browser_vm]
+
     - name: Install the VM console and cleanup units
       ansible.builtin.include_role:
         name: systemd_units
@@ -71,12 +82,34 @@
           tags: [console_font]
       tags: [console_font]
 
+    # Both provisioners wrap setup-kernel-tweaks in `|| echo WARNING
+    # non-fatal`; the role fails the play instead — rerun with
+    # --skip-tags kernel to proceed without it.
+    - name: Kernel command-line tweaks
+      ansible.builtin.include_role:
+        name: kernel_cmdline
+        apply:
+          tags: [kernel]
+      tags: [kernel]
+
     - name: Package manager safety
       ansible.builtin.include_role:
         name: pkg_safety
         apply:
           tags: [pkg_safety]
       tags: [pkg_safety]
+
+    # The provisioners write user-dirs.defaults, then rsync the skeleton into
+    # the primary home, then configure-user-dirs. skel before xdg_user_dirs
+    # keeps that order where it matters: the synced user-dirs.dirs must
+    # already exist when the role's template runs, or every run reports a
+    # change.
+    - name: Skeleton in /etc/skel and the primary home
+      ansible.builtin.include_role:
+        name: skel
+        apply:
+          tags: [skel]
+      tags: [skel]
 
     - name: Lowercase XDG user directories
       ansible.builtin.include_role:

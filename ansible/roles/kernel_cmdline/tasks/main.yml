@@ -1,0 +1,46 @@
+---
+# Wraps usr/sbin/setup-kernel-tweaks rather than translating it: the script
+# branches on the bootloader (grub vs systemd-boot), keeps .bak files, and
+# always regenerates the boot entries. The bash stays the implementation;
+# this role makes the call visible to the play.
+#
+# Deliberate divergence from the provisioners: they wrap the call in
+# `|| echo WARNING non-fatal`. Here a failed tweak fails the play — visible,
+# and you rerun with --skip-tags kernel when you actually want to proceed
+# without it. That is the migration plan's replacement for the non-fatal
+# wrappers.
+
+- name: Check the kernel-tweaks helper
+  ansible.builtin.stat:
+    path: "{{ kernel_cmdline_command }}"
+  register: kernel_cmdline_stat
+  check_mode: false
+
+- name: The kernel-tweaks helper must exist and be executable
+  ansible.builtin.assert:
+    that:
+      - kernel_cmdline_stat.stat.exists
+      - kernel_cmdline_stat.stat.executable | default(false)
+    fail_msg: >-
+      {{ kernel_cmdline_command }} is missing or not executable; the
+      supervisor lays down the /usr/local symlink farm before the play, so a
+      missing helper means the farm did not run
+
+# The helper is a command task, so check mode cannot predict whether a real
+# run would change the cmdline (it prints "Already configured" when
+# converged). Say so instead of forecasting a change.
+- name: Note the unpredictable kernel-tweak run
+  ansible.builtin.debug:
+    msg: >-
+      would run {{ kernel_cmdline_command }}
+      {{ kernel_cmdline_extra_params | join(' ') }}; whether it changes the
+      cmdline cannot be predicted in check mode
+  when: ansible_check_mode
+
+- name: Apply the kernel command-line tweaks
+  ansible.builtin.command:
+    cmd: >-
+      {{ kernel_cmdline_command }}
+      {{ kernel_cmdline_extra_params | map('quote') | join(' ') }}
+  register: kernel_cmdline_run
+  changed_when: "'Already configured' not in kernel_cmdline_run.stdout"

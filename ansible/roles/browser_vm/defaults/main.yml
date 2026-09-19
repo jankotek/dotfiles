@@ -1,0 +1,32 @@
+---
+# Mirrors usr/sbin/install-chrome-vm and usr/sbin/install-brave-vm. The two
+# helpers differ only in this data: the browser tree under /opt, the launcher
+# and icon inside it, the PATH link name, and the desktop-entry fields.
+#
+# Per entry: a browser whose `dir` is absent is skipped entirely (the helpers
+# exit 0 on a missing tree); a present dir with a missing or non-executable
+# launcher or a missing icon fails the play, as the helpers exit 1.
+browser_vm_browsers:
+  - name: Google Chrome
+    dir: /opt/google/chrome
+    binary: google-chrome
+    link: chrome
+    icon: product_logo_128.png
+    desktop_file: google-chrome.desktop
+    wm_class: google-chrome
+    private_name: New Incognito Window
+    private_arg: --incognito
+  - name: Brave Origin
+    dir: /opt/brave.com/brave-origin-beta
+    binary: brave-origin-beta
+    link: brave
+    icon: product_logo_128_beta.png
+    desktop_file: brave-origin.desktop
+    wm_class: brave-origin-beta
+    private_name: New Private Window
+    private_arg: --incognito
+
+# The helpers take these from JAN_APPLICATION_DIR / JAN_BIN_DIR; provisioning
+# never overrides them.
+browser_vm_applications_dir: /usr/local/share/applications
+browser_vm_bin_dir: /usr/local/bin

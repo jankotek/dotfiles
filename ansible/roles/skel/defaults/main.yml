@@ -1,0 +1,17 @@
+---
+# Mirrors /opt/jan/skel/install plus the home-sync block the VM provisioners
+# run for the primary account. The checkout lives at /opt/jan inside a guest,
+# the same assumption the laptop_power role makes.
+skel_repo_dir: /opt/jan
+skel_source_dir: "{{ skel_repo_dir }}/skel/home"
+skel_home_root_dir: "{{ skel_repo_dir }}/home-root"
+
+# The empty directories skel/install creates after the rsync, because Git
+# cannot retain them. Same payload as the lowercase XDG list plus the media
+# parent, kept as one source by referencing the shared var.
+skel_empty_dirs: "{{ xdg_user_dirs_lowercase + ['media'] }}"
+
+# Paths removed from the primary home after the sync, relative to it.
+# vm-xub26 removes ~/.cache/sessions; vm-baseweed removes nothing. The
+# per-family vars files set this.
+skel_home_absent_paths: []

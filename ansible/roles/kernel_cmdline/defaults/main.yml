@@ -1,0 +1,12 @@
+---
+# Wraps usr/sbin/setup-kernel-tweaks, which stays bash: it edits the kernel
+# command line for GRUB and systemd-boot and regenerates the bootloader
+# output. Both VM provisioners call it with the same extra parameter,
+# wrapped in `|| echo WARNING non-fatal`.
+kernel_cmdline_command: /usr/local/sbin/setup-kernel-tweaks
+
+# sysfb/simpledrm may take DRM card0 before virtio_gpu and later disappear,
+# leaving virtio_gpu at card1. spice-vdagent expects card0 when mapping the
+# SPICE display to XRandR, so this breaks resize and absolute pointer mapping.
+kernel_cmdline_extra_params:
+  - initcall_blacklist=sysfb_init,simpledrm_platform_driver_init

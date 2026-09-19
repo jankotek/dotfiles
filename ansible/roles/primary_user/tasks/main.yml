@@ -2,6 +2,11 @@
 # Primary-account discovery with setup/vm-baseweed's semantics:
 # regular login accounts rooted directly under /home, prefer `jan`, otherwise
 # require exactly one, fail on ambiguity.
+#
+# Shared by the roles that need the primary home (xdg_user_dirs, skel). It is
+# pulled in with a static import_role so the including role's tags propagate;
+# callers guard the import with `primary_user_name is not defined` so the discovery
+# runs at most once per play.
 
 - name: Read the passwd database
   ansible.builtin.getent:
@@ -15,10 +20,10 @@
 
 - name: Select regular login accounts rooted directly under /home
   ansible.builtin.set_fact:
-    xdg_user_dirs_home_users: "{{ _xdg_home_users_json | from_json }}"
+    primary_user_candidates: "{{ _home_users_json | from_json }}"
   vars:
     # getent_passwd values are [password, uid, gid, gecos, home, shell].
-    _xdg_home_users_json: >-
+    _home_users_json: >-
       {% set found = [] %}
       {% for name, f in ansible_facts.getent_passwd.items() %}
       {% if f[1] | int >= 1000 and f[1] | int < 65534
@@ -32,30 +37,30 @@
 - name: Require an unambiguous primary account
   ansible.builtin.assert:
     that:
-      - "'jan' in xdg_user_dirs_home_users or xdg_user_dirs_home_users | length == 1"
+      - "'jan' in primary_user_candidates or primary_user_candidates | length == 1"
     fail_msg: >-
       expected exactly one regular user under /home; found:
-      {{ xdg_user_dirs_home_users | join(' ') | default('(none)', true) }}
-    success_msg: "primary account candidates: {{ xdg_user_dirs_home_users | join(' ') }}"
+      {{ primary_user_candidates | join(' ') | default('(none)', true) }}
+    success_msg: "primary account candidates: {{ primary_user_candidates | join(' ') }}"
 
 - name: Resolve the primary account, its group and its home
   ansible.builtin.set_fact:
-    xdg_user_dirs_primary_user: "{{ _xdg_user }}"
-    xdg_user_dirs_primary_home: "{{ ansible_facts.getent_passwd[_xdg_user][4] }}"
-    xdg_user_dirs_primary_group: "{{ ansible_facts.getent_group | dict2items(key_name='name', value_name='g')
-                           | selectattr('g.1', 'equalto', ansible_facts.getent_passwd[_xdg_user][2])
-                           | map(attribute='name') | first }}"
+    primary_user_name: "{{ _user }}"
+    primary_user_home: "{{ ansible_facts.getent_passwd[_user][4] }}"
+    primary_user_group: "{{ ansible_facts.getent_group | dict2items(key_name='name', value_name='g')
+                          | selectattr('g.1', 'equalto', ansible_facts.getent_passwd[_user][2])
+                          | map(attribute='name') | first }}"
   vars:
-    _xdg_user: "{{ 'jan' if 'jan' in xdg_user_dirs_home_users else xdg_user_dirs_home_users[0] }}"
+    _user: "{{ 'jan' if 'jan' in primary_user_candidates else primary_user_candidates[0] }}"
 
 - name: Stat the primary home
   ansible.builtin.stat:
-    path: "{{ xdg_user_dirs_primary_home }}"
-  register: xdg_user_dirs_home_stat
+    path: "{{ primary_user_home }}"
+  register: primary_user_home_stat
   check_mode: false
 
 - name: Refuse to run when the primary home is missing
   ansible.builtin.assert:
     that:
-      - xdg_user_dirs_home_stat.stat.isdir | default(false)
-    fail_msg: "home directory does not exist: {{ xdg_user_dirs_primary_home }}"
+      - primary_user_home_stat.stat.isdir | default(false)
+    fail_msg: "home directory does not exist: {{ primary_user_home }}"

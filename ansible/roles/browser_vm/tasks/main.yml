@@ -1,0 +1,87 @@
+---
+# Mirrors usr/sbin/install-chrome-vm and usr/sbin/install-brave-vm, called
+# back to back by both VM provisioners: skip a browser whose /opt tree is
+# absent, fail when the tree exists but its launcher or icon does not, then
+# link the launcher into PATH and install the desktop entry.
+
+- name: Look for the browser trees
+  ansible.builtin.stat:
+    path: "{{ item.dir }}"
+  loop: "{{ browser_vm_browsers }}"
+  loop_control:
+    label: "{{ item.dir }}"
+  register: browser_vm_dirs
+  check_mode: false
+
+- name: Record which browsers are installed
+  ansible.builtin.set_fact:
+    browser_vm_present: "{{ browser_vm_dirs.results
+                            | selectattr('stat.isdir', 'defined')
+                            | selectattr('stat.isdir')
+                            | map(attribute='item') | list }}"
+
+# The helpers exit 1 when the tree exists but the payload is broken: an
+# installed-but-incomplete browser is a provisioning failure, not a skip.
+- name: Check the browser launchers
+  ansible.builtin.stat:
+    path: "{{ item.dir }}/{{ item.binary }}"
+    follow: true
+  loop: "{{ browser_vm_present }}"
+  loop_control:
+    label: "{{ item.binary }}"
+  register: browser_vm_launchers
+  check_mode: false
+
+- name: Check the browser icons
+  ansible.builtin.stat:
+    path: "{{ item.dir }}/{{ item.icon }}"
+  loop: "{{ browser_vm_present }}"
+  loop_control:
+    label: "{{ item.icon }}"
+  register: browser_vm_icons
+  check_mode: false
+
+- name: Every installed browser must have an executable launcher and an icon
+  ansible.builtin.assert:
+    that:
+      - item.0.stat.executable | default(false)
+      - item.1.stat.isreg | default(false)
+    fail_msg: >-
+      {{ item.0.item.dir }} is installed but its launcher or icon is missing:
+      {{ item.0.item.dir }}/{{ item.0.item.binary }},
+      {{ item.0.item.dir }}/{{ item.0.item.icon }}
+  loop: "{{ browser_vm_launchers.results | zip(browser_vm_icons.results) | list }}"
+  loop_control:
+    label: "{{ item.0.item.name }}"
+
+- name: Create the applications and bin directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ browser_vm_applications_dir }}"
+    - "{{ browser_vm_bin_dir }}"
+
+- name: Link the browser launchers into PATH
+  ansible.builtin.file:
+    src: "{{ item.dir }}/{{ item.binary }}"
+    path: "{{ browser_vm_bin_dir }}/{{ item.link }}"
+    state: link
+    force: true
+  loop: "{{ browser_vm_present }}"
+  loop_control:
+    label: "{{ item.link }}"
+
+- name: Install the desktop entries
+  ansible.builtin.template:
+    src: desktop-entry.j2
+    dest: "{{ browser_vm_applications_dir }}/{{ item.desktop_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ browser_vm_present }}"
+  loop_control:
+    label: "{{ item.desktop_file }}"

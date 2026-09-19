@@ -3,8 +3,18 @@
 # setup/host-weed-kde, setup/vm-baseweed and setup/vm-xub26, plus the
 # configure-user-dirs() function duplicated between the two VM provisioners.
 
+# Dynamic include so `when` gates the include itself rather than every
+# imported task (a static import would skip the trailing assertions once
+# primary_user_name gets defined mid-import). The inner apply: tags the
+# discovery tasks `always` so they run under any --tags selection that
+# reaches this role. Skipped when an earlier role already resolved the
+# account.
 - name: Discover the primary account
-  ansible.builtin.import_tasks: primary_user.yml
+  ansible.builtin.include_role:
+    name: primary_user
+    apply:
+      tags: [always]
+  when: primary_user_name is not defined
 
 - name: Install the system-wide lowercase XDG defaults
   ansible.builtin.template:
@@ -18,19 +28,19 @@
 # depends on the skel role having created it first.
 - name: Create the lowercase XDG directories and .config in the primary home
   ansible.builtin.file:
-    path: "{{ xdg_user_dirs_primary_home }}/{{ item }}"
+    path: "{{ primary_user_home }}/{{ item }}"
     state: directory
-    owner: "{{ xdg_user_dirs_primary_user }}"
-    group: "{{ xdg_user_dirs_primary_group }}"
+    owner: "{{ primary_user_name }}"
+    group: "{{ primary_user_group }}"
     mode: "0755"
   loop: "{{ xdg_user_dirs_lowercase + ['.config'] }}"
 
 - name: Write the primary user's user-dirs.dirs
   ansible.builtin.template:
     src: user-dirs.dirs.j2
-    dest: "{{ xdg_user_dirs_primary_home }}/.config/user-dirs.dirs"
-    owner: "{{ xdg_user_dirs_primary_user }}"
-    group: "{{ xdg_user_dirs_primary_group }}"
+    dest: "{{ primary_user_home }}/.config/user-dirs.dirs"
+    owner: "{{ primary_user_name }}"
+    group: "{{ primary_user_group }}"
     mode: "0644"
 
 # `removes:` makes the module return without running rmdir when the directory
@@ -49,8 +59,8 @@
 # supply that prediction instead; they are skipped outside check mode.
 - name: Remove the empty capitalised default directories
   ansible.builtin.command:
-    cmd: rmdir -- {{ (xdg_user_dirs_primary_home ~ '/' ~ item) | quote }}
-    removes: "{{ xdg_user_dirs_primary_home }}/{{ item }}"
+    cmd: rmdir -- {{ (primary_user_home ~ '/' ~ item) | quote }}
+    removes: "{{ primary_user_home }}/{{ item }}"
   environment:
     LC_ALL: C
   loop: "{{ xdg_user_dirs_capitalised }}"
@@ -62,7 +72,7 @@
 
 - name: Find the capitalised default directories that still exist
   ansible.builtin.find:
-    paths: "{{ xdg_user_dirs_primary_home }}"
+    paths: "{{ primary_user_home }}"
     patterns: "{{ xdg_user_dirs_capitalised }}"
     file_type: directory
     recurse: false
