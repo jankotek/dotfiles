@@ -1,0 +1,28 @@
+---
+# Mirrors usr/sbin/setup-pkg-safety. Each entry is appended verbatim, in
+# order, to a file the helper appends to; `requires` names a command that must
+# be present for the file to be written at all.
+pkg_safety_files:
+  - path: /etc/npmrc
+    lines:
+      - "# Supply chain safety: do not run install scripts"
+      - "ignore-scripts=true"
+  - path: /etc/pip.conf
+    lines:
+      - "[global]"
+      - "# Supply chain safety: refuse source distributions (no setup.py execution)"
+      - "only-binary = :all:"
+  - path: /etc/uv/uv.toml
+    requires: uv
+    lines:
+      - "# Supply chain safety: refuse source distributions"
+      - "only-binary = true"
+  - path: /etc/gemrc
+    requires: gem
+    lines:
+      - "gem: --no-document"
+
+# Commands the helper probes with `command -v` before writing their config.
+pkg_safety_probed_commands:
+  - uv
+  - gem

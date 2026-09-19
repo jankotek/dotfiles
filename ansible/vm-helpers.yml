@@ -43,6 +43,11 @@
         name: console_font
       tags: [console_font]
 
+    - name: Package manager safety
+      ansible.builtin.include_role:
+        name: pkg_safety
+      tags: [pkg_safety]
+
   post_tasks:
     - name: Flush remaining handlers while still under the guard
       ansible.builtin.meta: flush_handlers

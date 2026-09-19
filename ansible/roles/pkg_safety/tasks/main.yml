@@ -1,0 +1,47 @@
+---
+# Mirrors usr/sbin/setup-pkg-safety: harden npm, pip, uv and gem against
+# install-time code execution. go, deno and bun need no configuration.
+
+# `command -v` has no module equivalent, so the PATH is searched directly.
+# file_type: any also matches the symlinks that optupdate installs.
+- name: Look for the optional package managers on PATH
+  ansible.builtin.find:
+    paths: "{{ ansible_facts.env.PATH.split(':') | select | unique | list }}"
+    patterns: "{{ pkg_safety_probed_commands }}"
+    file_type: any
+  register: pkg_safety_probe
+  check_mode: false
+
+- name: Record which optional package managers are installed
+  ansible.builtin.set_fact:
+    pkg_safety_present: "{{ pkg_safety_probe.files | map(attribute='path') | map('basename') | unique | list }}"
+
+- name: Create the configuration directories
+  ansible.builtin.file:
+    path: "{{ item.path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ pkg_safety_files }}"
+  loop_control:
+    label: "{{ item.path | dirname }}"
+  when: item.requires is not defined or item.requires in pkg_safety_present
+
+# Append-only, exactly like the helper: an existing file keeps whatever else
+# it holds. The helper keys idempotence on the setting name and this keys it on
+# the whole line, so a file that already sets the key in a different spelling
+# would get the canonical lines appended here.
+- name: Append the package-manager safety settings
+  ansible.builtin.lineinfile:
+    path: "{{ item.0.path }}"
+    line: "{{ item.1 }}"
+    insertafter: EOF
+    create: true
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ pkg_safety_files | subelements('lines') }}"
+  loop_control:
+    label: "{{ item.0.path }}: {{ item.1 }}"
+  when: item.0.requires is not defined or item.0.requires in pkg_safety_present
