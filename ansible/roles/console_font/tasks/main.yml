@@ -70,6 +70,23 @@
   register: console_font_console_setup
   check_mode: false
 
+# In check mode on a guest without the console-setup package, the package task
+# above was only simulated, so the stat cannot see the file the real run would
+# create and rewrite. Report that instead of silently predicting no change.
+# Font selection has the same limitation: the find above only sees the fonts
+# already installed, so on a fresh guest the preview may name the fallback
+# where a real run picks a different candidate.
+- name: Report the console-setup configuration deferred to a real run
+  ansible.builtin.debug:
+    msg: >-
+      /etc/default/console-setup would be rewritten once the console-setup
+      package is installed
+  when:
+    - ansible_check_mode
+    - not console_font_console_setup.stat.exists
+    - ansible_facts.os_family == 'Debian'
+  changed_when: true
+
 # The helper only rewrites this file when the distribution already ships it.
 - name: Configure console-setup
   ansible.builtin.template:

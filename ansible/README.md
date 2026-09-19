@@ -24,7 +24,13 @@ compared against that helper on a pair of disposable Tumbleweed clones.
   their files are removed.
 - `roles/console_font` — `usr/sbin/console-font`.
 - `roles/pkg_safety` — `usr/sbin/setup-pkg-safety`.
-- `roles/vm_networkd` — `usr/sbin/setup-vm-networkd`.
+- `roles/vm_networkd` — `usr/sbin/setup-vm-networkd`. **Base-image contract:**
+  `systemd-networkd` and `systemd-resolved` must already be installed. The role
+  removes NetworkManager and masks the competing stacks, so it asserts both
+  units exist before it touches anything and refuses to run otherwise. Neither
+  it nor `setup/bootstrap` installs them; the shell provisioners install them
+  earlier with the rest of the packages (`setup/vm-baseweed:55`,
+  `setup/vm-xub26:124`).
 - `roles/laptop_power` — `usr/sbin/install-laptop-power` (the `laptop-power`
   policy engine itself stays bash).
 
@@ -142,6 +148,12 @@ not-yet-existing unit.
 - Every role is included with `apply: { tags: [...] }`. Tags on a plain
   `include_role` apply to the include task only, so `--tags console_font` would
   select the include and then skip every task inside it.
+- Check mode reports what a real run would do even where the module cannot
+  predict it: a unit whose file does not exist yet, an empty capitalised XDG
+  directory, a missing zypper lock, `acpid` before its package is installed,
+  and `/etc/default/console-setup` before `console-setup` is installed. What
+  check mode still cannot describe on a fresh guest is console font selection,
+  which can only see the fonts already present.
 - Two tasks are honestly non-convergent, and so is the shell they mirror:
   `guest-cleanup.service` is a `Type=oneshot` without `RemainAfterExit` that
   `install-guest-cleanup` starts on every run, and `laptop-power.service` is

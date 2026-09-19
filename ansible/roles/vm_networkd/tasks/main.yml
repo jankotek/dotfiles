@@ -6,6 +6,27 @@
 # This role changes networking underneath the running system, so the play
 # calls it last, exactly where the shell provisioners call the helper.
 
+# Read-only, and before any mutation: the role removes NetworkManager and
+# stops and masks every competing stack, so it must not start unless the
+# replacement is actually installed. Neither this role nor setup/bootstrap
+# installs it - the shell provisioners install systemd-networkd and
+# systemd-resolved earlier, with the rest of the packages
+# (setup/vm-baseweed:55, setup/vm-xub26:124), and that is the base-image
+# contract this role expects.
+- name: Read the unit inventory before touching anything
+  ansible.builtin.service_facts:
+
+- name: Refuse to replace networking without networkd and resolved installed
+  ansible.builtin.assert:
+    that:
+      - vm_networkd_units | reject('in', ansible_facts.services) | list | length == 0
+    fail_msg: >-
+      {{ vm_networkd_units | reject('in', ansible_facts.services) | join(', ') }}
+      not installed. This role removes NetworkManager and masks the competing
+      stacks, so it refuses to run without the replacement. Install
+      systemd-networkd and systemd-resolved first - the shell provisioners do
+      it with the rest of the packages - or bake them into the base image.
+
 - name: Create the networkd configuration directory
   ansible.builtin.file:
     path: /etc/systemd/network
@@ -26,7 +47,8 @@
 - name: Remove and block NetworkManager
   ansible.builtin.include_tasks: "{{ ansible_facts.os_family }}.yml"
 
-- name: Read the unit inventory
+# Re-read: the family tasks above may have removed the NetworkManager package.
+- name: Re-read the unit inventory after the package changes
   ansible.builtin.service_facts:
 
 - name: Disable and stop NetworkManager

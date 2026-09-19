@@ -21,11 +21,26 @@
   failed_when: vm_networkd_locks.rc not in [0, 6]
   check_mode: false
 
+# A command task is skipped in check mode, and `changed_when: true` does not
+# turn a skipped command into a forecast, so the missing locks would vanish
+# from the preview entirely. Report them instead, and add them for real only
+# outside check mode.
+- name: Report the package locks a real run would add
+  ansible.builtin.debug:
+    msg: "zypper lock would be added for {{ item }}"
+  loop: "{{ vm_networkd_nm_packages }}"
+  when:
+    - ansible_check_mode
+    - ('<name>' ~ item ~ '</name>') not in (vm_networkd_locks.stdout | default(''))
+  changed_when: true
+
 - name: Lock NetworkManager out of the repositories
   ansible.builtin.command:
     cmd: zypper -n addlock {{ item | quote }}
   loop: "{{ vm_networkd_nm_packages }}"
-  when: ('<name>' ~ item ~ '</name>') not in (vm_networkd_locks.stdout | default(''))
+  when:
+    - not ansible_check_mode
+    - ('<name>' ~ item ~ '</name>') not in (vm_networkd_locks.stdout | default(''))
   changed_when: true
 
 - name: Read the unit inventory
