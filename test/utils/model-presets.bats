@@ -101,6 +101,49 @@ EOF
     [ "$status" -eq 0 ]
 }
 
+@test "Qwen3.8-27B downloaders fetch the optional DFlash sidecars" {
+    TEST_TEMP="$(mktemp -d)"
+    mkdir -p "$TEST_TEMP/bin"
+    cat > "$TEST_TEMP/bin/aria2c" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+dest_dir=
+output=
+url=
+for argument in "$@"; do
+    case "$argument" in
+        --dir=*) dest_dir="${argument#--dir=}" ;;
+        --out=*) output="${argument#--out=}" ;;
+        https://*) url="$argument" ;;
+    esac
+done
+[[ -n "$dest_dir" && -n "$output" && -n "$url" ]]
+printf '%s\n' "$url" >> "$DOWNLOAD_LOG"
+mkdir -p "$dest_dir"
+printf fixture > "$dest_dir/$output"
+EOF
+    chmod +x "$TEST_TEMP/bin/aria2c"
+
+    for spec in \
+        'download-qwen3.8-27b.sh|BF16|Qwen3.8-27B-DFlash' \
+        'download-qwen3.8-27b-q8-0.sh|Q8_0|Qwen3.8-27B-Q8_0-DFlash' \
+        'download-qwen3.8-27b-q4-k-m.sh|Q4_0|Qwen3.8-27B-Q4_K_M-DFlash'; do
+        IFS='|' read -r script quant section <<< "$spec"
+        dir="$TEST_TEMP/$quant"
+        mkdir -p "$dir"
+        run env -u HF_TOKEN -u HUGGING_FACE_HUB_TOKEN \
+            PATH="$TEST_TEMP/bin:$PATH" DOWNLOAD_DFLASH=1 \
+            DOWNLOAD_LOG="$dir/urls" OUT_DIR="$dir" "$OPT_JAN/agent/$script"
+        [ "$status" -eq 0 ]
+        [ -s "$dir/dflash-Qwen3.8-27B-${quant}.gguf" ]
+        grep -Fx "https://huggingface.co/ggml-org/Qwen3.8-27B-GGUF/resolve/main/dflash-Qwen3.8-27B-${quant}.gguf" "$dir/urls"
+        run preset "$section"
+        [ "$status" -eq 0 ]
+        [[ "$output" == *"spec-draft-model = /var/models/"*"/dflash-Qwen3.8-27B-${quant}.gguf"* ]]
+        [[ "$output" == *"spec-type = draft-dflash"* ]]
+    done
+}
+
 @test "Flash-Next downloader fetches every shard and projector to the preset paths" {
     TEST_TEMP="$(mktemp -d)"
     mkdir -p "$TEST_TEMP/bin"

@@ -14,6 +14,9 @@ MODELS=(
   "mmproj-Qwen3.8-27B-BF16.gguf"
   "mtp-Qwen3.8-27B-BF16.gguf"
 )
+if [[ "${DOWNLOAD_DFLASH:-0}" == 1 ]]; then
+  MODELS+=("dflash-Qwen3.8-27B-BF16.gguf")
+fi
 
 die() {
   printf 'error: %s\n' "$*" >&2
@@ -78,3 +81,4 @@ echo "    --parallel 1 --jinja -c 262144 -ctk bf16 -ctv bf16 -ngl 99 \\"
 echo "    --reasoning on --reasoning-effort medium \\"
 echo "    --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0 \\"
 echo "    --presence-penalty 0 --repeat-penalty 1"
+echo "Set DOWNLOAD_DFLASH=1 to fetch the optional DFlash drafter."

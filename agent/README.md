@@ -4,6 +4,20 @@ All download scripts work without a Hugging Face token for public files. Set
 `HF_TOKEN` or `HUGGING_FACE_HUB_TOKEN` when a repository requires access; the
 scripts send an authorization header only when a token is set.
 
+Check the fixed filenames against current Hugging Face listings and show GGUFs
+published in the last 30 days that the scripts do not select:
+
+```bash
+/opt/jan/agent/check-model-downloads.py
+```
+
+Use `--since-days 7` for a shorter window. `UPDATED` marks a selected file
+changed within the window; `OTHER` marks a GGUF outside the download lists.
+The check reads remote metadata only. The download scripts still follow
+`main` for each named file; rerunning one downloads that file's current
+contents. A renamed file, a new quant, or a new model repository needs a
+script update.
+
 The download scripts write beneath the caller's current directory. On a model
 build machine, start them from the directory that will contain the model
 directories:
@@ -28,6 +42,18 @@ cd /var/models
 This creates `/var/models/Qwen3.8-27B-GGUF-Q8_0` for the
 `Qwen3.8-27B-Q8_0` router preset. Set `OUT_DIR` to use another download
 location.
+
+The ggml-org Qwen3.8-27B repository also publishes DFlash drafters. Add one
+to the BF16, Q8_0, or Q4_K_M download with `DOWNLOAD_DFLASH=1`:
+
+```bash
+cd /var/models
+DOWNLOAD_DFLASH=1 /opt/jan/agent/download-qwen3.8-27b-q8-0.sh
+```
+
+The corresponding router presets end in `-DFlash`; the existing presets
+continue to use MTP. The Q4_K_M downloader gets the publisher's Q4_0 DFlash
+head, while the BF16 and Q8_0 downloaders get matching DFlash heads.
 
 Qwen3.8-Flash-Next is available as Unsloth's `UD-Q4_K_XL` GGUF (four model
 shards, about 111 GB total), plus a BF16 vision projector:

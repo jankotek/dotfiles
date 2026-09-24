@@ -13,6 +13,9 @@ MODELS=(
   "mmproj-Qwen3.8-27B-Q8_0.gguf"
   "mtp-Qwen3.8-27B-Q8_0.gguf"
 )
+if [[ "${DOWNLOAD_DFLASH:-0}" == 1 ]]; then
+  MODELS+=("dflash-Qwen3.8-27B-Q8_0.gguf")
+fi
 
 die() {
   printf 'error: %s\n' "$*" >&2
@@ -68,3 +71,4 @@ done
 
 echo
 echo "Done. Serve with the Qwen3.8-27B-Q8_0 router preset."
+echo "Set DOWNLOAD_DFLASH=1 to fetch the optional DFlash drafter."
