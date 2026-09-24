@@ -31,6 +31,62 @@ preset() {
     [ "$status" -eq 0 ]
 }
 
+@test "all download scripts accept no token and send authorization only when set" {
+    TEST_TEMP="$(mktemp -d)"
+    mkdir -p "$TEST_TEMP/bin"
+    cat > "$TEST_TEMP/bin/aria2c" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+dest_dir=
+output=
+header=
+for argument in "$@"; do
+    case "$argument" in
+        --dir=*) dest_dir="${argument#--dir=}" ;;
+        --out=*) output="${argument#--out=}" ;;
+        --header=Authorization:*) header="${argument#--header=}" ;;
+    esac
+done
+[[ -n "$dest_dir" && -n "$output" ]]
+printf '%s\n' "$header" >> "$DOWNLOAD_LOG"
+mkdir -p "$dest_dir"
+printf fixture > "$dest_dir/$output"
+EOF
+    chmod +x "$TEST_TEMP/bin/aria2c"
+
+    for script in "$OPT_JAN"/agent/download-*.sh; do
+        name="$(basename "$script" .sh)"
+        for token_source in none hf hub; do
+            dir="$TEST_TEMP/$name/$token_source"
+            mkdir -p "$dir"
+            case "$token_source" in
+                none)
+                    run env -u HF_TOKEN -u HUGGING_FACE_HUB_TOKEN \
+                        PATH="$TEST_TEMP/bin:$PATH" DOWNLOAD_LOG="$dir/headers" \
+                        ROOT="$dir" OUT_DIR="$dir" "$script"
+                    ;;
+                hf)
+                    run env -u HUGGING_FACE_HUB_TOKEN \
+                        HF_TOKEN=fixture-hf PATH="$TEST_TEMP/bin:$PATH" \
+                        DOWNLOAD_LOG="$dir/headers" ROOT="$dir" OUT_DIR="$dir" "$script"
+                    ;;
+                hub)
+                    run env -u HF_TOKEN \
+                        HUGGING_FACE_HUB_TOKEN=fixture-hub PATH="$TEST_TEMP/bin:$PATH" \
+                        DOWNLOAD_LOG="$dir/headers" ROOT="$dir" OUT_DIR="$dir" "$script"
+                    ;;
+            esac
+            [ "$status" -eq 0 ]
+            [ -s "$dir/headers" ]
+            case "$token_source" in
+                none) ! grep -q . "$dir/headers" ;;
+                hf) ! grep -vxq 'Authorization: Bearer fixture-hf' "$dir/headers" ;;
+                hub) ! grep -vxq 'Authorization: Bearer fixture-hub' "$dir/headers" ;;
+            esac
+        done
+    done
+}
+
 @test "Qwen downloaders keep BF16 and Q4_K_M bases side by side" {
     run grep -F '"Qwen3.8-27B-BF16.gguf"' "$OPT_JAN/agent/download-qwen3.8-27b.sh"
     [ "$status" -eq 0 ]
@@ -43,6 +99,52 @@ preset() {
 
     run grep -F '"mtp-Qwen3.8-27B-BF16.gguf"' "$OPT_JAN/agent/download-qwen3.8-27b.sh"
     [ "$status" -eq 0 ]
+}
+
+@test "Flash-Next downloader fetches every shard and projector to the preset paths" {
+    TEST_TEMP="$(mktemp -d)"
+    mkdir -p "$TEST_TEMP/bin"
+    cat > "$TEST_TEMP/bin/aria2c" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+dest_dir=
+output=
+url=
+for argument in "$@"; do
+    case "$argument" in
+        --dir=*) dest_dir="${argument#--dir=}" ;;
+        --out=*) output="${argument#--out=}" ;;
+        https://*) url="$argument" ;;
+    esac
+done
+[[ -n "$dest_dir" && -n "$output" && -n "$url" ]]
+printf '%s\n' "$url" >> "$DOWNLOAD_LOG"
+printf fixture > "$dest_dir/$output"
+EOF
+    chmod +x "$TEST_TEMP/bin/aria2c"
+
+    run env \
+        PATH="$TEST_TEMP/bin:$PATH" \
+        HF_TOKEN=fixture-token \
+        DOWNLOAD_LOG="$TEST_TEMP/urls" \
+        OUT_DIR="$TEST_TEMP/Qwen3.8-Flash-Next-GGUF-UD-Q4_K_XL" \
+        "$OPT_JAN/agent/download-qwen3.8-flash-next-ud-q4-k-xl.sh"
+    [ "$status" -eq 0 ]
+
+    for shard in 1 2 3 4; do
+        printf -v number '%05d' "$shard"
+        file="UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-${number}-of-00004.gguf"
+        [ -s "$TEST_TEMP/Qwen3.8-Flash-Next-GGUF-UD-Q4_K_XL/$file" ]
+        grep -Fx "https://huggingface.co/unsloth/Qwen3.8-Flash-Next-GGUF/resolve/main/$file" "$TEST_TEMP/urls"
+    done
+    [ -s "$TEST_TEMP/Qwen3.8-Flash-Next-GGUF-UD-Q4_K_XL/mmproj-BF16.gguf" ]
+    grep -Fx "https://huggingface.co/unsloth/Qwen3.8-Flash-Next-GGUF/resolve/main/mmproj-BF16.gguf" "$TEST_TEMP/urls"
+    [ "$(wc -l < "$TEST_TEMP/urls")" -eq 5 ]
+
+    run preset Qwen3.8-Flash-Next-UD-Q4_K_XL
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"model = /var/models/Qwen3.8-Flash-Next-GGUF-UD-Q4_K_XL/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf"* ]]
+    [[ "$output" == *"mmproj = /var/models/Qwen3.8-Flash-Next-GGUF-UD-Q4_K_XL/mmproj-BF16.gguf"* ]]
 }
 
 @test "single Qwen embedding downloader creates all Q8_0 model directories" {

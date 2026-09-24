@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Download all official Qwen3 text-embedding models in Q8_0 GGUF format.
 # Run from the directory that should contain the model directories, or set ROOT.
-# Requires: aria2c, and HF_TOKEN or HUGGING_FACE_HUB_TOKEN in the environment.
+# Requires: aria2c. HF_TOKEN or HUGGING_FACE_HUB_TOKEN is optional.
 set -euo pipefail
 
 ROOT="${ROOT:-.}"
@@ -21,7 +21,8 @@ die() {
 }
 
 command -v aria2c >/dev/null 2>&1 || die "aria2c is not installed (package: aria2)"
-[[ -n "$HF_TOKEN" ]] || die "set HF_TOKEN or HUGGING_FACE_HUB_TOKEN"
+AUTH_HEADER=()
+[[ -z "$HF_TOKEN" ]] || AUTH_HEADER=(--header="Authorization: Bearer ${HF_TOKEN}")
 
 download() {
   local repo="$1"
@@ -47,7 +48,7 @@ download() {
     --allow-overwrite=true \
     --dir="$dest_dir" \
     --out="$file" \
-    --header="Authorization: Bearer ${HF_TOKEN}" \
+    "${AUTH_HEADER[@]}" \
     --header="User-Agent: aria2-hf-download" \
     "$url"
 

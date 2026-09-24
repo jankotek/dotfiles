@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# Download Gemma 4 E4B 8-bit GGUFs for llama.cpp via aria2c.
+# Download the ggml-org Qwen3.8-27B Q8_0 model, vision projector, and MTP head.
 # Requires: aria2c. HF_TOKEN or HUGGING_FACE_HUB_TOKEN is optional.
 set -euo pipefail
 
-REPO="ggml-org/gemma-4-E4B-it-GGUF"
-OUT_DIR="${OUT_DIR:-gemma-4-E4B}"
+REPO="ggml-org/Qwen3.8-27B-GGUF"
+OUT_DIR="${OUT_DIR:-Qwen3.8-27B-GGUF-Q8_0}"
 HF_TOKEN="${HF_TOKEN:-${HUGGING_FACE_HUB_TOKEN:-}}"
 CONNECTIONS="${ARIA_CONNECTIONS:-16}"
 
-# 8-bit instruct weights + matching multimodal projector (image/audio).
 MODELS=(
-  "gemma-4-E4B-it-Q8_0.gguf"
-  "mmproj-gemma-4-E4B-it-Q8_0.gguf"
+  "Qwen3.8-27B-Q8_0.gguf"
+  "mmproj-Qwen3.8-27B-Q8_0.gguf"
+  "mtp-Qwen3.8-27B-Q8_0.gguf"
 )
 
 die() {
@@ -67,8 +67,4 @@ for file in "${MODELS[@]}"; do
 done
 
 echo
-echo "Done. llama.cpp example (Q8 is tight on 8 GB RAM — keep context modest):"
-echo "  llama-server \\"
-echo "    -m $OUT_DIR/gemma-4-E4B-it-Q8_0.gguf \\"
-echo "    --mmproj $OUT_DIR/mmproj-gemma-4-E4B-it-Q8_0.gguf \\"
-echo "    --jinja --temp 1.0 --top-p 0.95 --top-k 64 --min-p 0 -c 4096 -ngl 99"
+echo "Done. Serve with the Qwen3.8-27B-Q8_0 router preset."

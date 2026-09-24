@@ -2,7 +2,7 @@
 # Download PaddleOCR-VL-1.6 (largest weights) via aria2c.
 #   llama.cpp: official F16 GGUF + F16 mmproj
 #   Paddle/official: HF safetensors snapshot + PP-DocLayoutV3 paddle weights
-# Requires: aria2c, and HF_TOKEN or HUGGING_FACE_HUB_TOKEN in the environment.
+# Requires: aria2c. HF_TOKEN or HUGGING_FACE_HUB_TOKEN is optional.
 set -euo pipefail
 
 ROOT="${ROOT:-.}"
@@ -40,7 +40,8 @@ die() {
 }
 
 command -v aria2c >/dev/null 2>&1 || die "aria2c is not installed (package: aria2)"
-[[ -n "$HF_TOKEN" ]] || die "set HF_TOKEN or HUGGING_FACE_HUB_TOKEN"
+AUTH_HEADER=()
+[[ -z "$HF_TOKEN" ]] || AUTH_HEADER=(--header="Authorization: Bearer ${HF_TOKEN}")
 
 hf_url() {
   local repo="$1" file="$2"
@@ -69,7 +70,7 @@ download() {
     --allow-overwrite=true \
     --dir="$out_dir" \
     --out="$file" \
-    --header="Authorization: Bearer ${HF_TOKEN}" \
+    "${AUTH_HEADER[@]}" \
     --header="User-Agent: aria2-hf-download" \
     "$(hf_url "$repo" "$file")"
 

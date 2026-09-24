@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Download Meta Muse Glimmer 30B official GGUF (K-Quant-Dynamic Q4_K_XL)
 # for llama.cpp via aria2c.
-# Requires: aria2c, and HF_TOKEN or HUGGING_FACE_HUB_TOKEN in the environment.
+# Requires: aria2c. HF_TOKEN or HUGGING_FACE_HUB_TOKEN is optional.
 set -euo pipefail
 
 REPO="meta-models/Muse-Glimmer-30B-GGUF"
@@ -22,7 +22,8 @@ die() {
 }
 
 command -v aria2c >/dev/null 2>&1 || die "aria2c is not installed (package: aria2)"
-[[ -n "$HF_TOKEN" ]] || die "set HF_TOKEN or HUGGING_FACE_HUB_TOKEN"
+AUTH_HEADER=()
+[[ -z "$HF_TOKEN" ]] || AUTH_HEADER=(--header="Authorization: Bearer ${HF_TOKEN}")
 
 mkdir -p "$OUT_DIR"
 
@@ -52,7 +53,7 @@ download() {
     --allow-overwrite=true \
     --dir="$OUT_DIR" \
     --out="$file" \
-    --header="Authorization: Bearer ${HF_TOKEN}" \
+    "${AUTH_HEADER[@]}" \
     --header="User-Agent: aria2-hf-download" \
     "$(hf_url "$file")"
 
