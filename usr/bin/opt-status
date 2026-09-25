@@ -1,0 +1,50 @@
+#!/bin/bash
+# List versions recorded under /opt. Reads version files only.
+
+set -Eeuo pipefail
+
+usage() { echo "Usage: opt-status"; }
+if [[ ${1:-} == -h || ${1:-} == --help ]]; then
+    usage
+    exit 0
+fi
+if (( $# )); then
+    usage >&2
+    exit 2
+fi
+
+root=${JAN_OPT:-/opt}
+root=${root%/}
+if [[ ! -d $root ]]; then
+    echo "ERROR: $root is not a directory" >&2
+    exit 1
+fi
+
+rows=()
+shopt -s nullglob
+for version_file in "$root"/*/.version "$root"/*/*/.version; do
+    [[ -f $version_file ]] || continue
+    name=${version_file#"$root"/}
+    name=${name%/.version}
+    IFS= read -r version < "$version_file" || true
+    version=${version//$'\r'/}
+    rows+=("$name"$'\t'"${version:-empty}")
+done
+for version_file in "$root"/.versions/*; do
+    [[ -f $version_file && $version_file != *.sha256 ]] || continue
+    name=bin/$(basename -- "$version_file")
+    IFS= read -r version < "$version_file" || true
+    version=${version//$'\r'/}
+    rows+=("$name"$'\t'"${version:-empty}")
+done
+shopt -u nullglob
+
+if (( ${#rows[@]} == 0 )); then
+    echo "No recorded versions in $root"
+    exit 0
+fi
+
+while IFS= read -r row; do
+    IFS=$'\t' read -r name version <<<"$row"
+    printf '%s  %s\n' "$name" "$version"
+done < <(printf '%s\n' "${rows[@]}" | sort -V)

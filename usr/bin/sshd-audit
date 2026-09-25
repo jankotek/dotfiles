@@ -114,13 +114,21 @@ else
             continue
         fi
         echo "  $(basename -- "$cert")  Valid: $valid"
-        expires=${valid##* to }
-        if expires_epoch=$(date -d "$expires" +%s 2>/dev/null); then
-            if (( expires_epoch < now )); then
-                warn "$(basename -- "$cert") expired"
+        expires=""
+        case $valid in
+            forever) ;;
+            before\ *) expires=${valid#before } ;;
+            *' to '*) expires=${valid##* to } ;;
+            *) warn "could not parse expiry for $(basename -- "$cert")" ;;
+        esac
+        if [[ -n $expires ]]; then
+            if expires_epoch=$(date -d "$expires" +%s 2>/dev/null); then
+                if (( expires_epoch < now )); then
+                    warn "$(basename -- "$cert") expired"
+                fi
+            else
+                warn "could not parse expiry for $(basename -- "$cert")"
             fi
-        else
-            warn "could not parse expiry for $(basename -- "$cert")"
         fi
     done
 fi

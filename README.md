@@ -40,6 +40,7 @@ fixture-only; see [test/README.md](test/README.md) for details.
 ## Utilities
 
 - `host-doctor` — read-only host/VM health summary
+- `opt-status` — list versions recorded under `/opt`
 - `pod-doctor` — read-only pod subordinate IDs, linger, Quadlet, and cgroup delegation
 - `sshd-audit` — read-only PermitRootLogin, password authentication, and host key/cert age
 - `vm-list` — one line per session VM: state, base or overlay disk, size, and guest IPv4

@@ -13,6 +13,7 @@ setup() {
         clean-check \
         host-doctor \
         dotfiles-diff \
+        opt-status \
         pod-doctor \
         sshd-audit \
         verified-download \
@@ -255,6 +256,52 @@ EOF
     [[ $output == *$'badjson                  shut off     unknown           -  -                -'* ]]
     [[ $output == *$'nosize                   shut off     unknown           -  -                -'* ]]
     [[ $output != *base* ]]
+}
+
+@test "vm-list rejects string disk sizes and hides partial totals" {
+    local bin="$UTIL_TMP/bin"
+    cat > "$bin/virsh" <<'EOF'
+#!/bin/bash
+set -euo pipefail
+if [[ ${1:-} == -c ]]; then shift 2; fi
+cmd=$1
+shift
+case "$cmd" in
+    list) printf 'zero\nstrsize\noctal\npair\n' ;;
+    domstate) printf 'shut off\n' ;;
+    domblklist)
+        case $1 in
+            pair)
+                printf 'file disk vda /images/pair-a.qcow2\n'
+                printf 'file disk vdb /images/pair-b.qcow2\n'
+                ;;
+            *) printf 'file disk vda /images/%s.qcow2\n' "$1" ;;
+        esac
+        ;;
+    *) exit 1 ;;
+esac
+EOF
+    cat > "$bin/qemu-img" <<'EOF'
+#!/bin/bash
+set -euo pipefail
+path=${*: -1}
+case "$path" in
+    /images/zero.qcow2) printf '%s\n' '{"actual-size":0}' ;;
+    /images/strsize.qcow2) printf '%s\n' '{"actual-size":"1048576"}' ;;
+    /images/octal.qcow2) printf '%s\n' '{"actual-size":"08"}' ;;
+    /images/pair-a.qcow2) printf '%s\n' '{"actual-size":1048576}' ;;
+    /images/pair-b.qcow2) printf 'not-json\n' ;;
+    *) exit 1 ;;
+esac
+EOF
+    chmod +x "$bin/virsh" "$bin/qemu-img"
+
+    run env PATH="$bin:$PATH" "$OPT_JAN/usr/bin/vm-list"
+    [[ $status -eq 0 ]]
+    [[ $output == *$'zero                     shut off     base              0  -                -'* ]]
+    [[ $output == *$'strsize                  shut off     unknown           -  -                -'* ]]
+    [[ $output == *$'octal                    shut off     unknown           -  -                -'* ]]
+    [[ $output == *$'pair                     shut off     unknown           -  -                -'* ]]
 }
 
 @test "vm-list rejects extra arguments" {
@@ -568,4 +615,77 @@ EOF
     [[ $output == *"ssh_host_ed25519_key-cert.pub  Valid: from 2020-01-01T00:00:00 to 2020-06-01T00:00:00"* ]]
     [[ $output == *"WARN: ssh_host_ed25519_key-cert.pub expired"* ]]
     [[ $output == *"Audit found 4 warning(s)."* ]]
+}
+
+@test "sshd-audit accepts a forever host certificate" {
+    local dir="$UTIL_TMP/ssh" bin="$UTIL_TMP/bin" config="$UTIL_TMP/sshd-forever.txt"
+    mkdir -p "$dir" "$bin"
+    printf 'permitrootlogin no\npasswordauthentication no\nkbdinteractiveauthentication no\n' > "$config"
+    printf 'cert\n' > "$dir/ssh_host_ed25519_key-cert.pub"
+    touch -d @1600000000 "$dir/ssh_host_ed25519_key.pub"
+    cat > "$bin/sshd" <<'EOF'
+#!/bin/bash
+[[ ${1:-} == -T ]]
+cat "$SSHD_STUB_CONFIG"
+EOF
+    cat > "$bin/ssh-keygen" <<'EOF'
+#!/bin/bash
+printf '        Valid: forever\n'
+EOF
+    chmod +x "$bin/sshd" "$bin/ssh-keygen"
+
+    run env PATH="$bin:$PATH" SSHD_AUDIT_KEY_DIR="$dir" SSHD_STUB_CONFIG="$config" \
+        "$OPT_JAN/usr/bin/sshd-audit"
+    [[ $status -eq 0 ]]
+    [[ $output == *"Valid: forever"* ]]
+    [[ $output != *"could not parse expiry"* ]]
+    [[ $output == *"Audit found no problems."* ]]
+}
+
+@test "sshd-audit treats a before-date host certificate as an expiry" {
+    local dir="$UTIL_TMP/ssh" bin="$UTIL_TMP/bin" config="$UTIL_TMP/sshd-before.txt"
+    mkdir -p "$dir" "$bin"
+    printf 'permitrootlogin no\npasswordauthentication no\nkbdinteractiveauthentication no\n' > "$config"
+    printf 'cert\n' > "$dir/ssh_host_ed25519_key-cert.pub"
+    touch -d @1600000000 "$dir/ssh_host_ed25519_key.pub"
+    cat > "$bin/sshd" <<'EOF'
+#!/bin/bash
+[[ ${1:-} == -T ]]
+cat "$SSHD_STUB_CONFIG"
+EOF
+    cat > "$bin/ssh-keygen" <<'EOF'
+#!/bin/bash
+printf '        Valid: before 2020-01-01T00:00:00\n'
+EOF
+    chmod +x "$bin/sshd" "$bin/ssh-keygen"
+
+    run env PATH="$bin:$PATH" SSHD_AUDIT_KEY_DIR="$dir" SSHD_STUB_CONFIG="$config" \
+        "$OPT_JAN/usr/bin/sshd-audit"
+    [[ $status -eq 1 ]]
+    [[ $output == *"Valid: before 2020-01-01T00:00:00"* ]]
+    [[ $output == *"WARN: ssh_host_ed25519_key-cert.pub expired"* ]]
+    [[ $output != *"could not parse expiry"* ]]
+}
+
+@test "opt-status lists recorded versions" {
+    local root="$UTIL_TMP/opt"
+    mkdir -p "$root/idea" "$root/jdk/21" "$root/.versions" "$root/bin"
+    printf '2026.1\n' > "$root/idea/.version"
+    printf '21.0.4\n' > "$root/jdk/21/.version"
+    printf '1.7.1\n' > "$root/.versions/jq"
+    printf 'abc\n' > "$root/.versions/jq.sha256"
+
+    run env JAN_OPT="$root" "$OPT_JAN/usr/bin/opt-status"
+    [[ $status -eq 0 ]]
+    [[ $output == *$'idea  2026.1'* ]]
+    [[ $output == *$'jdk/21  21.0.4'* ]]
+    [[ $output == *$'bin/jq  1.7.1'* ]]
+    [[ $output != *sha256* ]]
+    [[ $output != *abc* ]]
+}
+
+@test "opt-status reports a missing opt directory" {
+    run env JAN_OPT="$UTIL_TMP/missing-opt" "$OPT_JAN/usr/bin/opt-status"
+    [[ $status -eq 1 ]]
+    [[ $output == *"not a directory"* ]]
 }

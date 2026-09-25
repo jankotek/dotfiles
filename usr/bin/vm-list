@@ -83,12 +83,14 @@ while IFS= read -r vm; do
                 saw_missing=1
                 continue
             }
-            if ! bytes=$(jq -er '."actual-size" // empty' <<<"$info" 2>/dev/null) \
-                    || [[ ! $bytes =~ ^[0-9]+$ ]]; then
+            if ! bytes=$(jq -er '
+                    ."actual-size" | numbers | select(. >= 0 and . == floor)
+                ' <<<"$info" 2>/dev/null) \
+                    || [[ ! $bytes =~ ^(0|[1-9][0-9]*)$ ]]; then
                 saw_unknown=1
                 continue
             fi
-            total_bytes=$((total_bytes + bytes))
+            total_bytes=$((total_bytes + 10#$bytes))
             full_backing=$(jq -r '."full-backing-filename" // empty' <<<"$info" 2>/dev/null || true)
             if [[ -n $full_backing ]]; then
                 saw_overlay=1
@@ -108,14 +110,16 @@ while IFS= read -r vm; do
     fi
 
     if (( saw_disk && (saw_base || saw_overlay) )); then
-        size=$((total_bytes / 1048576))
         if (( saw_unknown || saw_missing )); then
             role=unknown
+            size="-"
             backing="-"
         elif (( saw_overlay && saw_base )); then
+            size=$((total_bytes / 1048576))
             role=mixed
             backing=mixed
         elif (( saw_overlay )); then
+            size=$((total_bytes / 1048576))
             role=overlay
             if (( ${#backing_names[@]} == 1 )); then
                 backing=${!backing_names[*]}
@@ -123,6 +127,7 @@ while IFS= read -r vm; do
                 backing=mixed
             fi
         else
+            size=$((total_bytes / 1048576))
             role=base
             backing="-"
         fi
