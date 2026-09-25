@@ -115,7 +115,6 @@ echo "==> Syncing canonical skeleton home to ${HOME_DIR} (user=${HOME_USER})"
 
 # Sync without --delete: dotfiles deploy, user data survives.
 rsync -a /opt/jan/skel/home/ "${HOME_DIR}/"
-[[ -d /opt/jan/home-root ]] && rsync -r /opt/jan/home-root/ /root/
 
 chmod 0755 /home
 chmod 0700 "$HOME_DIR" /root

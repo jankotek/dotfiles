@@ -72,3 +72,10 @@ done
 for name in "${retired_sbin[@]}"; do
     rm -f "/usr/local/sbin/$name"
 done
+
+# Starship was once vendored as usr/bin/starship; the distro package now
+# provides /usr/bin/starship. Drop only the dangling repo symlink, never a
+# locally installed binary.
+if [[ -L /usr/local/bin/starship && ! -e /usr/local/bin/starship ]]; then
+    rm -f /usr/local/bin/starship
+fi

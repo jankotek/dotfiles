@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# ci: fixture
 
 load ../helpers
 

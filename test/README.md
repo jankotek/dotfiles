@@ -47,9 +47,16 @@ test/test-vm-xub26-deploy.sh       # clone xub26 -> setup/vm-xub26 -> test -> de
 
 ### utils/ — fixture checks and manual integration tests
 
-Not triggered by the host or VM launchers. CI runs `repo-policy.bats` and
-`pod-subid-allocation.bats`; tests that modify system state are manual and must
-be run as root.
+Not triggered by the host or VM launchers. Line 2 of every file declares its
+CI category, and CI selects files by that tag:
+
+- `# ci: fixture` — offline and unprivileged, with external commands stubbed;
+  runs on every push
+- `# ci: portable-tools` — full network install; runs in the separate
+  `portable-tools` job
+- `# ci: manual` — needs root, a deployed VM, or heavy downloads
+
+`repo-policy.bats` fails if a file has no valid tag.
 
 | File | What it checks |
 |------|---------------|
@@ -63,6 +70,9 @@ be run as root.
 | `repo-policy.bats` | Fast, fixture-only checks for canonical dotfiles, error traps, download policy, and provisioning safety limits |
 | `pod-subid-allocation.bats` | Fixture-only unit tests for non-overlapping subordinate UID/GID allocation; does not require root |
 | `pod-security.bats` | Creates a temporary pod user via `pod-setup`, verifies subordinate-ID preservation and matching UID/GID ranges plus all security hardening layers (nologin shell, locked password, nogroup, 0700 home, sudo denied, cron denied, filesystem ACLs, podman configs, linger, cgroup delegation, sysctl port restriction), then deletes everything |
+| `laptop-power.bats` | Fixture sysfs trees and a stubbed `systemctl` for lid/AC CPU limits, per-user quotas, low-battery suspend, frequency readback, locking, and installer hooks |
+| `kernel-zbook-build.bats` | CLI checks only: help through the deployment symlink, argument rejection, and the root requirement; never builds a kernel |
+| `idempotency.bats` | Run as root inside a deployed VM: re-runs `setup/vm-xub26` and verifies user data survives (driven by `test/test-vm-idempotency.sh`) |
 
 ```bash
 OPT_JAN="$PWD" bats test/utils/pod-subid-allocation.bats

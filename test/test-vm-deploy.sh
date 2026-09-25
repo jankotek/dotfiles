@@ -63,7 +63,7 @@ fi
 if [[ "$BASE_STATE" == "running" ]]; then
     echo "Base VM '$BASE_VM' is running — shutting it down for cloning..."
     virsh shutdown "$BASE_VM"
-    for i in $(seq 1 60); do
+    for _ in $(seq 1 60); do
         [[ "$(virsh domstate "$BASE_VM" 2>/dev/null)" == "shut off" ]] && break
         sleep 1
     done
@@ -169,7 +169,7 @@ echo "=== Running $SETUP_SCRIPT ==="
 echo ""
 echo "=== Cold restarting VM ==="
 virsh shutdown "$VM_NAME" 2>/dev/null || true
-for i in $(seq 1 30); do
+for _ in $(seq 1 30); do
     [[ "$(virsh domstate "$VM_NAME" 2>/dev/null)" == "shut off" ]] && break
     sleep 1
 done
@@ -181,7 +181,7 @@ virsh start "$VM_NAME" >/dev/null
 
 # Wait for desktop session (autologin + XFCE startup)
 echo "Waiting for desktop session..."
-for i in $(seq 1 30); do
+for _ in $(seq 1 30); do
     if "$VM_EXEC" "$VM_NAME" "pgrep -u jan xfce4-panel >/dev/null && pgrep -u jan xfdesktop >/dev/null" &>/dev/null; then
         echo "Desktop ready"
         break

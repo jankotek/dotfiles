@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# ci: portable-tools
 # Full network integration test for every tool in optupdate's default set.
 
 @test "default optupdate installs every expected executable" {

@@ -36,7 +36,7 @@ trap cleanup EXIT
 
 if [[ "$(virsh -c qemu:///session domstate "$BASE_VM" 2>/dev/null)" == "running" ]]; then
     virsh -c qemu:///session shutdown "$BASE_VM"
-    for i in $(seq 1 60); do
+    for _ in $(seq 1 60); do
         [[ "$(virsh -c qemu:///session domstate "$BASE_VM")" == "shut off" ]] && break
         sleep 1
     done

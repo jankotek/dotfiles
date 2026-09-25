@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# ci: fixture
 # Unit tests for pod-setup subordinate-ID allocation. These use fixtures
 # only and do not require root or modify the host account databases.
 

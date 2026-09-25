@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# ci: fixture
 # CLI checks only; never build a kernel or modify installed packages.
 
 setup() {

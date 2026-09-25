@@ -293,11 +293,12 @@ EOF
 install_idea() {
     # The releases API is the source of truth for both the download URL and
     # its checksum (download filenames changed from ideaIC-* to idea-*).
-    local json=$(curl -s 'https://data.services.jetbrains.com/products/releases?code=IIU&latest=true&type=release')
-    local version=$(grep -oP '"version":"\K[^"]+' <<<"$json" | head -1)
-    local url=$(grep -oP '"link":"\K[^"]+\.tar\.gz' <<<"$json" | grep -v aarch64 | head -1)
-    local sum_url=$(grep -oP '"checksumLink":"\K[^"]+\.tar\.gz\.sha256' <<<"$json" | grep -v aarch64 | head -1)
-    local sum=$(fetch_checksum "$sum_url")
+    local json version url sum_url sum
+    json=$(curl -s 'https://data.services.jetbrains.com/products/releases?code=IIU&latest=true&type=release') || true
+    version=$(grep -oP '"version":"\K[^"]+' <<<"$json" | head -1) || true
+    url=$(grep -oP '"link":"\K[^"]+\.tar\.gz' <<<"$json" | grep -v aarch64 | head -1) || true
+    sum_url=$(grep -oP '"checksumLink":"\K[^"]+\.tar\.gz\.sha256' <<<"$json" | grep -v aarch64 | head -1) || true
+    sum=$(fetch_checksum "$sum_url") || true
     if [ -z "$url" ] || [ -z "$sum" ]; then
         echo "✗ Failed to fetch download/checksum info for IntelliJ IDEA"
         return 1
@@ -307,10 +308,11 @@ install_idea() {
 }
 
 install_nushell() {
-    local version=$(github_api https://api.github.com/repos/nushell/nushell/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+    local version sum
+    version=$(github_api https://api.github.com/repos/nushell/nushell/releases/latest | grep -oP '"tag_name": "\K[^"]+') || true
     local file="nu-${version}-x86_64-unknown-linux-musl.tar.gz"
     local url="https://github.com/nushell/nushell/releases/download/${version}/${file}"
-    local sum=$(fetch_checksum "https://github.com/nushell/nushell/releases/download/${version}/SHA256SUMS" "$file")
+    sum=$(fetch_checksum "https://github.com/nushell/nushell/releases/download/${version}/SHA256SUMS" "$file") || true
     [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for Nushell"; return 1; }
     download_and_extract "Nushell" "nushell" "$url" "$version" 1 "$sum" "nu"
 }
@@ -587,11 +589,12 @@ install_fresh() {
 }
 
 install_corretto() {
+    local latest sum
     local jdk_version=$1
-    local latest=$(github_api "https://api.github.com/repos/corretto/corretto-${jdk_version}/releases/latest" | grep -oP '"tag_name": "\K[^"]+')
+    latest=$(github_api "https://api.github.com/repos/corretto/corretto-${jdk_version}/releases/latest" | grep -oP '"tag_name": "\K[^"]+') || true
     local version=${latest#*-}
     local url="https://corretto.aws/downloads/latest/amazon-corretto-${jdk_version}-x64-linux-jdk.tar.gz"
-    local sum=$(fetch_checksum "https://corretto.aws/downloads/latest_sha256/amazon-corretto-${jdk_version}-x64-linux-jdk.tar.gz")
+    sum=$(fetch_checksum "https://corretto.aws/downloads/latest_sha256/amazon-corretto-${jdk_version}-x64-linux-jdk.tar.gz") || true
     [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for Corretto JDK ${jdk_version}"; return 1; }
 
     download_and_extract "Amazon Corretto JDK ${jdk_version}" "jdk/${jdk_version}" \
@@ -606,7 +609,8 @@ install_corretto_all() {
 }
 
 install_gradle() {
-    local version=$(github_api https://api.github.com/repos/gradle/gradle/releases/latest | grep -oP '"tag_name": "\K[^"]+' | sed 's/^v//')
+    local version sum
+    version=$(github_api https://api.github.com/repos/gradle/gradle/releases/latest | grep -oP '"tag_name": "\K[^"]+' | sed 's/^v//') || true
 
     if [ -z "$version" ]; then
         echo "✗ Failed to fetch version for Gradle"
@@ -625,7 +629,7 @@ install_gradle() {
     fi
     [ "$current_version" != "$version" ] || echo "→ Rebuilding incomplete Gradle $version installation"
 
-    local sum=$(fetch_checksum "${url}.sha256")
+    sum=$(fetch_checksum "${url}.sha256") || true
     [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for Gradle"; return 1; }
 
     echo "→ Downloading Gradle $version..."
@@ -645,7 +649,8 @@ install_gradle() {
 }
 
 install_maven() {
-    local version=$(curl -s https://dlcdn.apache.org/maven/maven-3/ | grep -oP 'href="\K[0-9]+\.[0-9]+\.[0-9]+(?=/)' | sort -V | tail -1)
+    local version sum
+    version=$(curl -s https://dlcdn.apache.org/maven/maven-3/ | grep -oP 'href="\K[0-9]+\.[0-9]+\.[0-9]+(?=/)' | sort -V | tail -1) || true
 
     if [ -z "$version" ]; then
         echo "✗ Failed to fetch version for Maven"
@@ -666,7 +671,7 @@ install_maven() {
 
     # Cross-host verification: artifact from the CDN, canonical sha512 from
     # Apache's origin server — tampering would have to hit both.
-    local sum=$(fetch_checksum "https://downloads.apache.org/maven/maven-3/${version}/binaries/apache-maven-${version}-bin.tar.gz.sha512" "" 128)
+    sum=$(fetch_checksum "https://downloads.apache.org/maven/maven-3/${version}/binaries/apache-maven-${version}-bin.tar.gz.sha512" "" 128) || true
     [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for Maven"; return 1; }
 
     echo "→ Downloading Maven $version..."
@@ -688,7 +693,8 @@ install_maven() {
 
 install_pgadmin() {
     # pgAdmin uses tags like "REL-9_10" instead of releases
-    local tag=$(github_api https://api.github.com/repos/pgadmin-org/pgadmin4/tags | grep -oP '"name": "REL-\K[0-9]+_[0-9]+' | head -1)
+    local tag version
+    tag=$(github_api https://api.github.com/repos/pgadmin-org/pgadmin4/tags | grep -oP '"name": "REL-\K[0-9]+_[0-9]+' | head -1) || true
 
     if [ -z "$tag" ]; then
         echo "✗ Failed to fetch version for pgAdmin"
@@ -696,7 +702,7 @@ install_pgadmin() {
     fi
 
     # Convert REL-9_10 to 9.10
-    local version=$(echo "$tag" | tr '_' '.')
+    version=$(echo "$tag" | tr '_' '.')
     local url="https://ftp.postgresql.org/pub/pgadmin/pgadmin4/v${version}/pip/pgadmin4-${version}-py3-none-any.whl"
     local version_file="$BASE_DIR/pgadmin/.version"
     local current_version=""
@@ -796,69 +802,77 @@ download_single_binary() (
 
 
 install_kubectl() {
-    local version=$(curl -sL https://dl.k8s.io/release/stable.txt)
+    local version sum
+    version=$(curl -sL https://dl.k8s.io/release/stable.txt) || true
     local url="https://dl.k8s.io/release/${version}/bin/linux/amd64/kubectl"
-    local sum=$(fetch_checksum "${url}.sha256")
+    sum=$(fetch_checksum "${url}.sha256") || true
     [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for kubectl"; return 1; }
     download_single_binary "kubectl" "kubectl" "$url" "$version" "$sum"
 }
 
 install_kind() {
-    local version=$(github_api https://api.github.com/repos/kubernetes-sigs/kind/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+    local version sum
+    version=$(github_api https://api.github.com/repos/kubernetes-sigs/kind/releases/latest | grep -oP '"tag_name": "\K[^"]+') || true
     local url="https://github.com/kubernetes-sigs/kind/releases/download/${version}/kind-linux-amd64"
-    local sum=$(fetch_checksum "${url}.sha256sum" "kind-linux-amd64")
+    sum=$(fetch_checksum "${url}.sha256sum" "kind-linux-amd64") || true
     [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for kind"; return 1; }
     download_single_binary "kind" "kind" "$url" "$version" "$sum"
 }
 
 install_k9s() {
-    local version=$(github_api https://api.github.com/repos/derailed/k9s/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+    local version sum
+    version=$(github_api https://api.github.com/repos/derailed/k9s/releases/latest | grep -oP '"tag_name": "\K[^"]+') || true
     local url="https://github.com/derailed/k9s/releases/download/${version}/k9s_Linux_amd64.tar.gz"
-    local sum=$(fetch_checksum "https://github.com/derailed/k9s/releases/download/${version}/checksums.sha256" "k9s_Linux_amd64.tar.gz")
+    sum=$(fetch_checksum "https://github.com/derailed/k9s/releases/download/${version}/checksums.sha256" "k9s_Linux_amd64.tar.gz") || true
     [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for k9s"; return 1; }
     download_and_extract "k9s" "k9s" "$url" "$version" 0 "$sum" "k9s"
 }
 
 install_helm() {
-    local version=$(github_api https://api.github.com/repos/helm/helm/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+    local version sum
+    version=$(github_api https://api.github.com/repos/helm/helm/releases/latest | grep -oP '"tag_name": "\K[^"]+') || true
     local url="https://get.helm.sh/helm-${version}-linux-amd64.tar.gz"
-    local sum=$(fetch_checksum "${url}.sha256")
+    sum=$(fetch_checksum "${url}.sha256") || true
     [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for Helm"; return 1; }
     download_and_extract "Helm" "helm" "$url" "$version" 1 "$sum" "helm"
 }
 
 install_stern() {
-    local version=$(github_api https://api.github.com/repos/stern/stern/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+    local version sum
+    version=$(github_api https://api.github.com/repos/stern/stern/releases/latest | grep -oP '"tag_name": "\K[^"]+') || true
     local file="stern_${version#v}_linux_amd64.tar.gz"
     local url="https://github.com/stern/stern/releases/download/${version}/${file}"
-    local sum=$(fetch_checksum "https://github.com/stern/stern/releases/download/${version}/checksums.txt" "$file")
+    sum=$(fetch_checksum "https://github.com/stern/stern/releases/download/${version}/checksums.txt" "$file") || true
     [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for Stern"; return 1; }
     download_and_extract "Stern" "stern" "$url" "$version" 0 "$sum" "stern"
 }
 
 install_skaffold() {
-    local version=$(github_api https://api.github.com/repos/GoogleContainerTools/skaffold/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+    local version sum
+    version=$(github_api https://api.github.com/repos/GoogleContainerTools/skaffold/releases/latest | grep -oP '"tag_name": "\K[^"]+') || true
     local url="https://github.com/GoogleContainerTools/skaffold/releases/download/${version}/skaffold-linux-amd64"
-    local sum=$(fetch_checksum "${url}.sha256" "skaffold-linux-amd64")
+    sum=$(fetch_checksum "${url}.sha256" "skaffold-linux-amd64") || true
     [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for Skaffold"; return 1; }
     download_single_binary "Skaffold" "skaffold" "$url" "$version" "$sum"
 }
 
 install_jq() {
-    local version=$(github_api https://api.github.com/repos/jqlang/jq/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+    local version sum
+    version=$(github_api https://api.github.com/repos/jqlang/jq/releases/latest | grep -oP '"tag_name": "\K[^"]+') || true
     local url="https://github.com/jqlang/jq/releases/download/${version}/jq-linux-amd64"
-    local sum=$(fetch_checksum "https://github.com/jqlang/jq/releases/download/${version}/sha256sum.txt" "jq-linux-amd64")
+    sum=$(fetch_checksum "https://github.com/jqlang/jq/releases/download/${version}/sha256sum.txt" "jq-linux-amd64") || true
     [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for jq"; return 1; }
     download_single_binary "jq" "jq" "$url" "$version" "$sum"
 }
 
 install_yq() {
-    local version=$(github_api https://api.github.com/repos/mikefarah/yq/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+    local version idx
+    version=$(github_api https://api.github.com/repos/mikefarah/yq/releases/latest | grep -oP '"tag_name": "\K[^"]+') || true
     local base="https://github.com/mikefarah/yq/releases/download/${version}"
     local url="${base}/yq_linux_amd64"
     # yq's "checksums" file has one row per file and one column per hash
     # algorithm; the column order is published in checksums_hashes_order.
-    local idx=$(curl -fLsS "${base}/checksums_hashes_order" 2>/dev/null | grep -nx 'SHA-256' | cut -d: -f1)
+    idx=$(curl -fLsS "${base}/checksums_hashes_order" 2>/dev/null | grep -nx 'SHA-256' | cut -d: -f1) || true
     local sum=""
     [ -n "$idx" ] && sum=$(curl -fLsS "${base}/checksums" 2>/dev/null \
         | awk -v c=$((idx + 1)) '$1 == "yq_linux_amd64" { print tolower($c); exit }' \
@@ -869,7 +883,8 @@ install_yq() {
 
 install_ffmpeg() {
     # BtbN dropped nonfree builds; gpl is the closest remaining variant.
-    local version=$(github_api https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest | grep -oP '"tag_name": "\K[^"]+')
+    local version sum
+    version=$(github_api https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest | grep -oP '"tag_name": "\K[^"]+') || true
     local file="ffmpeg-master-latest-linux64-gpl.tar.xz"
     local url="https://github.com/BtbN/FFmpeg-Builds/releases/download/${version}/${file}"
     local version_file="$BASE_DIR/ffmpeg/.version"
@@ -888,7 +903,7 @@ install_ffmpeg() {
     fi
     [ "$current_version" != "$version" ] || echo "→ Rebuilding incomplete FFmpeg $version installation"
 
-    local sum=$(fetch_checksum "https://github.com/BtbN/FFmpeg-Builds/releases/download/${version}/checksums.sha256" "$file")
+    sum=$(fetch_checksum "https://github.com/BtbN/FFmpeg-Builds/releases/download/${version}/checksums.sha256" "$file") || true
     [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for FFmpeg"; return 1; }
 
     echo "→ Downloading FFmpeg $version..."

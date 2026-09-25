@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# ci: fixture
 # Offline regression tests for upgrading an existing IntelliJ IDEA tree.
 
 setup() {

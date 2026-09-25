@@ -14,9 +14,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install test tools
-        run: sudo apt-get update && sudo apt-get install -y bats shellcheck
+        run: sudo apt-get update && sudo apt-get install -y bats jq rsync shellcheck
 
-      - name: Check shell syntax and errors
+      - name: Check shell syntax and warnings
         shell: bash
         run: |
           scripts=()
@@ -31,17 +31,12 @@ jobs:
           for script in "${scripts[@]}"; do
             bash -n "$script"
           done
-          shellcheck --severity=error --external-sources "${scripts[@]}"
+          shellcheck --severity=warning --external-sources "${scripts[@]}"
 
       - name: Run fixture-only unit tests
         run: |
-          OPT_JAN="$GITHUB_WORKSPACE" bats \
-            test/utils/browser-vm.bats \
-            test/utils/model-presets.bats \
-            test/utils/pod-subid-allocation.bats \
-            test/utils/repo-policy.bats \
-            test/utils/update-opt-idea-upgrade.bats \
-            test/utils/update-opt-mjolnir.bats
+          mapfile -t tests < <(awk 'FNR == 2 && $0 == "# ci: fixture" { print FILENAME }' test/utils/*.bats)
+          OPT_JAN="$GITHUB_WORKSPACE" bats "${tests[@]}"
 
   portable-tools:
     runs-on: ubuntu-latest
@@ -57,4 +52,6 @@ jobs:
           sudo apt-get install -y aria2 bats curl unzip xz-utils zstd
 
       - name: Install and verify all portable tools
-        run: OPT_JAN="$GITHUB_WORKSPACE" bats test/utils/update-opt-all.bats
+        run: |
+          mapfile -t tests < <(awk 'FNR == 2 && $0 == "# ci: portable-tools" { print FILENAME }' test/utils/*.bats)
+          OPT_JAN="$GITHUB_WORKSPACE" bats "${tests[@]}"

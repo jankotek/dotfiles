@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# ci: fixture
 
 setup() {
     source "$BATS_TEST_DIRNAME/../../usr/sbin/laptop-power"

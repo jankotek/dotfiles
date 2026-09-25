@@ -2,6 +2,9 @@
 #
 # Host setup — applies basic hardening to a fresh system.
 #
+# Installs no packages: CLI tools such as starship come from the distro
+# (setup/host-weed-kde installs them on Tumbleweed).
+#
 
 if [ "$EUID" -ne 0 ]; then
     echo "Please run as root"

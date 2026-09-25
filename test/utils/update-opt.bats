@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# ci: manual
 #
 # Network integration checks for portable tools managed by optupdate.
 #

@@ -189,7 +189,7 @@ PICTURES=media/pic
 VIDEOS=media/video
 EOF
 
-# Sync repo dotfiles into /home/jan and /root.
+# Sync repo dotfiles into /home/jan.
 #
 # Note: NO --delete. With --delete, rsync removes anything in the destination
 # that's not in the source, which blasts user data dirs (~/down, ~/doc,
@@ -198,7 +198,6 @@ EOF
 # preservation is more important than dotfile cleanliness.
 
 rsync -a /opt/jan/skel/home/ /home/jan
-[[ -d /opt/jan/home-root ]] && rsync -r /opt/jan/home-root/ /root
 
 chmod 0755 /home
 chmod 0700 /root/

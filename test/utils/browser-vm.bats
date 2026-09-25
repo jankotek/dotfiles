@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# ci: fixture
 
 setup() {
     export TEST_ROOT="$BATS_TEST_TMPDIR/browser-vm"

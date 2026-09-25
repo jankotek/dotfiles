@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# ci: fixture
 
 setup() {
     OPT_JAN="${OPT_JAN:-$(cd "${BATS_TEST_DIRNAME}/../.." && pwd)}"

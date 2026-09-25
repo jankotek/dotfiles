@@ -4,7 +4,7 @@ Personal dotfiles and system provisioning repo. Checked out at `/opt/jan` on tar
 
 ## Two deployment modes
 
-1. **Fresh install** — clone repo to `/opt/jan`, run a setup script (e.g. `setup/vm-xub26`)
+1. **Fresh install** — clone repo to `/opt/jan`, run the matching setup script as root
 2. **VM with host mount** — host's `/opt` is mounted into the guest; tools are already available
 
 ## Directory layout
@@ -12,12 +12,14 @@ Personal dotfiles and system provisioning repo. Checked out at `/opt/jan` on tar
 | Path | Purpose | Deployment |
 |------|---------|------------|
 | `skel/home/` | Canonical user dotfiles and new-user defaults | Installed into `/etc/skel`; VM provisioners also sync it into disposable VM homes |
-| `home-root/` | Root dotfiles | Non-deleting `rsync` to `/root` |
 | `usr/bin/` | User utilities | Symlinked into `/usr/local/bin` |
 | `usr/sbin/` | Admin scripts (run as root) | Symlinked into `/usr/local/sbin` |
 | `usr/share/` | Fonts, icons, themes, cursors | Symlinked into `/usr/local/share` |
-| `dist/` | Bundled theme assets (xfwm, cursors) | Referenced by themes |
-| `setup/` | Per-machine provisioning scripts | Run once on fresh install |
+| `dist/` | Bundled theme assets (Sweet, candy-icons, xfwm, cursors) and their `justfile` updater | Referenced by `usr/share/` links |
+| `setup/` | Per-machine provisioning scripts; `setup/host` is a minimal distro-agnostic hardening pass that installs no packages | Idempotent; safe to re-run |
+| `test/` | Bats suites for host, VM, and fixture checks | See Testing below |
+| `doc/` | Operational notes; `doc/todo/` holds open work | Not deployed |
+| `agent/` | Local GGUF download scripts, `llama-models.ini` presets, `serve-all.sh` | Run by hand on the model machine; downloads are gitignored |
 | `agent/skills/` | Canonical skill packages (repo-specific and general) | Not scanned by harnesses; source of truth |
 | `.agents/skills/` | Codex/Grok/Pi shared discovery | Real directory of per-skill symlinks into `agent/skills/` |
 | `.claude/skills/` | Claude Code discovery | Same per-skill symlink shape |
@@ -36,32 +38,39 @@ Personal dotfiles and system provisioning repo. Checked out at `/opt/jan` on tar
   `/opt/jan/agent/skills/<name>`
 - PATH commands in `usr/bin/` and `usr/sbin/` use domain-first kebab-case stems
   (`vm-gui`, `pod-setup`, `distro-upgrade`); no `jan-` brand prefix and no
-  `.sh` suffix. Vendored binaries keep the upstream name (`starship`)
+  `.sh` suffix. Do not vendor third-party binaries; use a distro package or
+  `optupdate`
 - `optupdate` downloads portable tools into `/opt/` with `.version` file tracking
+  and publisher checksums; `opt-status` lists what is installed
 - `distro-upgrade` is distro-agnostic: handles zypper (openSUSE), dnf (Fedora), apt (Ubuntu)
 - Setup scripts must check `systemd-detect-virt` before doing VM-specific operations
 - Shell configs exist for both bash (`.bashrc`) and fish (`config.fish`) — keep them in sync
 
 ## User environment
 
-- **Desktop**: XFCE, Sweet-Dark theme, JetBrains Mono font
-- **Terminal**: Terminator, Starship prompt
-- **Shells**: Bash + Fish (parallel configs)
-- **Editors**: mcedit (terminal), mousepad (GUI)
-- **Dev tools**: IntelliJ IDEA, Corretto JDKs, Gradle, Maven, Kubernetes tooling
+| | Host (`setup/host-weed-kde`) | VMs (`setup/vm-xub26`, `vm-baseweed`, `vm-ub26-xfce`) |
+|---|---|---|
+| OS | openSUSE Tumbleweed | Xubuntu 26.04, Ubuntu 26.04 cloud, or Tumbleweed |
+| Desktop | KDE Plasma 6 on Wayland, started from agetty on tty2-10 (tty1 stock) | XFCE on X11; the Ubuntu VMs autologin, `vm-baseweed` configures no login |
+| Terminal | Konsole | Terminator |
+| GUI editor | Kate / KWrite | Mousepad |
+
+Shared: Sweet-dark colors with Sweet-Purple/candy icons, JetBrains Mono,
+Bash + Fish with Starship (distro package), mcedit, and `optupdate` dev tools
+(IntelliJ IDEA, Corretto JDKs, Gradle, Maven, Kubernetes CLIs, coding agents).
 
 ## Testing
 
-Tests use [bats-core](https://github.com/bats-core/bats-core). Three test scenarios, two launchers, one automated deploy script.
+Tests use [bats-core](https://github.com/bats-core/bats-core): four test directories, two launchers, and automated VM deploy scripts.
 
 ### Scenarios
 
 | Directory | Runs on | What it verifies |
 |-----------|---------|-----------------|
-| `test/basic/` | everywhere | `/opt/jan` structure, CLI tools (fish, htop, ncdu, aria2c, yq, java, maven, go, ...), JetBrains Mono font |
-| `test/host/` | host only | Plasma/Wayland, KDE apps (kdenlive, krita, kdiff3, ...), virt tools, stock tty1 plus managed agetty on tty2-10, GDK_BACKEND=x11 patches |
+| `test/basic/` | everywhere | `/opt/jan` structure, CLI tools (fish, htop, ncdu, aria2c, yq, java, maven, go, ...), JetBrains Mono and console fonts, kernel tweaks, package safety locks, `/etc/skel` contents |
+| `test/host/` | host only | Plasma/Wayland, KDE apps (kdenlive, krita, kdiff3, ...), virt tools, stock tty1 plus managed agetty on tty2-10, GDK_BACKEND=x11 patches, monitor fixes, Strix Halo GPU parameters |
 | `test/vm/` | VM only | Deployed dotfiles (.bashrc, fish, git, user-dirs), XFCE/X11, terminator, rofi, autologin (xfce4-panel + xfdesktop running as jan), spice/qemu agents (installed + running), display resize loop, symlinks into /usr/local, purged packages (snapd, xfce4-terminal), systemd services |
-| `test/utils/` | CI / manual | Fast fixture-policy tests plus opt-in destructive integration tests such as pod-security |
+| `test/utils/` | CI / manual | Fixture tests, network installs, and opt-in destructive integration tests; each file declares its CI category (below) |
 
 ### Launchers
 
@@ -79,6 +88,8 @@ Tests use [bats-core](https://github.com/bats-core/bats-core). Three test scenar
 /opt/jan/test/test-vm-deploy.sh          # clone xub26 -> provision -> reboot -> test -> destroy
 /opt/jan/test/test-vm-deploy.sh --keep   # same, but keep VM for debugging
 /opt/jan/test/test-vm-xub26-deploy.sh    # clone xub26 -> setup/vm-xub26 -> test -> destroy
+/opt/jan/test/test-vm-baseweed-deploy.sh # same flow for the Tumbleweed VM base
+/opt/jan/test/test-vm-idempotency.sh     # provision twice and check user data survives
 ```
 
 The deploy script:
@@ -98,11 +109,18 @@ The deploy script:
 - Tests that need a running desktop (autologin, spice agent, resize loop) verify processes via `pgrep`, not env vars — because tests run via `vm-exec` (qemu guest agent), not inside an X session
 - VM tests run as root via guest agent; host tests run as the current user
 - When adding a new utility or setup script, add matching tests in the appropriate subdirectory
+- Every `test/utils/*.bats` has a `# ci: <category>` line after the shebang.
+  CI runs `fixture` files (offline, unprivileged, stubbed commands) on every
+  push and `portable-tools` files in the network job; `manual` files need
+  root, a VM, or heavy downloads. `repo-policy.bats` rejects untagged files
 - `sbin` tools live in `/usr/sbin` which may not be in user PATH — use `assert_executable /usr/sbin/...` instead of `assert_command`
 
 ## When editing scripts
 
 - Admin scripts (`usr/sbin/`) expect to run as root — they should check `$EUID`
 - Use `set -euo pipefail` in bash scripts
+- CI runs `bash -n` and `shellcheck --severity=warning` on every tracked shell
+  script. Under `set -e`, split `local x=$(cmd)` into `local x` plus
+  `x=$(cmd)`; add `|| true` only where the next line handles an empty result
 - Prefer `apt-get` over `apt` in scripts (non-interactive stability)
 - Version-managed tools use the pattern: check `.version` file, skip if current, download to `_temp` dir, swap in place

@@ -1,4 +1,4 @@
-update: update-candy update-sweet update-starship gitadd
+update: update-candy update-sweet gitadd
 
 update-candy:
     #!/usr/bin/env bash
@@ -39,21 +39,6 @@ update-sweet:
         sed -i 's/#1a1d2b/#000000/g' "$css"
         sed -i 's/#171a27/#000000/g' "$css"
     done
-
-update-starship:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    trap 'echo >&2 "${BASH_SOURCE[0]}:${BASH_LINENO[0]}: Command \`$BASH_COMMAND\` failed with exit code $?"; exit $?' ERR
-
-    url=https://github.com/starship/starship/releases/latest/download/starship-x86_64-unknown-linux-musl.tar.gz
-    tmp=$(mktemp -d)
-    wget  --no-verbose -O "$tmp/starship.tar.gz" "$url"
-    wget  --no-verbose -O "$tmp/starship.tar.gz.sha256" "$url.sha256"
-    echo "$(cat "$tmp/starship.tar.gz.sha256")  $tmp/starship.tar.gz" | sha256sum -c -
-
-    rm -rf starship/*
-    tar -xz -C starship/ -f "$tmp/starship.tar.gz"
-    rm -rf "$tmp"
 
 gitadd:
     #!/usr/bin/env bash

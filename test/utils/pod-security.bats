@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# ci: manual
 #
 # Integration test for pod-setup security hardening.
 # Creates a temporary pod user, verifies permissions, then removes it.

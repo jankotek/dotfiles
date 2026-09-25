@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# ci: manual
 #
 # Re-run idempotency + user-data preservation checks for setup/vm-xub26.
 #

@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# ci: fixture
 # Offline regression tests for the complete Mjolnir release bundle.
 
 setup() {

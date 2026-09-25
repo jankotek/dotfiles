@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# ci: fixture
 
 load ../helpers
 
@@ -187,7 +188,6 @@ load ../helpers
     for path in "$OPT_JAN"/usr/bin/* "$OPT_JAN"/usr/sbin/*; do
         [[ -f $path ]] || continue
         name=${path##*/}
-        [[ $name == starship ]] && continue
         [[ $name =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]
         [[ $name != *.sh ]]
         [[ $name != jan-* ]]
@@ -215,4 +215,55 @@ load ../helpers
         echo "unexpected package installs in test launchers" >&2
         return 1
     fi
+}
+
+@test "PATH utils are scripts, not vendored binaries" {
+    local path magic
+    for path in "$OPT_JAN"/usr/bin/* "$OPT_JAN"/usr/sbin/*; do
+        [[ -f $path ]] || continue
+        magic=$(head -c 4 -- "$path" | od -An -tx1 | tr -d ' \n')
+        if [[ $magic == 7f454c46 ]]; then
+            echo "vendored ELF binary: ${path#"$OPT_JAN"/}" >&2
+            return 1
+        fi
+    done
+}
+
+@test "every utils test file declares its CI category" {
+    local file tag
+    for file in "$OPT_JAN"/test/utils/*.bats; do
+        tag=$(sed -n '2p' "$file")
+        if [[ ! $tag =~ ^\#\ ci:\ (fixture|portable-tools|manual)$ ]]; then
+            echo "${file#"$OPT_JAN"/}: line 2 must be '# ci: fixture|portable-tools|manual'" >&2
+            return 1
+        fi
+    done
+}
+
+@test "AGENTS.md directory layout names existing paths" {
+    local path
+    local -a paths
+    mapfile -t paths < <(sed -n 's/^| `\([^`]*\)` |.*/\1/p' "$OPT_JAN/AGENTS.md")
+    (( ${#paths[@]} > 5 ))
+    for path in "${paths[@]}"; do
+        [[ $path == */ ]] || continue
+        if [[ ! -e $OPT_JAN/$path ]]; then
+            echo "AGENTS.md lists missing path: $path" >&2
+            return 1
+        fi
+    done
+}
+
+@test "CLAUDE.md points at the shared AGENTS.md" {
+    [[ -L $OPT_JAN/CLAUDE.md ]]
+    [[ $(readlink -- "$OPT_JAN/CLAUDE.md") == AGENTS.md ]]
+    [[ ! -e $OPT_JAN/agents.md || $OPT_JAN/agents.md -ef $OPT_JAN/AGENTS.md ]]
+}
+
+@test "VM provisioners do not reference the retired home-root tree" {
+    local script
+    [[ ! -e $OPT_JAN/home-root ]]
+    for script in setup/vm-xub26 setup/vm-baseweed; do
+        assert_file_not_contains "$OPT_JAN/$script" 'home-root'
+    done
 }
