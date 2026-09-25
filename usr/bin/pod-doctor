@@ -1,0 +1,205 @@
+#!/bin/bash
+# Read-only health summary for pods created by pod-setup.
+
+set -Eeuo pipefail
+
+usage() { echo "Usage: pod-doctor"; }
+if [[ ${1:-} == -h || ${1:-} == --help ]]; then
+    usage
+    exit 0
+fi
+if (( $# )); then
+    usage >&2
+    exit 2
+fi
+
+root=${POD_DOCTOR_ROOT:-}
+root=${root%/}
+pod_root=$root/var/pod
+subuid_file=$root/etc/subuid
+subgid_file=$root/etc/subgid
+linger_dir=$root/var/lib/systemd/linger
+systemd_system=$root/etc/systemd/system
+
+issues=0
+ok() { echo "OK: $*"; }
+warn() { echo "WARN: $*"; issues=$((issues + 1)); }
+
+delegate_ok() {
+    local value=${1,,} token need found
+    [[ $value == yes ]] && return 0
+    for need in cpu cpuset io memory pids; do
+        found=0
+        for token in ${value//,/ }; do
+            [[ $token == "$need" ]] && found=1
+        done
+        if (( found == 0 )); then
+            return 1
+        fi
+    done
+}
+
+collect_ranges() {
+    local file=$1 user=$2 uid=$3
+    local -n _dest=$4
+    local line owner
+    while IFS= read -r line || [[ -n ${line:-} ]]; do
+        [[ -n ${line:-} ]] || continue
+        [[ $line == \#* ]] && continue
+        owner=${line%%:*}
+        [[ $owner == "$user" || ( -n $uid && $owner == "$uid" ) ]] || continue
+        if [[ ! $line =~ ^[^:]+:(0|[1-9][0-9]*):([1-9][0-9]*)$ ]]; then
+            warn "$user invalid subordinate ID entry in $file: $line"
+            continue
+        fi
+        _dest+=("${BASH_REMATCH[1]}:${BASH_REMATCH[2]}")
+    done < "$file"
+    if (( ${#_dest[@]} )); then
+        local -a sorted=()
+        mapfile -t sorted < <(printf '%s\n' "${_dest[@]}" | sort -u)
+        _dest=("${sorted[@]}")
+    fi
+}
+
+join_lines() {
+    local IFS=,
+    printf '%s' "$*"
+}
+
+check_pod() {
+    local name=$1 home uid="" ranges_uid="" ranges_gid=""
+    local marker svc dropin delegate_value="" delegate_from_systemctl load_state=""
+    local -a quadlet_files=() uid_list=() gid_list=()
+
+    home=$pod_root/$name
+    if uid=$(id -u -- "$name" 2>/dev/null); then
+        ok "$name user exists"
+    else
+        warn "$name user does not exist"
+        uid=""
+    fi
+
+    if (( subuid_readable && subgid_readable )); then
+        uid_list=()
+        gid_list=()
+        collect_ranges "$subuid_file" "$name" "$uid" uid_list
+        collect_ranges "$subgid_file" "$name" "$uid" gid_list
+        ranges_uid=""
+        ranges_gid=""
+        if (( ${#uid_list[@]} )); then
+            ranges_uid=$(join_lines "${uid_list[@]}")
+        fi
+        if (( ${#gid_list[@]} )); then
+            ranges_gid=$(join_lines "${gid_list[@]}")
+        fi
+        if [[ -z $ranges_uid && -z $ranges_gid ]]; then
+            warn "$name has no subordinate IDs"
+        elif [[ $ranges_uid == "$ranges_gid" ]]; then
+            ok "$name subordinate IDs match ($ranges_uid)"
+        else
+            warn "$name subordinate IDs differ (subuid ${ranges_uid:-none}; subgid ${ranges_gid:-none})"
+        fi
+    fi
+
+    marker=$linger_dir/$name
+    if [[ -e $marker ]]; then
+        ok "$name linger is enabled"
+    else
+        warn "$name linger is disabled"
+    fi
+
+    if [[ -d $home/.config/containers/systemd ]]; then
+        mapfile -t quadlet_files < <(find "$home/.config/containers/systemd" -maxdepth 1 -type f \
+            \( -name '*.container' -o -name '*.pod' -o -name '*.volume' \
+               -o -name '*.network' -o -name '*.kube' -o -name '*.image' \
+               -o -name '*.build' \) -print | sort)
+    fi
+    if (( ${#quadlet_files[@]} == 0 )); then
+        warn "$name has no quadlet files"
+    else
+        svc=${name}-app.service
+        if [[ -f $home/.service-name ]]; then
+            IFS= read -r svc < "$home/.service-name" || true
+            [[ -n ${svc:-} ]] || svc=${name}-app.service
+        fi
+        load_state=""
+        if command -v systemctl >/dev/null 2>&1; then
+            if ! load_state=$(systemctl --machine="${name}@" --user show "$svc" \
+                    -p LoadState --value 2>/dev/null); then
+                load_state=""
+            fi
+        fi
+        load_state=${load_state//$'\n'/}
+        if [[ $load_state == loaded ]]; then
+            ok "$name quadlet $svc is loaded"
+        else
+            warn "$name quadlet $svc load state is ${load_state:-unavailable}"
+        fi
+    fi
+
+    if [[ -z $uid ]]; then
+        warn "$name cgroup delegation was not checked"
+        return 0
+    fi
+    delegate_value=""
+    delegate_from_systemctl=0
+    if command -v systemctl >/dev/null 2>&1; then
+        if delegate_value=$(systemctl show "user@${uid}.service" -p Delegate --value 2>/dev/null); then
+            delegate_from_systemctl=1
+        else
+            delegate_value=""
+        fi
+    fi
+    delegate_value=${delegate_value//$'\n'/}
+    read -r delegate_value <<<"${delegate_value:-}"
+    dropin=$systemd_system/user@${uid}.service.d/delegate.conf
+    if (( delegate_from_systemctl == 0 )) && [[ -f $dropin ]]; then
+        delegate_value=$(sed -n 's/^[[:space:]]*Delegate=//p' "$dropin" | head -1 | tr -d '\r')
+        read -r delegate_value <<<"${delegate_value:-}"
+    fi
+    if delegate_ok "$delegate_value"; then
+        ok "$name cgroup delegation is $delegate_value"
+    else
+        warn "$name cgroup delegation is '${delegate_value:-unset}'"
+    fi
+}
+
+pods=()
+if [[ ! -d $pod_root ]]; then
+    ok "no pods"
+elif [[ ! -r $pod_root ]]; then
+    warn "cannot list $pod_root"
+else
+    shopt -s nullglob
+    for marker in "$pod_root"/*/bin/upgrade; do
+        [[ -f $marker ]] || continue
+        marker=${marker%/bin/upgrade}
+        pods+=("${marker##*/}")
+    done
+    shopt -u nullglob
+    if (( ${#pods[@]} == 0 )); then
+        ok "no pods"
+    else
+        subuid_readable=0
+        subgid_readable=0
+        if [[ -r $subuid_file ]]; then
+            subuid_readable=1
+        else
+            warn "cannot read $subuid_file"
+        fi
+        if [[ -r $subgid_file ]]; then
+            subgid_readable=1
+        else
+            warn "cannot read $subgid_file"
+        fi
+        for name in "${pods[@]}"; do
+            check_pod "$name"
+        done
+    fi
+fi
+
+if (( issues )); then
+    echo "Doctor found $issues warning(s)."
+    exit 1
+fi
+echo "Doctor found no problems."

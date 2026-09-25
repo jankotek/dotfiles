@@ -1,5 +1,8 @@
 #!/bin/bash
 # Report cleanup candidates without deleting anything.
+#
+# CLEAN_CHECK_ROOT prefixes filesystem scans and skips live libvirt.
+# CLEAN_CHECK_KERNEL_QUERY selects auto (default), rpm, or dpkg.
 
 set -Eeuo pipefail
 
@@ -15,26 +18,49 @@ fi
 
 min_mib=${1:-512}
 min_kib=$((min_mib * 1024))
+scan_root=${CLEAN_CHECK_ROOT:-}
+scan_root=${scan_root%/}
+kernel_query=${CLEAN_CHECK_KERNEL_QUERY:-auto}
+
+abs() {
+    if [[ -n $scan_root ]]; then
+        printf '%s/%s\n' "$scan_root" "${1#/}"
+    else
+        printf '%s\n' "$1"
+    fi
+}
+
+print_mib() {
+    local kib=$1 path=$2
+    printf '%6d MiB  %s\n' "$((kib / 1024))" "$path"
+}
+
+dir_kib() {
+    local path=$1 size_kib
+    size_kib=$(du -skx "$path" 2>/dev/null | awk '{print $1}') || size_kib=0
+    [[ ${size_kib:-0} =~ ^[0-9]+$ ]] || size_kib=0
+    printf '%s\n' "$size_kib"
+}
 
 echo "Cleanup candidates (read-only; threshold ${min_mib} MiB)"
 echo
 echo "Home backups:"
+home_root=$(abs /home)
 while IFS= read -r -d '' backup; do
-    size_kib=$(du -skx "$backup" 2>/dev/null | awk '{print $1}') || size_kib=0
-    printf '%6d MiB  %s\n' "$((size_kib / 1024))" "$backup"
-done < <(find /home -mindepth 1 -maxdepth 1 -type d -name '*-backup-*' -print0 2>/dev/null)
+    print_mib "$(dir_kib "$backup")" "$backup"
+done < <(find "$home_root" -mindepth 1 -maxdepth 1 -type d -name '*-backup-*' -print0 2>/dev/null)
 
 echo
 echo "Large caches:"
-for cache in /var/cache /home/*/.cache; do
+for cache in "$(abs /var/cache)" "$home_root"/*/.cache; do
     [[ -d $cache ]] || continue
-    size_kib=$(du -skx "$cache" 2>/dev/null | awk '{print $1}') || size_kib=0
-    [[ ${size_kib:-0} -ge $min_kib ]] && printf '%6d MiB  %s\n' "$((size_kib / 1024))" "$cache"
+    size_kib=$(dir_kib "$cache")
+    [[ $size_kib -ge $min_kib ]] && print_mib "$size_kib" "$cache"
 done
 
 echo
 echo "Unattached qcow2 overlays:"
-if command -v virsh >/dev/null 2>&1 && command -v qemu-img >/dev/null 2>&1; then
+if [[ -z $scan_root ]] && command -v virsh >/dev/null 2>&1 && command -v qemu-img >/dev/null 2>&1; then
     declare -A attached=()
     while IFS= read -r vm; do
         [[ -n $vm ]] || continue
@@ -54,9 +80,114 @@ if command -v virsh >/dev/null 2>&1 && command -v qemu-img >/dev/null 2>&1; then
 fi
 
 echo
-echo "Installed kernels:"
-if command -v rpm >/dev/null 2>&1; then
-    rpm -qa 2>/dev/null | grep -E '^kernel-(default|longterm|zbook)-[0-9]' | sort -V || true
-elif command -v dpkg-query >/dev/null 2>&1; then
-    dpkg-query -W -f='${binary:Package} ${Version}\n' 'linux-image-[0-9]*' 2>/dev/null | sort -V || true
+echo "Journal:"
+found_journal=0
+for journal_dir in "$(abs /var/log/journal)" "$(abs /run/log/journal)"; do
+    [[ -d $journal_dir ]] || continue
+    found_journal=1
+    print_mib "$(dir_kib "$journal_dir")" "$journal_dir"
+done
+if (( found_journal == 0 )); then
+    echo "absent"
 fi
+
+echo
+echo "Podman storage:"
+found_podman=0
+print_podman() {
+    local base=$1
+    local path=$base
+    [[ -d $base ]] || return 0
+    if [[ -d $base/storage ]]; then
+        path=$base/storage
+    fi
+    found_podman=1
+    print_mib "$(dir_kib "$path")" "$path"
+}
+print_podman "$(abs /var/lib/containers)"
+shopt -s nullglob
+for containers_dir in "$home_root"/*/.local/share/containers \
+                      "$(abs /var/pod)"/*/.local/share/containers; do
+    print_podman "$containers_dir"
+done
+shopt -u nullglob
+if (( found_podman == 0 )); then
+    echo "none"
+fi
+
+echo
+echo "Hugging Face caches:"
+found_hf=0
+declare -A seen_hf=()
+print_hf() {
+    local path=$1
+    [[ -n $path && -d $path ]] || return 0
+    [[ -z ${seen_hf[$path]:-} ]] || return 0
+    seen_hf[$path]=1
+    found_hf=1
+    print_mib "$(dir_kib "$path")" "$path"
+}
+for hf_dir in "$home_root"/*/.cache/huggingface \
+              "$(abs /var/pod)"/*/.cache/huggingface; do
+    print_hf "$hf_dir"
+done
+if [[ -z $scan_root ]]; then
+    print_hf "${HF_HOME:-}"
+    print_hf "${HUGGINGFACE_HUB_CACHE:-}"
+fi
+if (( found_hf == 0 )); then
+    echo "none"
+fi
+
+echo
+echo "Installed kernels:"
+print_kernel() {
+    local bytes=$1 name=$2
+    [[ $bytes =~ ^[0-9]+$ ]] || return 0
+    printf '%6d MiB  %s\n' "$((bytes / 1048576))" "$name"
+}
+
+use_rpm=0
+use_dpkg=0
+case $kernel_query in
+    rpm) use_rpm=1 ;;
+    dpkg) use_dpkg=1 ;;
+    auto)
+        if command -v rpm >/dev/null 2>&1; then
+            use_rpm=1
+        elif command -v dpkg-query >/dev/null 2>&1; then
+            use_dpkg=1
+        fi
+        ;;
+    *)
+        echo "ERROR: CLEAN_CHECK_KERNEL_QUERY must be auto, rpm, or dpkg" >&2
+        exit 2
+        ;;
+esac
+
+kernel_lines=()
+if (( use_rpm )); then
+    mapfile -t kernel_lines < <(
+        rpm -qa --qf '%{NEVRA}\t%{SIZE}\n' 2>/dev/null \
+            | while IFS=$'\t' read -r nevra bytes; do
+                [[ ${nevra:-} =~ ^kernel-(default|longterm|zbook)-[0-9] ]] || continue
+                printf '%s\t%s\n' "$nevra" "$bytes"
+            done \
+            | sort -V
+    )
+elif (( use_dpkg )); then
+    mapfile -t kernel_lines < <(
+        dpkg-query -W -f='${binary:Package} ${Version}\t${Installed-Size}\n' \
+            'linux-image-[0-9]*' 2>/dev/null \
+            | while IFS=$'\t' read -r name kib; do
+                [[ -n ${name:-} && ${kib:-} =~ ^[0-9]+$ ]] || continue
+                printf '%s\t%s\n' "$name" "$((kib * 1024))"
+            done \
+            | sort -V
+    )
+fi
+for kernel_line in "${kernel_lines[@]}"; do
+    [[ -n $kernel_line ]] || continue
+    IFS=$'\t' read -r kernel_name kernel_bytes <<<"$kernel_line"
+    print_kernel "$kernel_bytes" "$kernel_name"
+done

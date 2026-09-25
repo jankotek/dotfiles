@@ -1,0 +1,133 @@
+#!/bin/bash
+# Read-only report of effective SSH login policy and host key/cert age.
+
+set -Eeuo pipefail
+
+usage() { echo "Usage: sshd-audit"; }
+if [[ ${1:-} == -h || ${1:-} == --help ]]; then
+    usage
+    exit 0
+fi
+if (( $# )); then
+    usage >&2
+    exit 2
+fi
+
+key_dir=${SSHD_AUDIT_KEY_DIR:-/etc/ssh}
+issues=0
+ok() { echo "OK: $*"; }
+warn() { echo "WARN: $*"; issues=$((issues + 1)); }
+
+sshd_bin=""
+if command -v sshd >/dev/null 2>&1; then
+    sshd_bin=$(command -v sshd)
+elif [[ -x /usr/sbin/sshd ]]; then
+    sshd_bin=/usr/sbin/sshd
+elif [[ -x /sbin/sshd ]]; then
+    sshd_bin=/sbin/sshd
+else
+    echo "ERROR: sshd is required" >&2
+    exit 1
+fi
+
+sshd_err=$(mktemp)
+trap 'rm -f "$sshd_err"' EXIT
+config_ok=0
+permit=""
+password=""
+keyboard=""
+if config=$("$sshd_bin" -T 2>"$sshd_err"); then
+    config_ok=1
+    permit=$(awk '$1 == "permitrootlogin" {print $2; exit}' <<<"$config")
+    password=$(awk '$1 == "passwordauthentication" {print $2; exit}' <<<"$config")
+    keyboard=$(awk '$1 == "kbdinteractiveauthentication" {print $2; exit}' <<<"$config")
+else
+    reason=$(head -n 1 "$sshd_err" | tr -d '\r')
+    warn "sshd -T failed${reason:+: $reason}"
+fi
+
+echo "PermitRootLogin: ${permit:-unknown}"
+if (( config_ok )); then
+    case ${permit:-} in
+        no|prohibit-password|without-password|forced-commands-only)
+            ok "root login is restricted ($permit)"
+            ;;
+        yes)
+            warn "root login is enabled"
+            ;;
+        "")
+            warn "PermitRootLogin is missing"
+            ;;
+        *)
+            warn "unexpected PermitRootLogin: $permit"
+            ;;
+    esac
+fi
+
+echo "PasswordAuthentication: ${password:-unknown}"
+if (( config_ok )); then
+    case ${password:-} in
+        no)
+            ok "password authentication is disabled"
+            ;;
+        "")
+            warn "PasswordAuthentication is missing"
+            ;;
+        *)
+            warn "password authentication is $password"
+            ;;
+    esac
+fi
+
+if (( config_ok )) && [[ -n ${keyboard:-} && $keyboard != no ]]; then
+    warn "keyboard-interactive authentication is $keyboard"
+fi
+
+echo "Host keys:"
+shopt -s nullglob
+keys=("$key_dir"/ssh_host_*_key.pub)
+if (( ${#keys[@]} == 0 )); then
+    warn "no host public keys in $key_dir"
+else
+    now=$(date +%s)
+    for key in "${keys[@]}"; do
+        mtime=$(stat -c %Y -- "$key")
+        age_days=$(( (now - mtime) / 86400 ))
+        printf '  %s  %s days\n' "$(basename -- "$key")" "$age_days"
+    done
+fi
+
+echo "Host certificates:"
+certs=("$key_dir"/ssh_host_*-cert.pub)
+if (( ${#certs[@]} == 0 )); then
+    echo "  none"
+else
+    now=${now:-$(date +%s)}
+    for cert in "${certs[@]}"; do
+        if ! text=$(ssh-keygen -L -f "$cert" 2>/dev/null); then
+            warn "could not read $(basename -- "$cert")"
+            continue
+        fi
+        valid=$(sed -n 's/^[[:space:]]*Valid: //p' <<<"$text" | head -1)
+        if [[ -z $valid ]]; then
+            warn "$(basename -- "$cert") has no validity window"
+            continue
+        fi
+        echo "  $(basename -- "$cert")  Valid: $valid"
+        expires=${valid##* to }
+        if expires_epoch=$(date -d "$expires" +%s 2>/dev/null); then
+            if (( expires_epoch < now )); then
+                warn "$(basename -- "$cert") expired"
+            fi
+        else
+            warn "could not parse expiry for $(basename -- "$cert")"
+        fi
+    done
+fi
+shopt -u nullglob
+
+if (( issues )); then
+    echo "Audit found $issues warning(s)."
+    exit 1
+fi
+echo "Audit found no problems."

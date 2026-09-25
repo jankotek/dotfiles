@@ -1,0 +1,182 @@
+#!/bin/bash
+# Read-only inventory of qemu:///session domains.
+
+set -Eeuo pipefail
+
+usage() { echo "Usage: vm-list"; }
+if [[ ${1:-} == -h || ${1:-} == --help ]]; then
+    usage
+    exit 0
+fi
+if (( $# )); then
+    usage >&2
+    exit 2
+fi
+
+uri=${VM_LIST_URI:-qemu:///session}
+command -v virsh >/dev/null 2>&1 || { echo "ERROR: virsh is required" >&2; exit 1; }
+command -v qemu-img >/dev/null 2>&1 || { echo "ERROR: qemu-img is required" >&2; exit 1; }
+command -v jq >/dev/null 2>&1 || { echo "ERROR: jq is required" >&2; exit 1; }
+
+guest_ipv4() {
+    local vm=$1 response addresses
+    response=$(virsh -c "$uri" qemu-agent-command "$vm" \
+        '{"execute":"guest-network-get-interfaces"}' 2>/dev/null) || {
+        echo "-"
+        return 0
+    }
+    addresses=$(jq -r '
+        [ .return[]? | select(.name != "lo") | ."ip-addresses"[]?
+          | select(."ip-address-type" == "ipv4")
+          | ."ip-address"
+          | select(startswith("127.") | not)
+        ] | unique | join(",")
+    ' <<<"$response" 2>/dev/null || true)
+    if [[ -z $addresses || $addresses == null ]]; then
+        echo "-"
+    else
+        printf '%s\n' "$addresses"
+    fi
+}
+
+if ! names=$(virsh -c "$uri" list --all --name); then
+    echo "ERROR: virsh list failed" >&2
+    exit 1
+fi
+
+row_vm=()
+row_state=()
+row_role=()
+row_size=()
+row_ip=()
+row_backing=()
+
+while IFS= read -r vm; do
+    [[ -n $vm ]] || continue
+    if ! state=$(virsh -c "$uri" domstate "$vm"); then
+        row_vm+=("$vm")
+        row_state+=(unknown)
+        row_role+=(unknown)
+        row_size+=("-")
+        row_ip+=("-")
+        row_backing+=("-")
+        continue
+    fi
+    state=${state//$'\n'/}
+
+    role=none
+    size="-"
+    backing="-"
+    total_bytes=0
+    saw_disk=0
+    saw_base=0
+    saw_overlay=0
+    saw_missing=0
+    saw_unknown=0
+    declare -A backing_names=()
+
+    if disks=$(virsh -c "$uri" domblklist "$vm" --details); then
+        while IFS= read -r disk; do
+            [[ -n $disk ]] || continue
+            saw_disk=1
+            info=$(qemu-img info --force-share --output=json -- "$disk" 2>/dev/null) || {
+                saw_missing=1
+                continue
+            }
+            if ! bytes=$(jq -er '."actual-size" // empty' <<<"$info" 2>/dev/null) \
+                    || [[ ! $bytes =~ ^[0-9]+$ ]]; then
+                saw_unknown=1
+                continue
+            fi
+            total_bytes=$((total_bytes + bytes))
+            full_backing=$(jq -r '."full-backing-filename" // empty' <<<"$info" 2>/dev/null || true)
+            if [[ -n $full_backing ]]; then
+                saw_overlay=1
+                backing_names["$(basename -- "$full_backing")"]=1
+            else
+                saw_base=1
+            fi
+        done < <(awk '
+            $1 == "file" && $2 == "disk" {
+                path = $0
+                sub(/^[[:space:]]*[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+/, "", path)
+                print path
+            }
+        ' <<<"$disks")
+    else
+        saw_unknown=1
+    fi
+
+    if (( saw_disk && (saw_base || saw_overlay) )); then
+        size=$((total_bytes / 1048576))
+        if (( saw_unknown || saw_missing )); then
+            role=unknown
+            backing="-"
+        elif (( saw_overlay && saw_base )); then
+            role=mixed
+            backing=mixed
+        elif (( saw_overlay )); then
+            role=overlay
+            if (( ${#backing_names[@]} == 1 )); then
+                backing=${!backing_names[*]}
+            else
+                backing=mixed
+            fi
+        else
+            role=base
+            backing="-"
+        fi
+    elif (( saw_disk && saw_missing && ! saw_unknown )); then
+        role=missing
+        size="-"
+        backing="-"
+    elif (( saw_disk || saw_unknown )); then
+        role=unknown
+        size="-"
+        backing="-"
+    fi
+
+    if [[ $state == running ]]; then
+        ip=$(guest_ipv4 "$vm")
+    else
+        ip="-"
+    fi
+
+    row_vm+=("$vm")
+    row_state+=("$state")
+    row_role+=("$role")
+    row_size+=("$size")
+    row_ip+=("$ip")
+    row_backing+=("$backing")
+    unset backing_names
+done <<<"$names"
+
+name_width=24
+state_width=12
+role_width=8
+size_width=10
+ip_width=16
+for (( i = 0; i < ${#row_vm[@]}; i++ )); do
+    (( ${#row_vm[i]} > name_width )) && name_width=${#row_vm[i]}
+    (( ${#row_state[i]} > state_width )) && state_width=${#row_state[i]}
+    (( ${#row_role[i]} > role_width )) && role_width=${#row_role[i]}
+    (( ${#row_size[i]} > size_width )) && size_width=${#row_size[i]}
+    (( ${#row_ip[i]} > ip_width )) && ip_width=${#row_ip[i]}
+done
+
+printf '%-*s %-*s %-*s %*s  %-*s %s\n' \
+    "$name_width" VM \
+    "$state_width" STATE \
+    "$role_width" DISK \
+    "$size_width" SIZE_MiB \
+    "$ip_width" IP \
+    BACKING
+for (( i = 0; i < ${#row_vm[@]}; i++ )); do
+    printf '%-*s %-*s %-*s %*s  %-*s %s\n' \
+        "$name_width" "${row_vm[i]}" \
+        "$state_width" "${row_state[i]}" \
+        "$role_width" "${row_role[i]}" \
+        "$size_width" "${row_size[i]}" \
+        "$ip_width" "${row_ip[i]}" \
+        "${row_backing[i]}"
+done

@@ -40,12 +40,15 @@ fixture-only; see [test/README.md](test/README.md) for details.
 ## Utilities
 
 - `host-doctor` — read-only host/VM health summary
+- `pod-doctor` — read-only pod subordinate IDs, linger, Quadlet, and cgroup delegation
+- `sshd-audit` — read-only PermitRootLogin, password authentication, and host key/cert age
+- `vm-list` — one line per session VM: state, base or overlay disk, size, and guest IPv4
 - `kernel-zbook-build` — build and install the custom openSUSE ZBook kernel with AMD ISP4 capture; run as root from the newest official kernel-default
 - `dotfiles-diff [USER|HOME|--skel]` — preview canonical skeleton changes
 - `verified-download URL OUTPUT [SHA256]` — resumable aria2 download with optional verification
 - `vm-smoke VM` — quick QGA, DHCP, DNS, and service checks
 - `vm-reset [--yes] VM BASE_VM` — recreate one disposable VM from its base
-- `clean-check [MIN_MIB]` — report large caches, backups, overlays, and kernels
+- `clean-check [MIN_MIB]` — report large caches, backups, overlays, journals, podman storage, Hugging Face caches, and kernels
 
 For a user whose home does not exist yet, run `sudo /opt/jan/skel/install`
 before `useradd --create-home`. `create-user` performs this automatically.
