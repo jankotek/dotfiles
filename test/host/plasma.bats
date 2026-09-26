@@ -86,14 +86,37 @@ ini_value() {
 }
 
 # On AC power the machine must never suspend, whether idle or with the lid
-# closed. setup-ac-no-suspend locks PowerDevil's AC actions system-wide with
-# immutable [$i] keys, so a user's own powerdevilrc cannot re-enable suspend
-# from any logged-in session, and tells logind to ignore the lid on AC.
-@test "PowerDevil AC suspend actions are locked system-wide" {
+# closed. setup-ac-no-suspend sets the system defaults in /etc/xdg/powerdevilrc;
+# a user's ~/.config/powerdevilrc value (set by ac-no-suspend or System
+# Settings) takes precedence. kreadconfig6 resolves each value the way
+# PowerDevil does (duplicate groups, blanks, flags, directory cascade). With
+# several users logged in on different TTYs, any one session may suspend the
+# machine: run as root to check every /home user; a regular user checks only
+# their own settings. This inspects configuration on disk, not what an
+# already-running PowerDevil has loaded.
+@test "no user auto-suspends or lid-suspends on AC power" {
     command -v plasmashell &>/dev/null || skip "plasma not installed"
-    assert_file /etc/xdg/powerdevilrc
-    [[ "$(ini_value /etc/xdg/powerdevilrc '[AC][SuspendAndShutdown]' 'AutoSuspendAction[$i]')" == 0 ]]
-    [[ "$(ini_value /etc/xdg/powerdevilrc '[AC][SuspendAndShutdown]' 'LidAction[$i]')" == 0 ]]
+    command -v kreadconfig6 &>/dev/null || skip "kreadconfig6 not installed"
+    local failed=0 user uid home key value
+    while IFS=: read -r user _ uid _ _ home _; do
+        [[ "$home" == /home/* ]] || continue
+        (( EUID == 0 || uid == EUID )) || continue
+        for key in AutoSuspendAction LidAction; do
+            value=$(XDG_CONFIG_HOME="$home/.config" \
+                XDG_CONFIG_DIRS="$home/.config/kdedefaults:/usr/local/etc/xdg:/etc/xdg:/usr/etc/xdg" \
+                kreadconfig6 --file powerdevilrc \
+                    --group AC --group SuspendAndShutdown --key "$key")
+            if [[ "$value" != 0 ]]; then
+                echo "$user: AC $key=${value:-built-in default} ($home/.config/powerdevilrc)" >&2
+                failed=1
+            fi
+        done
+    done < <(getent passwd)
+    if [[ "$failed" -ne 0 ]]; then
+        echo "machine could suspend while plugged in; run setup-ac-no-suspend or ac-no-suspend" >&2
+        return 1
+    fi
+    (( EUID == 0 )) || echo "# checked only $USER; run as root to check every user" >&3
 }
 
 @test "logind ignores the lid switch on AC power" {

@@ -29,7 +29,7 @@ test/test-vm-xub26-deploy.sh       # clone xub26 -> setup/vm-xub26 -> test -> de
 
 | File | What it checks |
 |------|---------------|
-| `plasma.bats` | plasmashell, kwin_wayland, Wayland session active, not a VM, konsole, dolphin, virt-manager/remote-viewer GDK_BACKEND=x11 patches, AC idle/lid suspend policy (immutable PowerDevil AC actions in /etc/xdg/powerdevilrc; live logind HandleLidSwitchExternalPower, HandleLidSwitchDocked and IdleAction all `ignore`) |
+| `plasma.bats` | plasmashell, kwin_wayland, Wayland session active, not a VM, konsole, dolphin, virt-manager/remote-viewer GDK_BACKEND=x11 patches, on-disk AC idle/lid PowerDevil settings resolve to do-nothing via kreadconfig6 (every /home user as root, else the current user); live logind HandleLidSwitchExternalPower, HandleLidSwitchDocked and IdleAction all `ignore`) |
 | `agetty.bats` | stock tty1, managed agetty logins on tty2-10, login PAM/logind integration, exec-based Plasma launcher, old greetd cleanup, persistent Full HD framebuffer |
 | `packages.bats` | KDE apps (kdenlive, kdiff3, kfind, krename, krita, kstars, ksystemlog, ktorrent, kwrite, filelight, partitionmanager), virt tools (virt-manager, virt-install, virt-viewer, podman, lima), dev tools (go, maven, java, yq) |
 | `strix-halo.bats` | AMD Strix Halo GPU params: amdgpu.gttsize, iommu=pt, amd_iommu=on, amdgpu.noretry=0, GTT >= 110GB, fixed VRAM <= 512MB. Skips on non-Strix Halo systems |
@@ -71,6 +71,7 @@ CI category, and CI selects files by that tag:
 | `pod-subid-allocation.bats` | Fixture-only unit tests for non-overlapping subordinate UID/GID allocation; does not require root |
 | `pod-security.bats` | Creates a temporary pod user via `pod-setup`, verifies subordinate-ID preservation and matching UID/GID ranges plus all security hardening layers (nologin shell, locked password, nogroup, 0700 home, sudo denied, cron denied, filesystem ACLs, podman configs, linger, cgroup delegation, sysctl port restriction), then deletes everything |
 | `laptop-power.bats` | Fixture sysfs trees and a stubbed `systemctl` for lid/AC CPU limits, per-user quotas, low-battery suspend, frequency readback, locking, and installer hooks |
+| `ac-no-suspend.bats` | Fixture config dirs for `setup-ac-no-suspend` (logind drop-in, merging PowerDevil AC defaults into an existing `/etc/xdg/powerdevilrc` across KConfig syntax variants) and a stubbed `kwriteconfig6`/`systemctl` for the per-user `ac-no-suspend` |
 | `kernel-zbook-build.bats` | CLI checks only: help through the deployment symlink, argument rejection, and the root requirement; never builds a kernel |
 | `idempotency.bats` | Run as root inside a deployed VM: re-runs `setup/vm-xub26` and verifies user data survives (driven by `test/test-vm-idempotency.sh`) |
 

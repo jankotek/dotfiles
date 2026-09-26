@@ -1,0 +1,50 @@
+#!/bin/bash
+#
+# Stop Plasma suspending on AC power for the current user: sets idle suspend
+# and lid-close suspend to "do nothing" in ~/.config/powerdevilrc, the same
+# file System Settings -> Power Management writes. Battery settings and every
+# other key are left alone. Run as the user whose settings should change.
+#
+set -euo pipefail
+
+CONFIG_FILE=${CONFIG_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/powerdevilrc}
+
+fail() { echo "ac-no-suspend: $*" >&2; return 1; }
+
+write_settings() {
+    local key
+    mkdir -p -- "$(dirname -- "$CONFIG_FILE")"
+    # An absolute --file path makes kwriteconfig6 store the value even when it
+    # equals the system default, so the user's choice survives default changes.
+    for key in AutoSuspendAction LidAction; do
+        kwriteconfig6 --file "$CONFIG_FILE" \
+            --group AC --group SuspendAndShutdown --key "$key" 0
+    done
+}
+
+main() {
+    case ${1:-} in
+        -h|--help)
+            echo "Usage: ac-no-suspend"
+            echo "Disable idle and lid-close suspend on AC power for the current user."
+            return ;;
+        '') ;;
+        *) fail "Unknown argument: $1 (see --help)"; return 2 ;;
+    esac
+    (( EUID != 0 )) || { fail 'Run as the regular user whose settings should change, not root.'; return 1; }
+    command -v kwriteconfig6 >/dev/null || { fail 'kwriteconfig6 is required (KDE Plasma 6).'; return 1; }
+    [[ $CONFIG_FILE == /* ]] || { fail "Config path must be absolute: $CONFIG_FILE"; return 1; }
+
+    write_settings
+    echo "Updated $CONFIG_FILE: AC idle suspend and lid action set to do nothing."
+
+    # A running PowerDevil keeps its old timers until it rereads the file.
+    if systemctl --user is-active --quiet plasma-powerdevil.service; then
+        systemctl --user restart plasma-powerdevil.service
+        echo "Restarted PowerDevil; the change is active now."
+    fi
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+    main "$@"
+fi
