@@ -1,0 +1,102 @@
+#!/bin/bash
+#
+# Keep the host running on AC power: no idle suspend and no lid-close suspend.
+#
+# Two layers decide whether a closed lid or an idle session suspends:
+#   logind      handles the lid when no desktop holds the lid inhibitor (tty
+#               logins, no session at all). HandleLidSwitchExternalPower
+#               applies only while on AC; battery keeps the distro default.
+#   PowerDevil  takes over lid and idle handling inside each Plasma session.
+#               System defaults in /etc/xdg/powerdevilrc are marked immutable
+#               ([$i]) so no user's powerdevilrc can re-enable suspend on AC.
+#               With several users logged in on different TTYs, any single
+#               session could otherwise put the machine to sleep.
+#
+# Manual suspend still works, and battery behavior is left unchanged. Scope is
+# the ordinary idle and lid policy: PowerDevil's separate 30-second re-sleep
+# after an RTC or network wake from a manual suspend is not covered.
+#
+set -euo pipefail
+
+LOGIND_DIR=${LOGIND_DIR:-/etc/systemd/logind.conf.d}
+XDG_DIR=${XDG_DIR:-/etc/xdg}
+
+# Set the two AC keys in a system powerdevilrc, keeping every other group and
+# key (Battery and LowBattery policy in particular). 0 = do nothing; [$i]
+# makes each key immutable for every user.
+merge_powerdevil_defaults() {
+    local rc=$1 tmp
+    tmp=$(mktemp "$rc.XXXXXX")
+    {
+        [[ -s $rc ]] || echo '# Managed by /opt/jan/usr/sbin/setup-ac-no-suspend'
+        [[ ! -f $rc ]] || cat -- "$rc"
+    } | awk '
+        function emit() {
+            print "AutoSuspendAction[$i]=0"
+            print "LidAction[$i]=0"
+            done = 1
+        }
+        /^\[/ { in_group = ($0 == "[AC][SuspendAndShutdown]") }
+        in_group && /^(AutoSuspendAction|LidAction)(\[[^]]*\])?=/ { next }
+        { print }
+        $0 == "[AC][SuspendAndShutdown]" { emit() }
+        END {
+            if (!done) {
+                print ""
+                print "[AC][SuspendAndShutdown]"
+                emit()
+            }
+        }
+    ' > "$tmp"
+    chmod 0644 "$tmp"
+    mv -f -- "$tmp" "$rc"
+}
+
+# Restart PowerDevil only in user managers where it is already running, so
+# every logged-in Plasma session drops its old idle timers and lid action.
+restart_running_powerdevil() {
+    local unit uid user
+    while read -r unit _; do
+        uid=${unit#user@}
+        uid=${uid%.service}
+        user=$(id -nu "$uid" 2>/dev/null) || continue
+        systemctl --user --machine="$user@.host" try-restart plasma-powerdevil.service \
+            || echo "WARNING: could not restart PowerDevil for $user; re-login to apply" >&2
+    done < <(systemctl list-units --plain --no-legend --state=running 'user@*.service')
+}
+
+write_configuration() {
+    install -d -m 0755 "$LOGIND_DIR" "$XDG_DIR"
+
+    cat > "$LOGIND_DIR/80-jan-ac-no-suspend.conf" <<'EOF'
+# Managed by /opt/jan/usr/sbin/setup-ac-no-suspend
+[Login]
+HandleLidSwitchExternalPower=ignore
+EOF
+
+    merge_powerdevil_defaults "$XDG_DIR/powerdevilrc"
+    chmod 0644 "$LOGIND_DIR/80-jan-ac-no-suspend.conf"
+}
+
+main() {
+    if (( EUID != 0 )); then
+        echo "Please run as root" >&2
+        return 1
+    fi
+
+    write_configuration
+
+    # logind rereads its configuration on reload; never restart it, which
+    # could end running sessions.
+    if ! systemctl reload systemd-logind.service; then
+        echo "WARNING: could not reload systemd-logind; the lid setting applies after reboot" >&2
+    fi
+
+    restart_running_powerdevil
+
+    echo "AC power: idle and lid-close suspend disabled."
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+    main "$@"
+fi

@@ -125,6 +125,7 @@ console-framebuffer
 setup-pkg-safety        || echo "WARNING: pkg safety setup failed (non-fatal)"
 setup-kernel-tweaks     || echo "WARNING: kernel tweaks setup failed (non-fatal)"
 setup-agetty
+setup-ac-no-suspend
 install-tty12-menu      || echo "WARNING: tty12 menu setup failed (non-fatal)"
 # Patch virt-manager/remote-viewer to run under XWayland (fractional scaling fix).
 fix-virtman-scaling     || echo "WARNING: virt-manager scaling fix failed (non-fatal)"
