@@ -168,14 +168,17 @@ activate_staged_directory() {
 # expected is an archive checksum; executable is the primary required path
 # after extraction. additional_executables is a space-separated list of other
 # bundle members that must remain present. The lock covers the transaction.
+# prepare (optional) checks installation completeness and prepares the staged
+# tree before activation; it receives the tree path and either check or install.
 download_and_extract() (
     set -e
     set -o pipefail
     local name=$1 dir=$2 url=$3 version=$4 strip=${5:-1}
     local expected=${6:-} executable=${7:-} additional_executables=${8:-}
+    local prepare=${9:-}
     local final="$BASE_DIR/$dir" version_file="$BASE_DIR/$dir/.version"
     local digest_file="$BASE_DIR/$dir/.installed-sha256"
-    local current_version="" lock_fd temp_dir required required_present=1
+    local current_version="" lock_fd temp_dir required required_present=1 reuse_tree=0
 
     [ -n "$version" ] || { echo "✗ Failed to fetch version for $name"; return 1; }
     acquire_tool_lock "$dir" lock_fd
@@ -188,25 +191,37 @@ download_and_extract() (
             break
         fi
     done
+    if [ -n "$prepare" ] && ! "$prepare" "$final" check; then
+        required_present=0
+    fi
     if [ "$current_version" = "$version" ]         && installed_binary_matches "$final/$executable" "$digest_file"; then
         if [ "$required_present" -eq 1 ]; then
             echo "✓ $name already at version $version"
             return 0
         fi
     fi
-    [ "$current_version" != "$version" ]         || echo "→ Repairing incomplete $name $version installation"
-
-    echo "→ Downloading $name $version..."
+    if [ "$current_version" = "$version" ] && [ -n "$prepare" ] \
+        && installed_binary_matches "$final/$executable" "$digest_file"; then
+        reuse_tree=1
+        echo "→ Updating $name $version plugins..."
+    else
+        [ "$current_version" != "$version" ] || echo "→ Repairing incomplete $name $version installation"
+        echo "→ Downloading $name $version..."
+    fi
     temp_dir=$(mktemp -d "$BASE_DIR/.jan-update-${dir//\//_}.staging.XXXXXX")
     trap 'rm -rf "$temp_dir"' EXIT
-    download_file "$url" "$temp_dir/archive.tar.gz"
-    if [ -n "$expected" ]; then
-        verify_file "$temp_dir/archive.tar.gz" "$expected"
+    if [ "$reuse_tree" -eq 1 ]; then
+        cp -a --reflink=auto "$final/." "$temp_dir/"
     else
-        echo "  ⚠ $name: publisher provides no checksum — installing unverified"
+        download_file "$url" "$temp_dir/archive.tar.gz"
+        if [ -n "$expected" ]; then
+            verify_file "$temp_dir/archive.tar.gz" "$expected"
+        else
+            echo "  ⚠ $name: publisher provides no checksum — installing unverified"
+        fi
+        tar xzf "$temp_dir/archive.tar.gz" -C "$temp_dir"         --strip-components="$strip" --no-same-owner
+        rm "$temp_dir/archive.tar.gz"
     fi
-    tar xzf "$temp_dir/archive.tar.gz" -C "$temp_dir"         --strip-components="$strip" --no-same-owner
-    rm "$temp_dir/archive.tar.gz"
     rm -rf -- "$temp_dir/.version" "$temp_dir/.installed-sha256"
 
     if [ -z "$executable" ] || [ ! -f "$temp_dir/$executable" ]         || [ -L "$temp_dir/$executable" ] || [ ! -s "$temp_dir/$executable" ]; then
@@ -220,6 +235,9 @@ download_and_extract() (
             return 1
         fi
     done
+    if [ -n "$prepare" ]; then
+        "$prepare" "$temp_dir" install
+    fi
     chmod -R a-s,a-t,u+rwX,go+rX,go-w "$temp_dir"
     chmod 0755 "$temp_dir" "$temp_dir/$executable"
     sha256sum "$temp_dir/$executable" | awk '{print $1}' > "$temp_dir/.installed-sha256"
@@ -290,12 +308,110 @@ EOF
     chmod 0755 "$DESKTOP_DIR/$filename.desktop"
 }
 
+# Official JetBrains Marketplace plugins: XML ID and a required bundle member.
+# C/C++ needs native build/debug infrastructure and a project model (CMake or
+# compilation database). Makefile/INI support suits the repo's system scripts.
+readonly -a IDEA_PLUGINS=(
+    'PythonCore python-ce/lib/python-ce.jar'
+    'Pythonid python/lib/python.jar'
+    'org.jetbrains.plugins.go go-plugin/lib/go-plugin.jar'
+    'com.jetbrains.rust intellij-rust/lib/intellij-rust.jar'
+    'org.jetbrains.plugins.clion.radler clion-radler/lib/clion-radler.jar'
+    'com.intellij.clion clion/lib/clion.jar'
+    'com.intellij.nativeDebug nativeDebug-plugin/lib/nativeDebug-plugin.jar'
+    'com.intellij.cmake cmake/lib/cmake.jar'
+    'com.intellij.clion.meson clion-meson/lib/clion-meson.jar'
+    'com.intellij.clion-compdb clion-compdb/lib/clion-compdb.jar'
+    'name.kropp.intellij.makefile makefile/lib/makefile.jar'
+    'com.jetbrains.plugins.ini4idea ini/lib/ini.jar'
+)
+
+idea_plugin_releases() {
+    local build=$1 json entry
+    local -a ids=() query=()
+    command -v python3 >/dev/null || { echo '✗ python3 is required for IDEA plugin metadata' >&2; return 1; }
+    for entry in "${IDEA_PLUGINS[@]}"; do
+        ids+=("${entry%% *}")
+        query+=(--data-urlencode "pluginXmlId=${entry%% *}")
+    done
+    # Resolve the latest compatible updates, including architecture-specific
+    # C/C++ builds. Record update IDs so plugins can advance independently of IDEA.
+    json=$(curl -fLsS --get --data-urlencode "build=IU-$build" \
+        --data-urlencode 'os=Linux' --data-urlencode 'arch=X86_64' \
+        "${query[@]}" 'https://plugins.jetbrains.com/api/search/updates/compatible') || return 1
+    python3 -c '
+import json, sys
+updates = {u["pluginXmlId"]: u for u in json.load(sys.stdin)}
+for plugin_id in sys.argv[1:]:
+    if plugin_id not in updates:
+        sys.exit("No compatible JetBrains plugin found: " + plugin_id)
+    update = updates[plugin_id]
+    print(plugin_id, update["id"], update["version"])
+' "${ids[@]}" <<<"$json"
+}
+
+prepare_idea_plugins() {
+    local tree=$1 mode=$2 entry
+    # plugin_releases is local to install_idea and inherited by this callback.
+    if [ "$mode" = check ]; then
+        [ ! -e "$tree/plugins/plugin-classpath.txt" ] || return 1
+        for entry in "${IDEA_PLUGINS[@]}"; do
+            [ -s "$tree/plugins/${entry#* }" ] || return 1
+        done
+        [ -f "$tree/.jetbrains-plugins" ] \
+            && [ "$(<"$tree/.jetbrains-plugins")" = "$plugin_releases" ]
+        return
+    fi
+
+    echo "→ Bundling latest compatible JetBrains plugins for all IntelliJ IDEA users..."
+    local work="$tree/.plugin-install" plugin
+    local -a ids=()
+    for entry in "${IDEA_PLUGINS[@]}"; do
+        ids+=("${entry%% *}")
+        # installPlugins skips IDs that are already bundled, even when a newer
+        # update exists. Remove managed plugins from this staged copy first.
+        plugin=${entry#* }
+        rm -rf -- "$tree/plugins/${plugin%%/*}"
+    done
+    mkdir -p "$work"
+    # Isolate installer settings/caches from the invoking user's IDEA profile.
+    # Keep normal launches' per-user plugin paths; install into the shared bundle.
+    cat > "$work/idea.properties" <<EOF
+idea.config.path=$work/config
+idea.system.path=$work/system
+idea.log.path=$work/log
+idea.plugins.path=$work/plugins
+EOF
+    IDEA_PROPERTIES="$work/idea.properties" \
+        "$tree/bin/idea.sh" installPlugins "${ids[@]}"
+    for entry in "${IDEA_PLUGINS[@]}"; do
+        if [ ! -s "$work/plugins/${entry#* }" ]; then
+            echo "✗ JetBrains plugin installation is incomplete: ${entry%% *}"
+            return 1
+        fi
+    done
+    mkdir -p "$tree/plugins"
+    for plugin in "$work/plugins"/*; do
+        # The tree is staged, so replacing an older plugin cannot damage the
+        # active installation. Include dependencies installed by JetBrains' CLI.
+        rm -rf -- "$tree/plugins/$(basename "$plugin")"
+        mv -T "$plugin" "$tree/plugins/$(basename "$plugin")"
+    done
+    rm -rf "$work"
+    # IDEA's prebuilt index lists only the publisher's original bundle. Without
+    # it, JetBrains' loader scans plugins/ and discovers our shared additions.
+    # https://github.com/JetBrains/intellij-community/blob/master/platform/core-impl/src/com/intellij/ide/plugins/PluginDescriptorLoader.kt
+    rm -f -- "$tree/plugins/plugin-classpath.txt"
+    printf '%s\n' "$plugin_releases" > "$tree/.jetbrains-plugins"
+}
+
 install_idea() {
     # The releases API is the source of truth for both the download URL and
     # its checksum (download filenames changed from ideaIC-* to idea-*).
-    local json version url sum_url sum
+    local json version build url sum_url sum plugin_releases
     json=$(curl -s 'https://data.services.jetbrains.com/products/releases?code=IIU&latest=true&type=release') || true
     version=$(grep -oP '"version":"\K[^"]+' <<<"$json" | head -1) || true
+    build=$(grep -oP '"build":"\K[^" ]+' <<<"$json" | head -1) || true
     url=$(grep -oP '"link":"\K[^"]+\.tar\.gz' <<<"$json" | grep -v aarch64 | head -1) || true
     sum_url=$(grep -oP '"checksumLink":"\K[^"]+\.tar\.gz\.sha256' <<<"$json" | grep -v aarch64 | head -1) || true
     sum=$(fetch_checksum "$sum_url") || true
@@ -303,7 +419,9 @@ install_idea() {
         echo "✗ Failed to fetch download/checksum info for IntelliJ IDEA"
         return 1
     fi
-    download_and_extract "IntelliJ IDEA" "idea" "$url" "$version" 1 "$sum" "bin/idea.sh"
+    [ -n "$build" ] || { echo "✗ Failed to fetch IntelliJ IDEA build number"; return 1; }
+    plugin_releases=$(idea_plugin_releases "$build") || return 1
+    download_and_extract "IntelliJ IDEA" "idea" "$url" "$version" 1 "$sum" "bin/idea.sh" "" prepare_idea_plugins
     create_desktop_file "intellij-idea" "IntelliJ IDEA" "$BASE_DIR/idea/bin/idea.sh" "$BASE_DIR/idea/bin/idea.svg" "IntelliJ IDEA"
 }
 

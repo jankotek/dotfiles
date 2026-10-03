@@ -31,6 +31,19 @@
             return 1
         }
     done
+    [[ ! -e $target/idea/plugins/plugin-classpath.txt ]]
+    [[ -s $target/idea/plugins/python-ce/lib/python-ce.jar ]]
+    [[ -s $target/idea/plugins/python/lib/python.jar ]]
+    [[ -s $target/idea/plugins/go-plugin/lib/go-plugin.jar ]]
+    [[ -s $target/idea/plugins/intellij-rust/lib/intellij-rust.jar ]]
+    [[ -s $target/idea/plugins/clion-radler/lib/clion-radler.jar ]]
+    [[ -s $target/idea/plugins/clion/lib/clion.jar ]]
+    [[ -s $target/idea/plugins/nativeDebug-plugin/lib/nativeDebug-plugin.jar ]]
+    [[ -s $target/idea/plugins/cmake/lib/cmake.jar ]]
+    [[ -s $target/idea/plugins/clion-meson/lib/clion-meson.jar ]]
+    [[ -s $target/idea/plugins/clion-compdb/lib/clion-compdb.jar ]]
+    [[ -s $target/idea/plugins/makefile/lib/makefile.jar ]]
+    [[ -s $target/idea/plugins/ini/lib/ini.jar ]]
     for binary in mj mj-desktop mj-voice-worker \
         mj-worker-x86_64-unknown-linux-musl \
         mj-worker-aarch64-unknown-linux-musl; do

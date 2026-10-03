@@ -41,6 +41,16 @@ fixture-only; see [test/README.md](test/README.md) for details.
 
 - `host-doctor` — read-only host/VM health summary
 - `opt-status` — list versions recorded under `/opt`
+- `optupdate idea` — install/update IntelliJ IDEA and its shared official
+  JetBrains plugins under `/opt/idea/plugins`: Python, Go, Rust, C/C++, native
+  build/debug tools, CMake, Meson, compilation databases, Makefile, and INI.
+  With an Ultimate subscription, IDEA also provides TypeScript, Spring Boot,
+  Database Tools and SQL, Docker/Podman, Kubernetes/Helm, and Shell scripts.
+  Every run checks Marketplace for the latest plugin releases compatible with
+  the IDEA build. Plugin-only updates reuse the installed IDEA tree instead of
+  downloading IDEA again; unchanged releases are skipped. A failed update leaves
+  the previous IDEA and plugins in place. Python 3 parses Marketplace metadata;
+  plugin versions/update IDs are recorded in `/opt/idea/.jetbrains-plugins`.
 - `pod-doctor` — read-only pod subordinate IDs, linger, Quadlet, and cgroup delegation
 - `sshd-audit` — read-only PermitRootLogin, password authentication, and host key/cert age
 - `vm-list` — one line per session VM: state, base or overlay disk, size, and guest IPv4

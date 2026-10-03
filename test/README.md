@@ -64,7 +64,7 @@ CI category, and CI selects files by that tag:
 | `model-presets.bats` | Offline checks for caller-relative model downloads, Qwen generation/embedding presets, slot sizing, and Muse BF16 KV cache |
 | `update-opt.bats` | Downloads Herdr, Mjolnir, Codex, Grok, Pi, Claude Code, Obsidian, and Fresh Editor into temporary `JAN_OPT` trees; verifies native binaries, publisher checksums, version tracking, and idempotent re-runs (network-heavy) |
 | `update-opt-all.bats` | Runs the complete default `optupdate` installation and verifies every expected executable, including the complete Mjolnir bundle and all Corretto JDKs (CI-only; very network-heavy) |
-| `update-opt-idea-upgrade.bats` | Uses a tiny offline fixture to verify upgrade from legacy Community IDEA, idempotence, stale-file removal, and preservation after checksum or activation failure |
+| `update-opt-idea-upgrade.bats` | Uses a tiny offline fixture to verify upgrade from legacy Community IDEA, shared JetBrains language/build plugins, independent compatible plugin updates, idempotence, missing-plugin repair, and preservation after checksum, plugin, or activation failure |
 | `update-opt-mjolnir.bats` | Uses a tiny offline tar.gz fixture to verify the complete Mjolnir bundle, checksum/version tracking, idempotence, and repair of missing workers |
 | `utilities.bats` | Fixture checks for utility help, dotfile dry-runs, missing-user guidance, atomic verified downloads, vm-list, pod-doctor, sshd-audit, opt-status, and clean-check reports |
 | `repo-policy.bats` | Fast, fixture-only checks for canonical dotfiles, error traps, download policy, and provisioning safety limits |
