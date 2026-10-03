@@ -240,6 +240,72 @@ EOF
     done
 }
 
+@test "Holo4 Q8 download directories match router model and projector paths" {
+    TEST_TEMP="$(mktemp -d)"
+    mkdir -p "$TEST_TEMP/bin"
+    cat > "$TEST_TEMP/bin/aria2c" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+dest_dir=
+output=
+url=
+for argument in "$@"; do
+    case "$argument" in
+        --dir=*) dest_dir="${argument#--dir=}" ;;
+        --out=*) output="${argument#--out=}" ;;
+        https://*) url="$argument" ;;
+    esac
+done
+printf '%s\n' "$url" >> "$DOWNLOAD_LOG"
+printf fixture > "$dest_dir/$output"
+EOF
+    chmod +x "$TEST_TEMP/bin/aria2c"
+
+    for size in 27B 35B-A3B; do
+        dir="$TEST_TEMP/Holo4-${size}-GGUF-Q8_0"
+        run env PATH="$TEST_TEMP/bin:$PATH" OUT_DIR="$dir" \
+            DOWNLOAD_LOG="$TEST_TEMP/urls" \
+            "$OPT_JAN/agent/download-holo4-${size,,}-q8-0.sh"
+        [ "$status" -eq 0 ]
+        for file in "Holo4-${size}.Q8_0.gguf" "Holo4-${size}.mmproj-Q8_0.gguf"; do
+            [ -s "$dir/$file" ]
+            grep -Fx "https://huggingface.co/mradermacher/Holo4-${size}-GGUF/resolve/main/$file" "$TEST_TEMP/urls"
+            run preset "Holo4-${size}-Q8_0"
+            [[ "$output" == *"/var/models/Holo4-${size}-GGUF-Q8_0/$file"* ]]
+        done
+        [[ "$output" != *"spec-draft-model"* ]]
+        [[ "$output" == *"cache-type-k = bf16"* ]]
+        [[ "$output" == *"cache-type-v = bf16"* ]]
+    done
+}
+
+@test "JEV downloader fetches native decision components without a backbone" {
+    TEST_TEMP="$(mktemp -d)"
+    mkdir -p "$TEST_TEMP/bin"
+    cat > "$TEST_TEMP/bin/aria2c" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+for argument in "$@"; do
+    case "$argument" in
+        --dir=*) dest_dir="${argument#--dir=}" ;;
+        --out=*) output="${argument#--out=}" ;;
+        https://*) printf '%s\n' "$argument" >> "$DOWNLOAD_LOG" ;;
+    esac
+done
+printf fixture > "$dest_dir/$output"
+EOF
+    chmod +x "$TEST_TEMP/bin/aria2c"
+    run env PATH="$TEST_TEMP/bin:$PATH" OUT_DIR="$TEST_TEMP/JEV-27B-adapter" \
+        DOWNLOAD_LOG="$TEST_TEMP/urls" "$OPT_JAN/agent/download-jev-27b-adapter.sh"
+    [ "$status" -eq 0 ]
+    for file in adapter/adapter_model.safetensors adapter_vllm/adapter_model.safetensors \
+        adapter_vllm/decision_head.json head.safetensors calibration.json judge_config.json; do
+        [ -s "$TEST_TEMP/JEV-27B-adapter/$file" ]
+        grep -Fx "https://huggingface.co/autotrust/JEV-27B/resolve/main/$file" "$TEST_TEMP/urls"
+    done
+    ! grep -E '/model-[0-9]|\.gguf$' "$TEST_TEMP/urls"
+}
+
 @test "Qwen BF16 router preset remains available" {
     run preset Qwen3.8-27B
     [ "$status" -eq 0 ]

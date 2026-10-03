@@ -18,8 +18,8 @@ def configured_files(scripts_dir: Path) -> dict[str, set[str]]:
         source = script.read_text()
         repo_match = re.search(r'^REPO="([^"]+)"', source, re.MULTILINE)
         if repo_match:
-            files = set(re.findall(r'^\s+"([^"\n]+\.(?:gguf|bin))"\s*$', source, re.MULTILINE))
-            files.update(re.findall(r'\b(?:MODELS|FILES)\+?=\("([^"\n]+\.(?:gguf|bin))"\)', source))
+            files = set(re.findall(r'^\s+"([^"\n]+\.(?:gguf|bin|safetensors|json|md))"\s*$', source, re.MULTILINE))
+            files.update(re.findall(r'\b(?:MODELS|FILES)\+?=\("([^"\n]+\.(?:gguf|bin|safetensors|json|md))"\)', source))
             single = re.search(r'^MODEL="([^"]+)"', source, re.MULTILINE)
             if single:
                 files.add(single.group(1))

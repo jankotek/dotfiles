@@ -2,6 +2,8 @@
 # Serve all llama.cpp GGUFs from llama-models.ini.
 # Web UI + OpenAI API on port 7013. Idle unload after 5 minutes.
 # Only one model stays loaded (--models-max 1).
+# Includes Holo4-27B-Q8_0 and Holo4-35B-A3B-Q8_0 after copying their
+# downloader output directories into /var/models/.
 # Muse Glimmer needs llama.cpp >= b10353; system package is older (b10154).
 set -euo pipefail
 
