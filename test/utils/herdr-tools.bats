@@ -342,3 +342,10 @@ PY
     echo "$output"
     [ "$status" -eq 0 ]
 }
+
+@test "autosave preserves unchanged generations and refuses incomplete restores or replacement servers" {
+    run python3 "$OPT_JAN/test/fixtures/herdr-tools-regressions.py" \
+        Regressions.test_autosave_preserves_generation_and_guards_publication
+    echo "$output"
+    [ "$status" -eq 0 ]
+}

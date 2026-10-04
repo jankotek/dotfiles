@@ -229,6 +229,28 @@ class Regressions(unittest.TestCase):
                     layout.ensure_server(self.api, "test")
                 start.assert_not_called()
 
+    def test_autosave_preserves_generation_and_guards_publication(self):
+        path = self.root / "autosave.json"
+        instance = self.api.instance()
+        self.assertTrue(layout.save(self.api, path, only_changed=True, expected_instance=instance))
+        original = path.read_bytes()
+        self.assertFalse(layout.save(self.api, path, only_changed=True, expected_instance=instance))
+        self.assertEqual(path.read_bytes(), original)
+        self.assertFalse(path.with_name(path.name + ".previous").exists())
+        self.api.state["tabs"][0]["label"] = "Edited tab"
+        atomic_json(layout.journal_path(self.api), {"status": "restoring", "instance": instance})
+        with self.assertRaisesRegex(ToolError, "Restore is incomplete"):
+            layout.save(self.api, path, only_changed=True, expected_instance=instance)
+        self.assertEqual(path.read_bytes(), original)
+        atomic_json(layout.journal_path(self.api), {"status": "complete", "instance": instance})
+        self.assertTrue(layout.save(self.api, path, only_changed=True, expected_instance=instance))
+        self.assertEqual(path.with_name(path.name + ".previous").read_bytes(), original)
+        updated = path.read_bytes()
+        self.api.identity = "new server"
+        with self.assertRaisesRegex(ToolError, "server changed"):
+            layout.save(self.api, path, only_changed=True, expected_instance=instance)
+        self.assertEqual(path.read_bytes(), updated)
+
 
 if __name__ == "__main__":
     unittest.main()

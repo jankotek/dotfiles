@@ -136,8 +136,10 @@ def validate_capture(saved):
     return saved
 
 
-def save(api, path):
+def save(api, path, *, only_changed=False, expected_instance=None):
     with lock("layout"):
+        if expected_instance is not None and api.instance() != expected_instance:
+            raise ToolError("Herdr server changed; stopping autosave")
         path_to_journal = journal_path(api)
         if path_to_journal.exists():
             journal = read_json(path_to_journal)
@@ -153,11 +155,16 @@ def save(api, path):
         else:
             raise last_error
         validate_capture(captured)
+        if expected_instance is not None and api.instance() != expected_instance:
+            raise ToolError("Herdr server changed; stopping autosave")
         if path.exists():
             previous = validate_capture(read_json(path))
+            if only_changed and {k: v for k, v in previous.items() if k != "generation"} == {k: v for k, v in captured.items() if k != "generation"}:
+                return False
             atomic_json(path.with_name(path.name + ".previous"), previous)
         atomic_json(path, captured)
         print(f"Saved {len(captured['workspaces'])} workspace(s), {len(captured['mappings'])} mapping(s) to {path}")
+        return True
 
 
 def launcher():
@@ -443,14 +450,23 @@ def ensure_server(api, session):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--session", help="explicit named Herdr session")
-    parser.add_argument("operation", choices=["save", "restore", "open"])
+    parser.add_argument("operation", choices=["save", "restore", "open", "autosave"])
     parser.add_argument("--recover", action="store_true", help="recover idle shells from a previous completed replay after server restart")
     parser.add_argument("--file", type=Path, help="private snapshot JSON path")
+    parser.add_argument("--background", action="store_true", help="run autosave in the background until this server exits")
     args = parser.parse_args()
     api = Herdr(args.session)
     session_key = hashlib.sha256(str(api.path).encode()).hexdigest()[:16]
     path = args.file or state_dir() / f"layout-{session_key}.json"
-    if args.operation == "open":
+    if args.background and args.operation != "autosave":
+        parser.error("--background requires autosave")
+    if args.operation == "autosave":
+        from .autosave import start, watch
+        if args.background:
+            start(api, path)
+        else:
+            watch(api, path)
+    elif args.operation == "open":
         saved = read_json(path)
         starting = ensure_server(api, args.session or os.environ.get("HERDR_SESSION", "default"))
         # Fresh interactive shells can briefly have prompt/startup children.
@@ -464,6 +480,8 @@ def main():
                 if "not an idle shell" not in str(error) or time.monotonic() >= deadline:
                     raise
                 time.sleep(0.1)
+        from .autosave import start
+        start(api, path)
         binary = os.environ.get("HERDR_BIN_PATH", "herdr")
         os.execvp(binary, [binary, "--session", args.session or os.environ.get("HERDR_SESSION", "default")])
     elif args.operation == "save":

@@ -63,7 +63,7 @@ CI category, and CI selects files by that tag:
 | `herdr-tools.bats` | Offline command/environment and VM fixtures, plus interrupted cold recovery, shell guards, SSH timeout/menu handling, and capture during pending VM creation |
 | `vm-image-build.bats` | Offline builder checks for symlink invocation, configuration validation, snapshot expiry, signature rejection and immutable artifact verification |
 | `herdr-baseweed-live.bats` | Opt-in independently built dotfiles base: canonical setup, reboot, network/home checks, four VM tmux panes and cold Herdr recovery preserving application PIDs |
-| `herdr-tools-live.bats` | Isolated real Herdr tests for original save/restart/recovery, new generations after replay, PTY launcher startup, and actual htop/mc/nano processes, topology, focus/zoom and environment restoration |
+| `herdr-tools-live.bats` | Isolated real Herdr tests for original save/restart/recovery, new generations after replay, PTY launcher startup, actual htop/mc/nano processes, and event-driven autosaving of tabs, splits, closures and new VM mappings |
 | `vm-tmux-live.bats` | Opt-in disposable qdistro overlay VM: QGA-anchored SSH trust, guest tmux handoff, pause/resume, managed save/start, and wrong-host rejection |
 | `browser-vm.bats` | Offline fixtures for shared `/opt` Chrome and Brave Origin desktop/PATH integration, including absent-browser no-op behavior |
 | `model-presets.bats` | Offline checks for caller-relative model downloads, Qwen generation/embedding presets, slot sizing, and Muse BF16 KV cache |

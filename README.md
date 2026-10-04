@@ -44,7 +44,8 @@ fixture-only; see [test/README.md](test/README.md) for details.
   See [Build and test baseweed](doc/vm-image.md).
 - `herdr-run COMMAND [ARGS...]` — associate a restart command and environment
   with the calling Herdr pane; `herdr-layout save` / `restore` recover its live
-  arrangement. `vm-tmux` starts existing session VMs and attaches to guest tmux.
+  arrangement. Layout and command-mapping edits autosave through Herdr events.
+  `vm-tmux` starts existing session VMs and attaches to guest tmux.
   See [Herdr recovery and VM profiles](doc/herdr-layout.md).
 - `host-doctor` — read-only host/VM health summary
 - `opt-status` — list versions recorded under `/opt`

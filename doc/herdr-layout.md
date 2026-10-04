@@ -3,8 +3,8 @@
 The three commands use Python 3's standard library. `herdr-run` records what to
 restart, `herdr-layout` saves/reconstructs the live arrangement, and `vm-tmux`
 starts an existing session-libvirt VM and attaches through verified SSH.
-The environment detector is a small editable Bash script. No daemon or rule
-engine is required.
+The environment detector is a small editable Bash script. An event watcher
+autosaves layout and mapping changes.
 
 ## Commands in ordinary Herdr panes
 
@@ -23,6 +23,37 @@ the UI-focused pane. Moving, swapping, or renaming the pane preserves its
 mapping. Closing it removes it from the next saved layout. When the mapped
 program exits, its live association is cleared; earlier snapshots still retain
 their restart records. Re-run `herdr-run` to associate another command.
+
+## Autosaving
+
+Normal `herdr-run` launches automatically start a background watcher for that
+session. Registering a new `vm-tmux attach` mapping saves its command and explicit
+environment, including when you launch it in an existing pane. Successful
+`vm-tmux new` starts autosaving after its durable attachment mapping is bound.
+`herdr-layout open` enables autosaving after recovery, using the same snapshot
+file passed to `open`.
+
+To enable it for an already running session:
+
+```sh
+herdr-layout --session NAME autosave --background
+```
+
+Omit `--background` to run in the foreground. `--file SNAPSHOT` chooses another
+destination. One watcher owns each session/destination; repeated launches do
+not create duplicate owners. The default file is the same one used by `save`.
+
+Herdr events trigger saves for new/closed tabs and panes, splits/resizes,
+renames, moves, focus/zoom, and mapping updates. Edits are grouped for 0.5 seconds,
+with a two-second maximum delay during a continuous burst. Terminal output
+does not trigger saves; unchanged captures do not rotate generations. Saves use
+the same lock, validation, atomic publication and previous-generation retention
+as manual capture. Failed/incomplete restoration defers publication.
+
+The watcher exits with its server and never follows a replacement instance into
+unmapped native shells. Start again through `open`, `herdr-run`, or `autosave`.
+Set `HERDR_LAYOUT_AUTOSAVE=0` to disable automatic watcher startup. Background
+diagnostics live in `~/.local/state/herdr-layout/autosave-*.log`.
 
 Explicit launcher flags precede the command:
 

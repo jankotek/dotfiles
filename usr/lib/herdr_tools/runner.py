@@ -34,14 +34,21 @@ def launch(record, api, restoring=False):
     creating = record["kind"] == "vm-tmux" and record["vm"]["operation"] == "new" and not restoring
     if not creating:
         api.bind(record["id"])
+        if not restoring:
+            from .autosave import start
+            start(api)
     env = dict(os.environ)
     env.pop("HERDR_AGENT", None)
     env.update(record["env"])
     try:
         if record["kind"] == "vm-tmux":
             from .vm import run_mapping
+            def created():
+                api.bind(record["id"])
+                from .autosave import start
+                start(api)
             return run_mapping(record, env, restoring=restoring,
-                               on_created=(lambda: api.bind(record["id"])) if creating else None)
+                               on_created=created if creating else None)
         result = subprocess.run(record["argv"], cwd=record["cwd"], env=env)
         return result.returncode if result.returncode >= 0 else 128 - result.returncode
     except (ToolError, OSError) as error:

@@ -49,6 +49,7 @@ herdr-layout [--session NAME] save [--file PATH]
 herdr-layout [--session NAME] restore [--file PATH]
 herdr-layout [--session NAME] restore --recover [--file PATH]
 herdr-layout [--session NAME] open [--file PATH]
+herdr-layout [--session NAME] autosave [--background] [--file PATH]
 ```
 
 Select one explicit Herdr session/socket. Capture all workspaces and tabs in that session, their order and labels, split directions and ratios, pane mappings, working directories, focused workspace/tab/pane, and zoom state.
@@ -170,7 +171,7 @@ Before starting or stopping qci, inspect only play1-owned qci processes, user-sy
 4. Implement existing-VM profiles and `vm-tmux` lifecycle/SSH/tmux menu behavior.
 5. Integrate VM mappings and verify menu-first recovery and agent hint scoping.
 
-Still to settle during implementation: exact snapshot retention count; Herdr native restore coordination; the first test VM/profile. Periodic autosave and user-systemd timers are optional follow-up work, not part of the first manual save/restore interface.
+Snapshot retention, native restore coordination and the first VM/profile were settled during implementation. Event-driven autosaving was added as a follow-up; periodic timers remain outside scope.
 
 ## Review record
 
@@ -191,3 +192,5 @@ Follow-up Astra implementation review found four issues: original save/reopen an
 Fresh base validation on 2026-10-04: built a standalone boot image directly from the original signed openSUSE Tumbleweed cloud download with `vm-image-build`, without a qdistro-built disk. Ran canonical `setup/vm-baseweed` in an independent guest systemd service, rebooted, and passed four network/home checks. The real Herdr test saved four VM panes, restarted the server, restored attachment menus, attached, and verified unchanged htop/mc/nano guest PIDs. The immutable reusable image currently contains boot prerequisites; full canonical provisioning runs in the test VM. Fully provisioned golden-image sealing/publication remains future work. See `../doc/vm-image.md`.
 
 Final Astra review on 2026-10-04 fixed stale-socket startup by probing the public API and waiting for a responsive replacement server. Offline tests preserve live/inaccessible listeners; the real test kills a server after a deterministic native persistence checkpoint and recovers htop/mc/nano through `open`. A crash before native persistence can leave topology identities inconsistent with the recovery journal; recovery safely refuses that mismatch and requires a fresh named target. The immutable-image fixture now uses a current test snapshot independently of production pins, so it does not expire with the checked-in cloud pin.
+
+Autosaving follow-up: `herdr-run` starts a watcher after mapping registration, including new VM attachments and finalized `new` mappings. `open` starts one after recovery. A public event subscription tracks topology, focus and mapping changes, debounces bursts and skips unchanged captures. Watchers are unique per session/destination and stop with their server instance; they reuse manual save's locking, restore guards, validation and atomic retention. Real Herdr tests cover wrapper-triggered VM mapping/environment capture and automatic tab/split/closure updates. Offline tests protect unchanged generations, incomplete recovery and replacement-server boundaries.
