@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Edit a private copy at ~/.config/herdr-layout/agent-env to customize detection.
+# Arguments are inspected as text only. Output is data, never evaluated as shell.
+set -euo pipefail
+
+command_text="$*"
+if [[ $command_text =~ ^([^[:space:]]*/)?(vm-tmux[[:space:]]+attach|ssh)[[:space:]] ]]; then
+    if [[ $command_text =~ (^|[[:space:]])claude($|[[:space:]]) ]]; then
+        printf '%s\n' 'HERDR_AGENT=claude'
+    elif [[ $command_text =~ (^|[[:space:]])codex($|[[:space:]]) ]]; then
+        printf '%s\n' 'HERDR_AGENT=codex'
+    fi
+fi

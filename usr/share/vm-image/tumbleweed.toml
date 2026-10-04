@@ -1,0 +1,8 @@
+# Original openSUSE cloud input, independently downloaded by vm-image-build.
+arch = "x86_64"
+snapshot = "20261002"
+cloud_url = "https://download.opensuse.org/tumbleweed/appliances/openSUSE-Tumbleweed-Minimal-VM.x86_64-Cloud.qcow2"
+cloud_sha256 = "d5c261e0576bde06a6b71788be810753eaba7139a23bfccf472f8bd40bb1dc1a"
+signing_fingerprint = "AD485664E901B867051AB15F35A2F86E29B700A4"
+disk_size = "25G"
+selinux = "permissive" # Development QGA provisioning profile.

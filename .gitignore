@@ -4,3 +4,7 @@
 # Model download output
 *.gguf
 *.aria2
+
+# Python utility bytecode
+__pycache__/
+*.py[cod]

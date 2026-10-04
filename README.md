@@ -39,6 +39,13 @@ fixture-only; see [test/README.md](test/README.md) for details.
 
 ## Utilities
 
+- `vm-image-build` — build a fresh, verified Tumbleweed boot image from the
+  original cloud download, then use canonical dotfiles provisioning.
+  See [Build and test baseweed](doc/vm-image.md).
+- `herdr-run COMMAND [ARGS...]` — associate a restart command and environment
+  with the calling Herdr pane; `herdr-layout save` / `restore` recover its live
+  arrangement. `vm-tmux` starts existing session VMs and attaches to guest tmux.
+  See [Herdr recovery and VM profiles](doc/herdr-layout.md).
 - `host-doctor` — read-only host/VM health summary
 - `opt-status` — list versions recorded under `/opt`
 - `optupdate idea` — install/update IntelliJ IDEA and its shared official

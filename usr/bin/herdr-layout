@@ -1,0 +1,10 @@
+#!/usr/bin/env python3
+"""Capture and restore live Herdr layouts with explicit command mappings."""
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+from herdr_tools.common import entry
+from herdr_tools.layout import main
+
+sys.exit(entry(main))

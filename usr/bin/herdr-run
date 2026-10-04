@@ -1,0 +1,10 @@
+#!/usr/bin/env python3
+"""Register a restart command in the calling Herdr pane, then run it."""
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+from herdr_tools.common import entry
+from herdr_tools.runner import main
+
+sys.exit(entry(main))
