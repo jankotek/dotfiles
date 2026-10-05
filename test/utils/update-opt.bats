@@ -9,6 +9,26 @@
 
 load ../helpers
 
+teardown() {
+    if [[ -n "${CODEX_TEST_HOME:-}" && -x "${CODEX_TEST_BIN:-}" ]]; then
+        timeout 15 env CODEX_HOME="$CODEX_TEST_HOME" \
+            "$CODEX_TEST_BIN" app-server daemon stop >/dev/null 2>&1 || true
+        # Stopping the server leaves its updater running. Stop only the
+        # updater whose executable belongs to this test's isolated home.
+        local pid_file="$CODEX_TEST_HOME/app-server-daemon/daemon-updater.pid"
+        local pid executable=""
+        if [[ -f "$pid_file" ]]; then
+            pid=$(sed -n 's/.*"pid":\([0-9][0-9]*\).*/\1/p' "$pid_file")
+            if [[ "$pid" =~ ^[0-9]+$ && -r "/proc/$pid/cmdline" ]]; then
+                IFS= read -r -d '' executable < "/proc/$pid/cmdline" || true
+                if [[ "$executable" == "$CODEX_TEST_HOME"/packages/app-server-daemon/*/bin/codex ]]; then
+                    kill "$pid" 2>/dev/null || true
+                fi
+            fi
+        fi
+    fi
+}
+
 @test "optupdate installs and tracks Herdr" {
     local target="$BATS_TEST_TMPDIR/opt"
     mkdir -p "$target"
@@ -101,6 +121,11 @@ load ../helpers
     fi
     [[ "$status" -eq 0 ]]
     [[ -x "$target/bin/codex" ]]
+    assert_symlink "$target/bin/codex" "$target/codex/bin/codex"
+    [[ -s "$target/codex/codex-package.json" ]]
+    [[ -x "$target/codex/bin/codex-code-mode-host" ]]
+    [[ -x "$target/codex/codex-path/rg" ]]
+    [[ -x "$target/codex/codex-resources/bwrap" ]]
     [[ -s "$target/codex/.version" ]]
     [[ -s "$target/codex/.installed-sha256" ]]
     [[ "$output" == *"sha256 verified"* ]]
@@ -108,11 +133,34 @@ load ../helpers
     run "$target/bin/codex" --version
     [[ "$status" -eq 0 ]]
 
+    # --version also succeeds for the incomplete single-binary installation.
+    # Exercise the package bootstrap used by normal interactive startup.
+    CODEX_TEST_HOME="$BATS_TEST_TMPDIR/codex-home"
+    CODEX_TEST_BIN="$target/bin/codex"
+    mkdir -p "$CODEX_TEST_HOME"
+    run timeout 30 env CODEX_HOME="$CODEX_TEST_HOME" \
+        "$CODEX_TEST_BIN" app-server daemon start 3>&-
+    if [[ "$status" -ne 0 ]]; then
+        echo "$output" >&2
+    fi
+    [[ "$status" -eq 0 ]]
+    [[ "$output" == *'"status":"started"'* ]]
+    run timeout 15 env CODEX_HOME="$CODEX_TEST_HOME" \
+        "$CODEX_TEST_BIN" app-server daemon stop
+    [[ "$status" -eq 0 ]]
+
     local version
     version=$(<"$target/codex/.version")
     run env JAN_OPT="$target" "$OPT_JAN/usr/sbin/optupdate" codex
     [[ "$status" -eq 0 ]]
     [[ "$output" == *"Codex CLI already at version $version"* ]]
+
+    # A current version with a missing manifest must be repaired, not skipped.
+    rm "$target/codex/codex-package.json"
+    run env JAN_OPT="$target" "$OPT_JAN/usr/sbin/optupdate" codex
+    [[ "$status" -eq 0 ]]
+    [[ "$output" == *"Repairing incomplete Codex CLI $version installation"* ]]
+    [[ -s "$target/codex/codex-package.json" ]]
 }
 
 @test "optupdate installs and tracks native Pi archive" {

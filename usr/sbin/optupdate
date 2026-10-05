@@ -170,12 +170,13 @@ activate_staged_directory() {
 # bundle members that must remain present. The lock covers the transaction.
 # prepare (optional) checks installation completeness and prepares the staged
 # tree before activation; it receives the tree path and either check or install.
+# additional_files (optional) lists required non-executable bundle members.
 download_and_extract() (
     set -e
     set -o pipefail
     local name=$1 dir=$2 url=$3 version=$4 strip=${5:-1}
     local expected=${6:-} executable=${7:-} additional_executables=${8:-}
-    local prepare=${9:-}
+    local prepare=${9:-} additional_files=${10:-}
     local final="$BASE_DIR/$dir" version_file="$BASE_DIR/$dir/.version"
     local digest_file="$BASE_DIR/$dir/.installed-sha256"
     local current_version="" lock_fd temp_dir required required_present=1 reuse_tree=0
@@ -187,6 +188,13 @@ download_and_extract() (
     for required in $executable $additional_executables; do
         if [ ! -f "$final/$required" ] || [ -L "$final/$required" ] \
             || [ ! -x "$final/$required" ] || [ ! -s "$final/$required" ]; then
+            required_present=0
+            break
+        fi
+    done
+    for required in $additional_files; do
+        if [ ! -f "$final/$required" ] || [ -L "$final/$required" ] \
+            || [ ! -s "$final/$required" ]; then
             required_present=0
             break
         fi
@@ -232,6 +240,13 @@ download_and_extract() (
         if [ ! -f "$temp_dir/$required" ] || [ -L "$temp_dir/$required" ] \
             || [ ! -x "$temp_dir/$required" ] || [ ! -s "$temp_dir/$required" ]; then
             echo "✗ $name archive does not contain expected executable: $required"
+            return 1
+        fi
+    done
+    for required in $additional_files; do
+        if [ ! -f "$temp_dir/$required" ] || [ -L "$temp_dir/$required" ] \
+            || [ ! -s "$temp_dir/$required" ]; then
+            echo "✗ $name archive does not contain expected file: $required"
             return 1
         fi
     done
@@ -506,7 +521,7 @@ install_codex() {
             ;;
     esac
 
-    file="codex-${arch}-unknown-linux-musl.tar.gz"
+    file="codex-package-${arch}-unknown-linux-musl.tar.gz"
     url="https://github.com/openai/codex/releases/download/${tag}/${file}"
     sum=$(github_asset_sha256 "$release" "$file" || true)
     [[ "$tag" == rust-v* && "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+ && "$sum" =~ ^[0-9a-f]{64}$ ]] || {
@@ -514,8 +529,12 @@ install_codex() {
         return 1
     }
 
+    # Normal startup needs the package manifest and companion binaries to
+    # bootstrap the background server; the single-binary asset only passes
+    # lightweight commands such as --version.
     download_and_extract "Codex CLI" "codex" "$url" "$version" 0 "$sum" \
-        "codex-${arch}-unknown-linux-musl"
+        "bin/codex" "bin/codex-code-mode-host codex-path/rg codex-resources/bwrap" \
+        "" "codex-package.json"
 }
 
 install_pi() {
@@ -1075,8 +1094,7 @@ chmod 0755 "$BASE_DIR/bin"
 [ -f "$BASE_DIR/ffmpeg/bin/ffmpeg" ] && ln -sf "$BASE_DIR/ffmpeg/bin/ffmpeg" "$BASE_DIR/bin/ffmpeg"
 [ -f "$BASE_DIR/ffmpeg/bin/ffplay" ] && ln -sf "$BASE_DIR/ffmpeg/bin/ffplay" "$BASE_DIR/bin/ffplay"
 [ -f "$BASE_DIR/ffmpeg/bin/ffprobe" ] && ln -sf "$BASE_DIR/ffmpeg/bin/ffprobe" "$BASE_DIR/bin/ffprobe"
-[ -f "$BASE_DIR/codex/codex-x86_64-unknown-linux-musl" ] && ln -sf "$BASE_DIR/codex/codex-x86_64-unknown-linux-musl" "$BASE_DIR/bin/codex"
-[ -f "$BASE_DIR/codex/codex-aarch64-unknown-linux-musl" ] && ln -sf "$BASE_DIR/codex/codex-aarch64-unknown-linux-musl" "$BASE_DIR/bin/codex"
+[ -f "$BASE_DIR/codex/bin/codex" ] && ln -sf "$BASE_DIR/codex/bin/codex" "$BASE_DIR/bin/codex"
 [ -f "$BASE_DIR/pi/pi" ] && ln -sf "$BASE_DIR/pi/pi" "$BASE_DIR/bin/pi"
 [ -f "$BASE_DIR/claude/claude" ] && ln -sf "$BASE_DIR/claude/claude" "$BASE_DIR/bin/claude"
 [ -f "$BASE_DIR/mjolnir/mj" ] && ln -sf "$BASE_DIR/mjolnir/mj" "$BASE_DIR/bin/mj"
