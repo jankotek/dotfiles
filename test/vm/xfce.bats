@@ -36,8 +36,9 @@ load ../helpers
     assert_file_contains "$JAN_HOME/.config/terminator/config" 'JetBrains Mono'
 }
 
-@test "terminator uses fish shell" {
-    assert_file_contains "$JAN_HOME/.config/terminator/config" 'custom_command = /usr/bin/fish'
+@test "terminator uses bash with a 1M-line scrollback" {
+    assert_file_contains "$JAN_HOME/.config/terminator/config" 'custom_command = /bin/bash'
+    assert_file_contains "$JAN_HOME/.config/terminator/config" 'scrollback_lines = 1000000'
 }
 
 @test "terminator hides titlebar" {

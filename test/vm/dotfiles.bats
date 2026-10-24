@@ -19,16 +19,8 @@ load ../helpers
     assert_file_contains "$JAN_HOME/.bashrc" 'starship init bash'
 }
 
-@test "fish config exists" {
-    assert_file "$JAN_HOME/.config/fish/config.fish"
-}
-
-@test "fish config sets EDITOR to mcedit" {
-    assert_file_contains "$JAN_HOME/.config/fish/config.fish" 'EDITOR "mcedit"'
-}
-
-@test "fish config sources starship" {
-    assert_file_contains "$JAN_HOME/.config/fish/config.fish" 'starship init fish'
+@test "bashrc leaves TERM to the terminal" {
+    assert_file_not_contains "$JAN_HOME/.bashrc" '^export TERM='
 }
 
 @test "user helper scripts retain executable modes" {

@@ -888,47 +888,11 @@ EOF
 install -d -o "$NAME" -g nogroup -m 0700 "/run/user/${USER_UID}" 2>/dev/null || true
 
 # ---------- /proc hidepid — hide other users' processes ----------
-# hidepid=2: users can only see their own processes in /proc.
-# gid=<admin>: members of that group keep visibility into all PIDs, so
-# `ps`, `htop`, `loginctl session-status` continue to work for admins.
-# Without gid=, the remount is system-wide and breaks those tools for ALL
-# unprivileged users — including admin accounts that aren't running as root.
-#
-# Group preference: wheel (RHEL/SUSE) → sudo (Debian/Ubuntu) → root (gid 0,
-# meaning only root keeps visibility, which is the legacy behavior).
+# Shared with create-lab-users: pod accounts (nologin) are not in the `proc`
+# group, so they see only their own processes after the next boot.
 
-ADMIN_GID=0
-ADMIN_GROUP_NAME="root"
-for g in wheel sudo; do
-    if getent group "$g" >/dev/null 2>&1; then
-        ADMIN_GID=$(getent group "$g" | cut -d: -f3)
-        ADMIN_GROUP_NAME="$g"
-        break
-    fi
-done
-
-PROC_HIDEPID="/etc/systemd/system/proc-hidepid.service"
-# Always rewrite — re-running pod-setup picks up admin-group changes
-# (e.g. user installs `wheel` package between runs).
-cat > "$PROC_HIDEPID" <<HIDEPID
-[Unit]
-Description=Remount /proc with hidepid=2 (admin gid=${ADMIN_GID} / ${ADMIN_GROUP_NAME})
-DefaultDependencies=no
-Before=sysinit.target
-
-[Service]
-Type=oneshot
-ExecStart=/bin/mount -o remount,hidepid=2,gid=${ADMIN_GID} /proc
-RemainAfterExit=yes
-
-[Install]
-WantedBy=sysinit.target
-HIDEPID
-systemctl daemon-reload
-systemctl enable proc-hidepid.service 2>/dev/null
-mount -o remount,hidepid=2,gid=${ADMIN_GID} /proc 2>/dev/null && \
-    echo "==> /proc remounted with hidepid=2,gid=${ADMIN_GID} (group '${ADMIN_GROUP_NAME}' keeps PID visibility)" || \
-    echo "WARNING: could not remount /proc with hidepid=2"
+"$(dirname "$(readlink -f "$0")")/setup-proc-hidepid" || \
+    echo "WARNING: could not configure /proc hidepid"
 
 # ---------- POSIX ACLs — deny access to sensitive host directories ----------
 # ACLs are the primary enforcement mechanism for filesystem isolation.

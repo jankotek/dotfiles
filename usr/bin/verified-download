@@ -15,10 +15,6 @@ if (( $# < 2 || $# > 3 )); then
     usage >&2
     exit 2
 fi
-if ! command -v aria2c >/dev/null 2>&1; then
-    echo "ERROR: aria2c is required" >&2
-    exit 1
-fi
 
 url=$1
 output=$2
@@ -34,6 +30,11 @@ if [[ -n $expected ]]; then
         echo "ERROR: SHA-256 must be 64 hexadecimal characters" >&2
         exit 2
     fi
+fi
+
+if ! command -v aria2c >/dev/null 2>&1; then
+    echo "ERROR: aria2c is required" >&2
+    exit 1
 fi
 
 install -d "$output_dir"

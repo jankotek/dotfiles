@@ -59,6 +59,11 @@ fixture-only; see [test/README.md](test/README.md) for details.
   downloading IDEA again; unchanged releases are skipped. A failed update leaves
   the previous IDEA and plugins in place. Python 3 parses Marketplace metadata;
   plugin versions/update IDs are recorded in `/opt/idea/.jetbrains-plugins`.
+- `setup-lab-hardening` — run by `create-lab-users`: private `/tmp` for every
+  user; lab sessions see only their own processes and cgroups, get high
+  memory/CPU/task caps, cannot reach this host's own services below port
+  10000 (their session VMs forward on higher ports), cannot use
+  cron or at, and are killed at logout
 - `pod-doctor` — read-only pod subordinate IDs, linger, Quadlet, and cgroup delegation
 - `sshd-audit` — read-only PermitRootLogin, password authentication, and host key/cert age
 - `vm-list` — one line per session VM: state, base or overlay disk, size, and guest IPv4

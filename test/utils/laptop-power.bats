@@ -9,6 +9,7 @@ setup() {
     CALLS="$BATS_TEST_TMPDIR/calls"
     LOGS="$BATS_TEST_TMPDIR/logs"
     STATE_FILE="$BATS_TEST_TMPDIR/laptop-power.state"
+    UNIT_DIR="$BATS_TEST_TMPDIR/units"
     mkdir -p "$CPU_ROOT"/policy{0,1} "$POWER_ROOT"/{AC,BAT0} "$LID_ROOT/LID0"
     echo Mains > "$POWER_ROOT/AC/type"
     echo 0 > "$POWER_ROOT/AC/online"
@@ -68,6 +69,15 @@ setup() {
     echo 2000000 > "$CPU_ROOT/policy1/scaling_max_freq"
     apply_policy
     [[ $(< "$CPU_ROOT/policy1/scaling_max_freq") == 625000 ]]
+}
+
+@test "session quota reset keeps a persistent per-user cap" {
+    mkdir -p "$UNIT_DIR/user-1201.slice.d"
+    printf '[Slice]\nCPUQuota=1280%%\nMemoryMax=80%%\n' \
+        > "$UNIT_DIR/user-1201.slice.d/50-jan-lab-limits.conf"
+    apply_policy
+    [[ $(cat "$CALLS") == *'set-property --runtime user-1201.slice CPUQuota=1280%'* ]]
+    [[ $(cat "$CALLS") == *'set-property --runtime user-1001.slice CPUQuota='$'\n'* ]]
 }
 
 @test "opening lid restores power-saver range and removes user quotas" {

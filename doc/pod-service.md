@@ -66,7 +66,7 @@ journalctl _SYSTEMD_USER_UNIT=<name>-app.service     # filter by service
 | Cron/at | Added to `/etc/cron.deny` and `/etc/at.deny` |
 | Filesystem ACLs | Deny access to /home, /root, /tmp, /var/tmp, /var/log, /var/spool, /var/mail, /etc/ssh |
 | Home directory | 0700, parent /var/pod is 0711 (traverse only, no listing) |
-| /proc | `hidepid=2` — users can only see their own processes |
+| /proc | `hidepid=invisible` via `setup-proc-hidepid` (after reboot) — pod users see only their own processes |
 | Ports | `net.ipv4.ip_unprivileged_port_start=1024` — no low port binding |
 | dmesg | `kernel.dmesg_restrict=1` — kernel log restricted to root |
 | Containers | `DropCapability=ALL` by default, `NoNewPrivileges=true`, private namespaces |

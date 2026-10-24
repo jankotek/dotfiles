@@ -1,0 +1,132 @@
+#!/bin/bash
+#
+# Hide other users' processes in /proc (hidepid=invisible). An account sees
+# another user's PID directories, and with them process names and command
+# lines, only while it belongs to the `proc` group.
+#
+# pod-setup uses this so pod accounts see only their own processes. Membership
+# is granted to every interactive account (UID_MIN..UID_MAX with a login
+# shell) except members of `lab`, so nologin service accounts such as pod
+# users stay hidden and regular users keep the stock view. Accounts created
+# later are hidden until this script runs again or they are added to `proc`
+# by hand. Lab sessions are restricted separately by setup-lab-hardening.
+#
+# Some system services read other users' /proc entries without
+# CAP_SYS_PTRACE: systemd-logind (session registration), polkit (subject
+# checks), rtkit, NetworkManager, and the D-Bus broker. Each gets `proc` as a
+# supplementary group through a drop-in.
+#
+# The remount happens at boot, before those services start. Remounting a
+# running system would leave the current logind without visibility and could
+# break new logins, so reboot to activate.
+#
+set -euo pipefail
+
+UNIT_DIR=${UNIT_DIR:-/etc/systemd/system}
+LOGIN_DEFS=${LOGIN_DEFS:-/etc/login.defs}
+readonly PROC_GROUP=proc
+readonly HIDDEN_GROUP=lab
+readonly MANAGED='# Managed by /opt/jan/usr/sbin/setup-proc-hidepid'
+readonly -a PROC_READERS=(
+    systemd-logind.service
+    polkit.service
+    rtkit-daemon.service
+    NetworkManager.service
+    dbus-broker.service
+    dbus.service
+)
+
+login_defs_value() {
+    local key=$1 default=$2 value
+    value=$(awk -v key="$key" '$1 == key { print $2 }' "$LOGIN_DEFS" 2>/dev/null | tail -n 1)
+    echo "${value:-$default}"
+}
+
+# write_configuration GID
+write_configuration() {
+    local gid=$1 unit
+    install -d -m 0755 "$UNIT_DIR"
+    cat > "$UNIT_DIR/proc-hidepid.service" <<EOF
+$MANAGED
+[Unit]
+Description=Remount /proc with hidepid=invisible (visible to group $PROC_GROUP, gid $gid)
+DefaultDependencies=no
+Before=sysinit.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/mount -o remount,hidepid=invisible,gid=$gid /proc
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target
+EOF
+    chmod 0644 "$UNIT_DIR/proc-hidepid.service"
+
+    for unit in "${PROC_READERS[@]}"; do
+        install -d -m 0755 "$UNIT_DIR/$unit.d"
+        cat > "$UNIT_DIR/$unit.d/50-proc-hidepid.conf" <<EOF
+$MANAGED
+[Service]
+SupplementaryGroups=$PROC_GROUP
+EOF
+        chmod 0644 "$UNIT_DIR/$unit.d/50-proc-hidepid.conf"
+    done
+}
+
+# Print interactive accounts that should keep the full process view.
+visible_users() {
+    local uid_min uid_max hidden_members
+    uid_min=$(login_defs_value UID_MIN 1000)
+    uid_max=$(login_defs_value UID_MAX 60000)
+    hidden_members=$(getent group "$HIDDEN_GROUP" | cut -d: -f4 || true)
+    local hidden_gid
+    hidden_gid=$(getent group "$HIDDEN_GROUP" | cut -d: -f3 || true)
+
+    getent passwd | while IFS=: read -r name _ uid gid _ _ shell; do
+        (( uid >= uid_min && uid <= uid_max )) || continue
+        case $shell in
+            */nologin|*/false|'') continue ;;
+        esac
+        [[ -n $hidden_gid && $gid == "$hidden_gid" ]] && continue
+        [[ ",$hidden_members," == *",$name,"* ]] && continue
+        echo "$name"
+    done
+}
+
+main() {
+    if (( EUID != 0 )); then
+        echo "Please run as root" >&2
+        return 1
+    fi
+
+    getent group "$PROC_GROUP" >/dev/null || groupadd --system "$PROC_GROUP"
+    local gid user
+    gid=$(getent group "$PROC_GROUP" | cut -d: -f3)
+
+    # A lab account must never keep the full view, even if added by hand.
+    local -a hidden=()
+    IFS=, read -r -a hidden <<< "$(getent group "$HIDDEN_GROUP" | cut -d: -f4 || true)"
+    for user in "${hidden[@]}"; do
+        [[ -n $user ]] || continue
+        if id -nG "$user" | tr ' ' '\n' | grep -qx "$PROC_GROUP"; then
+            gpasswd -d "$user" "$PROC_GROUP" >/dev/null
+        fi
+    done
+
+    while IFS= read -r user; do
+        usermod -aG "$PROC_GROUP" "$user"
+        echo "  $user keeps the full process view (group $PROC_GROUP)"
+    done < <(visible_users)
+
+    write_configuration "$gid"
+    systemctl daemon-reload
+    systemctl enable proc-hidepid.service >/dev/null 2>&1
+
+    echo "/proc will mount with hidepid=invisible,gid=$gid on the next boot."
+    echo "Reboot to activate; group changes apply to new logins."
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+    main "$@"
+fi

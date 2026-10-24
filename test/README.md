@@ -21,7 +21,7 @@ test/test-vm-xub26-deploy.sh       # clone xub26 -> setup/vm-xub26 -> test -> de
 
 | File | What it checks |
 |------|---------------|
-| `cli.bats` | Common CLI tools: git, curl, aria2c, mc, htop, fish, nano, ncdu, rg, starship, Fresh Editor, iotop, powertop, pwgen, telnet, jdupes, just, bats, zim, JetBrains Mono font |
+| `cli.bats` | Common CLI tools: git, fzf, curl, aria2c, mc, htop, fish, nano, ncdu, rg, starship, Fresh Editor, iotop, powertop, pwgen, telnet, jdupes, just, bats, zim, JetBrains Mono font |
 | `optjan.bats` | `/opt/jan` directory structure, key scripts exist in repo |
 | `zswap.bats` | zswap enabled with zstd compressor in boot params and at runtime |
 
@@ -38,8 +38,8 @@ test/test-vm-xub26-deploy.sh       # clone xub26 -> setup/vm-xub26 -> test -> de
 
 | File | What it checks |
 |------|---------------|
-| `dotfiles.bats` | Deployed dotfiles: .bashrc (EDITOR, VISUAL, starship), fish config, .profile (GTK_THEME), git config (name, email, defaultBranch), user-dirs (lowercase folders) |
-| `xfce.bats` | xfce4-session, Xorg, autologin (xfce4-panel + xfdesktop running as jan), vm-resize-display-loop running, terminator config (font, fish, titlebar), rofi, XFCE panel/xfwm4/xsettings XML, autostart entry, desktop shortcuts |
+| `dotfiles.bats` | Deployed dotfiles: .bashrc (EDITOR, VISUAL, starship, no forced TERM), .profile (GTK_THEME), git config (name, email, defaultBranch), user-dirs (lowercase folders) |
+| `xfce.bats` | xfce4-session, Xorg, autologin (xfce4-panel + xfdesktop running as jan), vm-resize-display-loop running, terminator config (font, bash, 1M-line scrollback, titlebar), rofi, XFCE panel/xfwm4/xsettings XML, autostart entry, desktop shortcuts |
 | `agents.bats` | Running inside VM, spice-vdagent installed + service enabled + process running as jan, spice-vdagentd running, qemu-guest-agent installed + enabled |
 | `system.bats` | /opt/jan/usr symlinked into /usr/local, core GUI tools installed, home owned by jan with 0700, automatic APT updates disabled, unwanted packages removed, tty11-root enabled |
 | `network.bats` | Portable VM networking: DHCP configuration with a live IPv4 address/default route, working DNS through systemd-resolved, and NetworkManager removed/masked |
@@ -77,6 +77,9 @@ CI category, and CI selects files by that tag:
 | `pod-security.bats` | Creates a temporary pod user via `pod-setup`, verifies subordinate-ID preservation and matching UID/GID ranges plus all security hardening layers (nologin shell, locked password, nogroup, 0700 home, sudo denied, cron denied, filesystem ACLs, podman configs, linger, cgroup delegation, sysctl port restriction), then deletes everything |
 | `laptop-power.bats` | Fixture sysfs trees and a stubbed `systemctl` for lid/AC CPU limits, per-user quotas, low-battery suspend, frequency readback, locking, and installer hooks |
 | `ac-no-suspend.bats` | Fixture config dirs for `setup-ac-no-suspend` (logind drop-in, merging PowerDevil AC defaults into an existing `/etc/xdg/powerdevilrc` across KConfig syntax variants) and a stubbed `kwriteconfig6`/`systemctl` for the per-user `ac-no-suspend` |
+| `lab-hardening.bats` | Fixture `/etc` tree and vendor PAM dir for `setup-lab-hardening`: private `/tmp` and `/var/tmp` via pam_namespace (lab sessions required, others optional), pam-config `common-session` wrapping, `systemd-user` coverage, lab slice memory/CPU/task caps, logind kill on logout, the loopback nftables rule (DNS and ports 10000+ allowed), and idempotent cron/at deny |
+| `lab-hardening-live.bats` | Disposable Tumbleweed guest: real SSH/PAM and systemd user sessions, failed isolation rejecting login, provisioning twice, firewall connections, resource caps, and boot ordering after reboot. Run with `LAB_TEST_BASE=/path/from/vm-image-build.qcow2`; removes its VM and disk, retaining logs beside the base image |
+| `proc-hidepid.bats` | Fixture unit dir and stubbed `getent` for `setup-proc-hidepid`: which accounts keep the full process view (interactive, non-lab), the boot-time `hidepid=invisible` remount, and `proc` drop-ins for logind, polkit, rtkit, NetworkManager, and D-Bus |
 | `kernel-zbook-build.bats` | CLI checks only: help through the deployment symlink, argument rejection, and the root requirement; never builds a kernel |
 | `idempotency.bats` | Run as root inside a deployed VM: re-runs `setup/vm-xub26` and verifies user data survives (driven by `test/test-vm-idempotency.sh`) |
 

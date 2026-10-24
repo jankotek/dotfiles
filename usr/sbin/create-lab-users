@@ -6,12 +6,18 @@
 # and Bluetooth administration. BlueZ D-Bus access and su are denied as well.
 # This blocks normal desktop Bluetooth use, but is not an LSM sandbox against
 # a hostile program opening raw AF_BLUETOOTH sockets directly.
+#
+# setup-lab-hardening then hides other users' processes and app names from
+# lab sessions, caps their memory, CPU, and tasks, blocks their connections
+# to this host's own services, denies cron and at, kills their processes at
+# logout, and gives every user a private /tmp.
 
 set -Eeuo pipefail
 
 readonly LAB_GROUP=lab
 readonly REGULAR_GROUP=users
 readonly PASSWORD_HELPER=/usr/local/sbin/randomize-user-passwords
+readonly HARDENING_HELPER=/usr/local/sbin/setup-lab-hardening
 readonly PAM_MARKER='# Managed by create-lab-users.'
 readonly POLKIT_RULE=/etc/polkit-1/rules.d/00-jan-lab-restrictions.rules
 readonly DBUS_RULE=/etc/dbus-1/system.d/90-jan-lab-restrictions.conf
@@ -43,21 +49,24 @@ if [[ ${ID:-} != opensuse-tumbleweed ]]; then
     exit 1
 fi
 
-if [[ ! -x $PASSWORD_HELPER ]]; then
-    echo "ERROR: missing executable $PASSWORD_HELPER" >&2
-    echo "       deploy the repository's usr/ tree to /usr/local first" >&2
-    exit 1
-fi
+for helper in "$PASSWORD_HELPER" "$HARDENING_HELPER"; do
+    if [[ ! -x $helper ]]; then
+        echo "ERROR: missing executable $helper" >&2
+        echo "       deploy the repository's usr/ tree to /usr/local first" >&2
+        exit 1
+    fi
+done
 
 echo "==> Installing password and per-user virtualization tools" >&2
 zypper -n install --no-recommends \
     pwgen \
+    nftables \
     libvirt-client \
     libvirt-daemon-qemu \
     qemu-x86 \
     qemu-tools >&2
 
-for required_command in chage pgrep useradd usermod pwgen virsh visudo; do
+for required_command in chage pgrep useradd usermod pwgen virsh visudo nft; do
     if ! command -v "$required_command" >/dev/null; then
         echo "ERROR: required command is missing: $required_command" >&2
         exit 1
@@ -200,7 +209,9 @@ polkit.addRule(function(action, subject) {
     if (action.id.indexOf("org.freedesktop.NetworkManager.") === 0 ||
         action.id.indexOf("org.bluez.") === 0 ||
         action.id.indexOf("org.blueman.") === 0 ||
-        action.id.indexOf("org.libvirt.") === 0) {
+        action.id.indexOf("org.libvirt.") === 0 ||
+        action.id === "org.freedesktop.login1.set-self-linger" ||
+        action.id === "org.freedesktop.login1.set-user-linger") {
         return polkit.Result.NO;
     }
 
@@ -260,6 +271,9 @@ for user in "${LAB_USERS[@]}"; do
         exit 1
     fi
 done
+
+echo "==> Applying lab session restrictions" >&2
+"$HARDENING_HELPER" >&2
 
 echo "==> Assigning fresh lab passwords" >&2
 trap - EXIT

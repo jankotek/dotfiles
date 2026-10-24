@@ -6,11 +6,11 @@ WordMode=true
 WordModeAscii=true
 
 [General]
-Command=/usr/bin/fish
+Command=/bin/bash
 Name=white
 Parent=FALLBACK/
 TerminalColumns=160
 TerminalRows=40
 
 [Scrolling]
-HistorySize=100000
+HistorySize=1000000

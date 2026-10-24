@@ -1,1 +1,64 @@
-# Starship currently uses its built-in defaults.
+"$schema" = 'https://starship.rs/config-schema.json'
+
+# Muted take on the Oceanic Pulse theme (github.com/tirsasaki/starship-themes):
+# flat coloured blocks on the first line, the input on the second. No Nerd
+# Font is installed, so symbols are ASCII plus a few characters every common
+# font has (… › ↑ ↓).
+#
+# Bash has no right-hand prompt; .bashrc draws the last command's run time,
+# the system load, and the exit code with the date and time on the right of
+# the input line, in the sand, mist, coral, and clock colours below.
+
+add_newline = false
+palette = 'oceanic_muted'
+
+format = """
+$hostname$directory$git_branch$git_status
+$character"""
+
+[palettes.oceanic_muted]
+deep = '#1B3245'
+blue = '#3D6A8A'
+teal = '#3E8E87'
+foam = '#D5E4E8'
+mist = '#8FB3BF'
+coral = '#C9716A'
+sand = '#C9A96A'
+clock = '#7F9CA8'
+
+[hostname]
+style = 'bg:blue fg:foam'
+format = '[ $hostname ]($style)'
+
+[directory]
+style = 'bg:deep fg:foam bold'
+format = '[ $path ]($style)[$read_only]($read_only_style)'
+truncation_length = 3
+truncation_symbol = '…/'
+read_only = ' ro '
+read_only_style = 'bg:deep fg:coral'
+
+[git_branch]
+symbol = ''
+style = 'bg:teal fg:deep bold'
+format = '[ $symbol$branch ]($style)'
+
+[git_status]
+style = 'bg:teal fg:deep'
+format = '[($all_status$ahead_behind )]($style)'
+untracked = '?'
+modified = '!'
+staged = '+'
+deleted = 'x'
+ahead = '↑${count}'
+behind = '↓${count}'
+# Starship's defaults for these use arrows and quotes many fonts lack.
+diverged = '↑${ahead_count}↓${behind_count}'
+renamed = 'r'
+conflicted = '='
+stashed = '$'
+
+[character]
+success_symbol = '[›](fg:mist)'
+error_symbol = '[›](fg:coral)'
+vimcmd_symbol = '[‹](fg:mist)'

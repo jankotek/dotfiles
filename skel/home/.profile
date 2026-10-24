@@ -3,7 +3,8 @@ if [ -n "${BASH_VERSION:-}" ] && [ -f "$HOME/.bashrc" ]; then
     . "$HOME/.bashrc"
 fi
 
-if [ -d "$HOME/.local/bin" ]; then
-    PATH="$HOME/.local/bin:$PATH"
-fi
+case ":$PATH:" in
+    *":$HOME/.local/bin:"*) ;;
+    *) [ -d "$HOME/.local/bin" ] && PATH="$HOME/.local/bin:$PATH" ;;
+esac
 export PATH

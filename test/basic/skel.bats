@@ -37,6 +37,168 @@ load ../helpers
     '
 }
 
+@test "bashrc keeps stock commands and builds PATH once" {
+    [[ ! -e $OPT_JAN/skel/home/.config/fish/config.fish ]]
+    local home
+    home=$(mktemp -d)
+    cp "$OPT_JAN/skel/home/.bashrc" "$OPT_JAN/skel/home/.profile" "$home/"
+    mkdir -p "$home/.local/bin"
+    run env -i HOME="$home" PATH=/usr/bin:/bin TERM=screen-256color bash -i -c '
+        source "$HOME/.profile"
+        source "$HOME/.bashrc"
+        alias stat >/dev/null 2>&1 && exit 1
+        printf "%s\n" "$TERM" "$PATH" > "$HOME/result"
+    ' 2>/dev/null
+    [[ $status -eq 0 ]]
+    mapfile -t lines < "$home/result"
+    rm -rf "$home"
+    [[ ${lines[0]} == screen-256color ]]
+    [[ $(tr ':' '\n' <<<"${lines[1]}" | grep -cx "$home/.local/bin") -eq 1 ]]
+}
+
+@test "bash keeps a large, immediately saved history" {
+    local home
+    home=$(mktemp -d)
+    cp "$OPT_JAN/skel/home/.bashrc" "$home/"
+    run env -i HOME="$home" PATH=/usr/bin:/bin TERM=xterm bash -i -c '
+        printf "%s\n" "$HISTSIZE" "$HISTFILESIZE" "$HISTCONTROL" > "$HOME/result"
+        history -s "saved-before-shell-exit"
+        eval "$PROMPT_COMMAND"
+        grep -qx "saved-before-shell-exit" "$HISTFILE"
+    ' 2>/dev/null
+    local -a result
+    mapfile -t result < "$home/result"
+    rm -rf "$home"
+    [[ $status -eq 0 ]]
+    [[ ${result[0]} == 1000000 && ${result[1]} == 1000000 ]]
+    [[ ${result[2]} == ignoreboth:erasedups ]]
+}
+
+@test "Ctrl-R opens fzf history search and leaves Ctrl-T and Alt-C alone" {
+    command -v fzf >/dev/null || skip "fzf not installed"
+    fzf --bash >/dev/null 2>&1 \
+        || [[ -r /usr/share/fzf/shell/key-bindings.bash ]] \
+        || [[ -r /usr/share/doc/fzf/examples/key-bindings.bash ]] \
+        || skip "fzf has no bash key bindings"
+    local home
+    home=$(mktemp -d)
+    cp "$OPT_JAN/skel/home/.bashrc" "$home/"
+    run env -i HOME="$home" PATH="$PATH" TERM=xterm bash -i -c '
+        { bind -X; bind -p; } > "$HOME/bindings"
+        [ -z "${FZF_CTRL_T_COMMAND+x}" ]
+    ' 2>/dev/null
+    local bindings
+    bindings=$(cat "$home/bindings")
+    rm -rf "$home"
+    [[ $status -eq 0 ]]
+    [[ $bindings =~ \"\\C-r\"[:\ ]+[^$'\n']*fzf ]]
+    [[ $bindings == *'"\C-t": transpose-chars'* ]]
+    [[ $bindings == *'"\M-c": capitalize-word'* || $bindings == *'"\ec": capitalize-word'* ]]
+}
+
+@test "Starship config parses and uses only characters common fonts have" {
+    python3 - "$OPT_JAN/skel/home/.config/starship.toml" <<'PY'
+import sys, tomllib
+text = open(sys.argv[1], encoding="utf-8").read()
+config = tomllib.loads(text)
+assert config["palette"] in config["palettes"]
+# No Nerd Font is installed: allow ASCII plus characters every common font
+# has, so the prompt never shows boxes.
+allowed = set("…›‹↑↓")
+bad = {f"U+{ord(c):04X} {c}" for c in text if ord(c) > 0x7E and c not in allowed}
+assert not bad, bad
+# Shown git states whose Starship defaults use other characters.
+for key in ("ahead", "behind", "diverged", "renamed", "deleted"):
+    assert key in config["git_status"], key
+PY
+}
+
+@test "prompt shows day-month 24-hour clock on the right without growing" {
+    local home
+    home=$(mktemp -d)
+    mkdir "$home/bin"
+    cp "$OPT_JAN/skel/home/.bashrc" "$home/"
+    # Minimal stand-in for `starship init bash`: rebuild PS1 on every prompt.
+    cat > "$home/bin/starship" <<'STUB'
+#!/bin/sh
+echo 'starship_precmd() { PS1="> "; }; PROMPT_COMMAND=starship_precmd'
+STUB
+    chmod +x "$home/bin/starship"
+    run env -i HOME="$home" PATH="$home/bin:/usr/bin:/bin" TERM=xterm COLUMNS=40 bash -i -c '
+        eval "$PROMPT_COMMAND"
+        eval "$PROMPT_COMMAND"
+        printf "%s" "$PS1" > "$HOME/ps1"
+    ' 2>/dev/null
+    local ps1
+    ps1=$(cat "$home/ps1")
+    rm -rf "$home"
+    [[ $status -eq 0 ]]
+    # One clock, placed so 11 characters end one column before the edge.
+    [[ $ps1 =~ ^'> \[\e7\e[29G'.*'m'[0-3][0-9]-[01][0-9]' '[0-2][0-9]:[0-5][0-9]'\e[0m\e8\]'$ ]]
+}
+
+@test "right prompt shows run time and load from 5 s, and a failed exit code" {
+    local home
+    home=$(mktemp -d)
+    mkdir "$home/bin"
+    cp "$OPT_JAN/skel/home/.bashrc" "$home/"
+    # Stand-in for `starship init bash` that reports what Starship would.
+    cat > "$home/bin/starship" <<'STUB'
+#!/bin/sh
+echo 'starship_precmd() { PS1="> "; }; PROMPT_COMMAND=starship_precmd'
+STUB
+    chmod +x "$home/bin/starship"
+    run env -i HOME="$home" PATH="$home/bin:/usr/bin:/bin" TERM=xterm COLUMNS=60 bash -i -c '
+        strip() { sed "s/\\\\e\[[0-9;]*m//g; s/\\\\[][]//g; s/\\\\e[78]//g"; }
+        eval "$PROMPT_COMMAND"; strip <<<"$PS1" > "$HOME/p1"
+        STARSHIP_END_TIME=1 STARSHIP_DURATION=6500 STARSHIP_CMD_STATUS=3
+        eval "$PROMPT_COMMAND"; strip <<<"$PS1" > "$HOME/p2"
+        STARSHIP_DURATION=4999 STARSHIP_CMD_STATUS=0 STARSHIP_END_TIME=2
+        eval "$PROMPT_COMMAND"; strip <<<"$PS1" > "$HOME/p3"
+        eval "$PROMPT_COMMAND"; strip <<<"$PS1" > "$HOME/p4"
+        STARSHIP_DURATION=42 STARSHIP_CMD_STATUS=1 STARSHIP_END_TIME=3
+        eval "$PROMPT_COMMAND"; strip <<<"$PS1" > "$HOME/p5"
+    ' 2>/dev/null
+    local p1 p2 p3 p4 p5
+    p1=$(cat "$home/p1") p2=$(cat "$home/p2") p3=$(cat "$home/p3")
+    p4=$(cat "$home/p4") p5=$(cat "$home/p5")
+    rm -rf "$home"
+    [[ $status -eq 0 ]]
+    local clock='[0-3][0-9]-[01][0-9] [0-2][0-9]:[0-5][0-9]'
+    # Each right prompt ends one column before the 60-column edge.
+    local p
+    for p in "$p1" "$p2" "$p3" "$p4" "$p5"; do
+        [[ $p =~ ^'> \e['([0-9]+)'G'(.*)$ ]]
+        (( BASH_REMATCH[1] + ${#BASH_REMATCH[2]} == 60 ))
+    done
+    # First prompt: only the clock.
+    [[ $p1 =~ G$clock$ ]]
+    # 6.5 s: run time, the 1-minute load average, and exit 3.
+    [[ $p2 =~ G'6.5s  load '[0-9]+'.'[0-9][0-9]'  exit 3  '$clock$ ]]
+    # Under 5 s and successful: only the clock.
+    [[ $p3 =~ G$clock$ ]]
+    # A quick failure still shows its exit code.
+    [[ $p5 =~ G'exit 1  '$clock$ ]]
+    # An empty line shows only the clock again.
+    [[ $p4 =~ G$clock$ ]]
+}
+
+@test "ex extracts archives with spaces and tar.zst" {
+    command -v zstd >/dev/null || skip "zstd not installed"
+    local work
+    work=$(mktemp -d)
+    mkdir "$work/src"
+    echo hi > "$work/src/a file"
+    tar -C "$work/src" --zstd -cf "$work/my archive.tar.zst" "a file"
+    mkdir "$work/out"
+    run bash -c '
+        eval "$(sed -n "/^ex ()/,/^}/p" "$1")"
+        cd "$2/out" && ex "../my archive.tar.zst"
+    ' _ "$OPT_JAN/skel/home/.bashrc" "$work"
+    [[ $status -eq 0 && -f "$work/out/a file" ]]
+    rm -rf "$work"
+}
+
 @test "Plasma defaults match the XFCE Sweet appearance" {
     local kdeglobals="$OPT_JAN/skel/home/.config/kdeglobals"
     assert_file_contains "$kdeglobals" '^ColorScheme=Sweet-dark$'
@@ -46,7 +208,7 @@ load ../helpers
     fi
 }
 
-@test "Konsole defaults to the pure black dark profile" {
+@test "Konsole uses global profiles and defaults to pure black" {
     assert_file_contains \
         "$OPT_JAN/skel/home/.config/konsolerc" \
         '^DefaultProfile=dark.profile$'
@@ -62,12 +224,16 @@ load ../helpers
     assert_file_contains \
         "$OPT_JAN/usr/share/konsole/dark.profile" \
         '^WordModeAscii=true$'
-    cmp \
-        "$OPT_JAN/usr/share/konsole/dark.profile" \
-        "$OPT_JAN/skel/home/.local/share/konsole/dark.profile"
-    cmp \
-        "$OPT_JAN/usr/share/konsole/white.profile" \
-        "$OPT_JAN/skel/home/.local/share/konsole/white.profile"
+    local profile
+    for profile in dark white; do
+        [[ ! -e $OPT_JAN/skel/home/.local/share/konsole/$profile.profile ]]
+        assert_file_contains \
+            "$OPT_JAN/usr/share/konsole/$profile.profile" \
+            '^Command=/bin/bash$'
+        assert_file_contains \
+            "$OPT_JAN/usr/share/konsole/$profile.profile" \
+            '^HistorySize=1000000$'
+    done
 }
 
 @test "MC desktop shortcuts use the packaged icon name" {

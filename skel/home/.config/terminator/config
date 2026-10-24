@@ -6,9 +6,9 @@
     foreground_color = "#ffffff"
     show_titlebar = False
     scrollbar_position = hidden
-    scrollback_lines = 50000
+    scrollback_lines = 1000000
     use_custom_command = True
-    custom_command = /usr/bin/fish
+    custom_command = /bin/bash
     use_system_font = False
 [layouts]
   [[default]]

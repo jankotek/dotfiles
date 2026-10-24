@@ -6,6 +6,7 @@ readonly -a JAN_COMMON_CLI_PACKAGES=(
     mc
     htop
     git
+    fzf
     lazygit
     curl
     aria2

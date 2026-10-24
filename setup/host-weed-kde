@@ -85,7 +85,7 @@ zypper -n install --no-recommends \
     filelight partitionmanager \
     virt-manager virt-install virt-viewer qemu podman lima \
     "${JAN_COMMON_CLI_PACKAGES[@]}" \
-    sshpass jq yq fzf dconf \
+    sshpass jq yq dconf \
     NetworkManager-tui jetbrains-mono-fonts \
     java-17-openjdk-devel maven
 

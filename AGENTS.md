@@ -44,7 +44,8 @@ Personal dotfiles and system provisioning repo. Checked out at `/opt/jan` on tar
   and publisher checksums; `opt-status` lists what is installed
 - `distro-upgrade` is distro-agnostic: handles zypper (openSUSE), dnf (Fedora), apt (Ubuntu)
 - Setup scripts must check `systemd-detect-virt` before doing VM-specific operations
-- Shell configs exist for both bash (`.bashrc`) and fish (`config.fish`) — keep them in sync
+- `.bashrc` is the only managed shell config; fish is installed but runs with
+  its stock defaults (no `config.fish` in `skel/home/`)
 
 ## User environment
 
@@ -56,7 +57,7 @@ Personal dotfiles and system provisioning repo. Checked out at `/opt/jan` on tar
 | GUI editor | Kate / KWrite | Mousepad |
 
 Shared: Sweet-dark colors with Sweet-Purple/candy icons, JetBrains Mono,
-Bash + Fish with Starship (distro package), mcedit, and `optupdate` dev tools
+Bash with Starship (distro package), fish with stock config, mcedit, and `optupdate` dev tools
 (IntelliJ IDEA, Corretto JDKs, Gradle, Maven, Kubernetes CLIs, coding agents).
 
 ## Testing
@@ -69,7 +70,7 @@ Tests use [bats-core](https://github.com/bats-core/bats-core): four test directo
 |-----------|---------|-----------------|
 | `test/basic/` | everywhere | `/opt/jan` structure, CLI tools (fish, htop, ncdu, aria2c, yq, java, maven, go, ...), JetBrains Mono and console fonts, kernel tweaks, package safety locks, `/etc/skel` contents |
 | `test/host/` | host only | Plasma/Wayland, KDE apps (kdenlive, krita, kdiff3, ...), virt tools, stock tty1 plus managed agetty on tty2-10, GDK_BACKEND=x11 patches, monitor fixes, Strix Halo GPU parameters |
-| `test/vm/` | VM only | Deployed dotfiles (.bashrc, fish, git, user-dirs), XFCE/X11, terminator, rofi, autologin (xfce4-panel + xfdesktop running as jan), spice/qemu agents (installed + running), display resize loop, symlinks into /usr/local, purged packages (snapd, xfce4-terminal), systemd services |
+| `test/vm/` | VM only | Deployed dotfiles (.bashrc, git, user-dirs), XFCE/X11, terminator, rofi, autologin (xfce4-panel + xfdesktop running as jan), spice/qemu agents (installed + running), display resize loop, symlinks into /usr/local, purged packages (snapd, xfce4-terminal), systemd services |
 | `test/utils/` | CI / manual | Fixture tests, network installs, and opt-in destructive integration tests; each file declares its CI category (below) |
 
 ### Launchers

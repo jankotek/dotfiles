@@ -31,6 +31,10 @@ load ../helpers
     assert_command htop
 }
 
+@test "fzf is installed" {
+    assert_command fzf
+}
+
 @test "fish is installed" {
     assert_command fish
 }

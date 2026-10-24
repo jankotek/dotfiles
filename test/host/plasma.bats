@@ -28,10 +28,8 @@ load ../helpers
     assert_file "$JAN_HOME/.config/kdeglobals"
     assert_file "$JAN_HOME/.config/konsolerc"
     assert_file_contains "$JAN_HOME/.config/konsolerc" '^DefaultProfile=dark.profile$'
-    assert_file "$JAN_HOME/.local/share/konsole/dark.profile"
-    assert_file "$JAN_HOME/.local/share/konsole/white.profile"
-    [[ $(stat -c %U "$JAN_HOME/.local/share/konsole/dark.profile") == \
-        $(stat -c %U "$JAN_HOME") ]]
+    assert_file /usr/local/share/konsole/dark.profile
+    assert_file /usr/local/share/konsole/white.profile
 }
 
 @test "Sweet palette is the referenced KDE system default" {

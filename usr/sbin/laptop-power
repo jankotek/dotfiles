@@ -10,8 +10,20 @@ ALLOW_SUSPEND=1
 LOCK_FILE=${LOCK_FILE:-/run/laptop-power.lock}
 LOCK_WAIT_SECONDS=${LOCK_WAIT_SECONDS:-5}
 STATE_FILE=${STATE_FILE:-/run/laptop-power.state}
+UNIT_DIR=${UNIT_DIR:-/etc/systemd/system}
 
 fail() { echo "laptop-power: $*" >&2; return 1; }
+
+# The CPUQuota a persistent drop-in sets on user-UID.slice (setup-lab-hardening
+# caps lab accounts), or nothing. A runtime property overrides /etc, so the
+# reset below must restore this value instead of clearing it.
+persistent_cpu_quota() {
+    local uid=$1 conf
+    for conf in "$UNIT_DIR/user-$uid.slice.d"/*.conf; do
+        [[ -f $conf ]] || continue
+        sed -n 's/^[[:space:]]*CPUQuota=//p' "$conf"
+    done | tail -n 1
+}
 
 detect_power() {
     local supply type online battery=0 offline=0 discharging=0
@@ -209,7 +221,8 @@ apply_policy() {
     # Current terminal-launched agents and QEMU processes are in app.slice.
     for account in "${accounts[@]}"; do
         uid=${quota_users[$account]}
-        systemctl set-property --runtime "user-$uid.slice" CPUQuota= || return 1
+        systemctl set-property --runtime "user-$uid.slice" \
+            "CPUQuota=$(persistent_cpu_quota "$uid")" || return 1
         if systemctl is-active --quiet "user@$uid.service"; then
             systemctl --user --machine="$account@.host" set-property --runtime app.slice "CPUQuota=$quota" || return 1
         else
