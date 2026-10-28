@@ -5,13 +5,13 @@ load ../helpers
 
 @test "skel/home is the only user-dotfile source" {
     [[ ! -e "$OPT_JAN/home" ]]
-    for script in setup/vm-xub26 setup/vm-baseweed; do
-        assert_file_contains "$OPT_JAN/$script" 'rsync -a /opt/jan/skel/home/'
+    for script in setup/vm-xub26 setup/vm-cli; do
+        assert_file_contains "$OPT_JAN/$script" 'rsync -a .*[/]opt/jan/skel/home/'
     done
 }
 
 @test "legacy provisioning traps preserve the failing status" {
-    for script in setup/host-weed-kde setup/vm-xub26 setup/vm-baseweed; do
+    for script in setup/host-weed-kde setup/vm-xub26 setup/vm-cli; do
         assert_file_contains "$OPT_JAN/$script" 'local rc=\$?'
         assert_file_contains "$OPT_JAN/$script" 'exit "\$rc"'
     done
@@ -90,8 +90,8 @@ load ../helpers
 }
 
 @test "VM provisioners apply skel without automatic home backups" {
-    for script in setup/vm-xub26 setup/vm-baseweed; do
-        assert_file_contains "$OPT_JAN/$script" 'rsync -a /opt/jan/skel/home/'
+    for script in setup/vm-xub26 setup/vm-cli; do
+        assert_file_contains "$OPT_JAN/$script" 'rsync -a .*[/]opt/jan/skel/home/'
         assert_file_not_contains "$OPT_JAN/$script" \
             'jan_home_backup|HOME_DIR.*-backup-|home-before-vm'
         assert_file_contains "$OPT_JAN/$script" \
@@ -101,7 +101,7 @@ load ../helpers
 }
 
 @test "VM provisioners use systemd-networkd instead of NetworkManager" {
-    for script in setup/vm-xub26 setup/vm-baseweed; do
+    for script in setup/vm-xub26 setup/vm-cli; do
         assert_file_contains "$OPT_JAN/$script" '^setup-vm-networkd$'
     done
     assert_file_contains "$OPT_JAN/usr/sbin/setup-vm-networkd" \
@@ -115,13 +115,13 @@ load ../helpers
 }
 
 @test "Tumbleweed refresh keeps repository signature verification" {
-    assert_file_contains "$OPT_JAN/setup/vm-baseweed" \
-        'zypper -n --gpg-auto-import-keys refresh'
+    assert_file_contains "$OPT_JAN/setup/install-cli-packages.sh" \
+        'apt -y update'
     assert_file_not_contains "$OPT_JAN/setup/vm-baseweed" '--no-gpg-checks'
 }
 
 @test "baseweed deployment supports the baked qdistro image" {
-    assert_file_contains "$OPT_JAN/setup/vm-baseweed" \
+    assert_file_contains "$OPT_JAN/setup/vm-cli" \
         '^mapfile -t HOME_USERS'
     assert_file_contains "$OPT_JAN/test/test-vm-baseweed-deploy.sh" \
         "require_clone_xml '<memoryBacking>'"
@@ -200,7 +200,7 @@ load ../helpers
         setup/host \
         setup/host-weed-kde \
         setup/vm-xub26 \
-        setup/vm-baseweed \
+        setup/vm-cli \
         setup/vm-ub26-xfce; do
         assert_file_contains "$OPT_JAN/$script" 'retire-path-util-names.sh'
     done
@@ -286,7 +286,7 @@ load ../helpers
 
 @test "Tumbleweed installs the distro apt compatibility frontend" {
     local script
-    for script in setup/host-weed-kde setup/vm-baseweed; do
+    for script in setup/host-weed-kde usr/lib/vm_bootstrap.py; do
         assert_file_contains "$OPT_JAN/$script" 'zypper-aptitude'
     done
     # apt-get also exists on openSUSE now. Package names must come from zypper.

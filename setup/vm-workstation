@@ -1,0 +1,76 @@
+#!/bin/bash
+# Promote an existing text-only VM to minimal XFCE with LightDM autologin.
+set -Eeuo pipefail
+if (( EUID != 0 )); then
+    echo 'ERROR: vm-workstation must run as root' >&2
+    exit 1
+fi
+if ! systemd-detect-virt -q -v; then
+    echo 'ERROR: vm-workstation must run inside a virtual machine' >&2
+    exit 1
+fi
+if (( $# != 1 )) || [[ ! $1 =~ ^[a-z_][a-z0-9_-]*$ || $1 == root ]]; then
+    echo 'Usage: vm-workstation EXISTING_USER' >&2
+    exit 2
+fi
+user=$1
+entry=$(getent passwd "$user")
+IFS=: read -r _ _ uid _ _ home shell <<< "$entry"
+if (( uid < 1000 || uid >= 65534 )) || [[ $home != /home/* || ! -d $home || $shell == */nologin || $shell == */false ]]; then
+    echo 'ERROR: choose an existing regular login user under /home' >&2
+    exit 1
+fi
+SETUP_DIR=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+# shellcheck source=/dev/null
+source "$SETUP_DIR/common-cli-packages.sh"
+export DEBIAN_FRONTEND=noninteractive
+# Use the existing CLI provisioning/identity, without reapplying its home files.
+if command -v zypper >/dev/null 2>&1; then
+    # Tumbleweed has no lightdm-autologin-greeter package. LightDM's built-in
+    # zero-delay autologin uses its packaged PAM service; GTK is the logout fallback.
+    desktop_packages=(xorg-x11-server xf86-input-libinput Mesa-dri xfdesktop lightdm-gtk-greeter)
+    greeter=lightdm-gtk-greeter
+    autologin_delay=0
+else
+    desktop_packages=(xserver-xorg-core xserver-xorg-input-libinput libgl1-mesa-dri dbus-x11 xfdesktop4 lightdm-autologin-greeter)
+    greeter=lightdm-autologin-greeter
+    # The greeter needs a nonzero timeout to log back in after session logout.
+    autologin_delay=1
+fi
+apt -y update
+apt "${JAN_APT_INSTALL_OPTIONS[@]}" install \
+    lightdm xfce4-session xfce4-panel xfce4-settings xfconf xfwm4 thunar \
+    terminator mousepad spice-vdagent "${desktop_packages[@]}"
+install -d -m 0755 /etc/lightdm/lightdm.conf.d
+# Debian's autologin greeter ships an alphabetically later placeholder user in
+# lightdm-autologin-greeter.conf. Our managed settings must sort after that file.
+rm -f /etc/lightdm/lightdm.conf.d/90-jan-autologin.conf
+cat > /etc/lightdm/lightdm.conf.d/zz-jan-autologin.conf <<CONFIG
+[Seat:*]
+greeter-session=$greeter
+user-session=xfce
+autologin-user=$user
+autologin-user-timeout=$autologin_delay
+autologin-session=xfce
+allow-guest=false
+CONFIG
+if [[ -d /etc/sysconfig ]] && command -v zypper >/dev/null 2>&1; then
+    # openSUSE's display-manager wrapper selects the actual manager here.
+    touch /etc/sysconfig/displaymanager
+    sed -i '/^DISPLAYMANAGER=/d; /^DISPLAYMANAGER_AUTOLOGIN=/d' /etc/sysconfig/displaymanager
+    printf 'DISPLAYMANAGER="lightdm"\nDISPLAYMANAGER_AUTOLOGIN="%s"\n' "$user" >> /etc/sysconfig/displaymanager
+else
+    printf '/usr/sbin/lightdm\n' > /etc/X11/default-display-manager
+fi
+# Keep keys/passwords unchanged. Debian's packaged PAM service permits autologin;
+# SUSE uses its autologin group when configured by the package.
+if getent group autologin >/dev/null; then
+    usermod -a -G autologin "$user"
+fi
+systemctl disable greetd.service gdm.service gdm3.service sddm.service 2>/dev/null || true
+# Installing SUSE's xdm dependency may preset the legacy display-manager alias.
+# This promotion explicitly selects LightDM, so replace that alias deliberately.
+systemctl enable --force lightdm.service
+systemctl set-default graphical.target
+lightdm --show-config
+printf 'Minimal XFCE installed for %s. Reboot to enter the LightDM autologin session.\n' "$user"

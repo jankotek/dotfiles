@@ -1,29 +1,18 @@
 #!/bin/bash
-#
-# vm-baseweed — Tumbleweed counterpart to setup/vm-xub26.
-#
-# Symlinks /opt/jan/usr into /usr/local, installs core CLI tools via zypper,
-# runs the cross-distro setup helpers, and syncs the canonical dotfiles
-# without --delete (so user data survives re-runs).
-
-# Sanity check: verify running inside a VM
-if ! systemd-detect-virt -q -v; then
-    echo "ERROR: This script must run inside a virtual machine"
+# Tumbleweed graphical VM profile, layered over the shared text-only setup.
+set -Eeuo pipefail
+if (( EUID != 0 )); then
+    echo "ERROR: vm-baseweed must run as root" >&2
     exit 1
 fi
-
-set -Eeuo pipefail
-error_trap() {
-    local rc=$?
-    echo >&2 "${BASH_SOURCE[1]}:${BASH_LINENO[0]}: Command \`$BASH_COMMAND\` failed with exit code $rc"
-    exit "$rc"
-}
-trap error_trap ERR
-
-SETUP_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
-# shellcheck source=/dev/null
-source "${SETUP_DIR}/common-cli-packages.sh"
-
+if ! systemd-detect-virt -q -v; then
+    echo "ERROR: This script must run inside a virtual machine" >&2
+    exit 1
+fi
+SETUP_DIR=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+cp -f -s -r /opt/jan/usr/* /usr/local
+/opt/jan/setup/retire-path-util-names.sh
+export PATH="/usr/local/sbin:/usr/local/bin:$PATH"
 guest_agent_owner_token=
 cleanup_guest_agent_guard() {
     local rc=$?
@@ -36,138 +25,34 @@ cleanup_guest_agent_guard() {
     exit "$rc"
 }
 trap cleanup_guest_agent_guard EXIT
-
-# ---------- /opt/jan/usr -> /usr/local symlinks ----------
-
-cp -f -s -r /opt/jan/usr/* /usr/local
-/opt/jan/setup/retire-path-util-names.sh
-/usr/local/sbin/install-chrome-vm
-/usr/local/sbin/install-brave-vm
-
-# ---------- Package install ----------
-
-# Recover masks and the boot-time helper left by older provisioning runs.
-# SPICE does not carry this command's control channel and needs no guard.
+# Recover persistent state left by older versions before taking a runtime lease.
 systemctl unmask spice-vdagentd.service
 systemctl disable jan-unmask-guest-agents.service 2>/dev/null || true
 rm -f /etc/systemd/system/jan-unmask-guest-agents.service
 systemctl daemon-reload
-
-# The runtime lease is released on failure; its watchdog recovers after owner
-# death. Reboot also clears the mask, so an interrupted setup cannot persist it.
 guest_agent_owner_token=$(/usr/local/sbin/qga-guard acquire "$$")
-
-zypper -n --gpg-auto-import-keys refresh
-
-# DO NOT add qemu-guest-agent or spice-vdagent here — they are already in
-# the baseweed image, and reinstalling/upgrading them mid-run kills our
-# control channel. Limit zypper install to packages that don't restart
-# system services.
-zypper -n install --no-recommends \
-    terminator rofi mousepad arandr \
-    xfce4-fsguard-plugin xfce4-systemload-plugin xfce4-taskmanager \
-    "${JAN_COMMON_CLI_PACKAGES[@]}" "${JAN_DISTRO_CLI_PACKAGES[@]}" zypper-aptitude \
-    iftop diffutils \
-    systemd-networkd systemd-resolved \
-    jetbrains-mono-fonts terminus-bitmap-fonts
-
-# Seed future XFCE VM accounts while preserving /usr/etc/skel vendor files.
-/opt/jan/skel/install
-
-# ---------- Cross-distro setup helpers ----------
-# Each helper detects distro internally; only kernel-tweaks has a real
-# Tumbleweed-specific branch (sdbootutil).
-
-install-tty11-root || echo "WARNING: tty11-root setup failed (non-fatal)"
-install-guest-cleanup || echo "WARNING: guest-cleanup setup failed (non-fatal)"
-console-font || echo "WARNING: console font setup failed (non-fatal)"
-# sysfb/simpledrm may take DRM card0 before virtio_gpu and later disappear,
-# leaving virtio_gpu at card1. spice-vdagent expects card0 when mapping the
-# SPICE display to XRandR, so this breaks resize and absolute pointer mapping.
-setup-kernel-tweaks \
-    initcall_blacklist=sysfb_init,simpledrm_platform_driver_init \
-    || echo "WARNING: kernel tweaks setup failed (non-fatal)"
-setup-pkg-safety || echo "WARNING: pkg safety setup failed (non-fatal)"
-
-# ---------- xdg user-dirs (lowercase) ----------
-
-cat << EOF >  /etc/xdg/user-dirs.defaults
-DESKTOP=desk
-DOWNLOAD=down
-DOCUMENTS=doc
-TEMPLATES=doc/templates
-PUBLICSHARE=media/share
-MUSIC=media/music
-PICTURES=media/pic
-VIDEOS=media/video
-EOF
-
-# ---------- Sync canonical skeleton home (NO --delete) ----------
-# Select only regular login accounts rooted directly under /home. Prefer jan
-# when it is one of those valid accounts; otherwise require an unambiguous one.
-mapfile -t HOME_USERS < <(getent passwd | awk -F: '
-    $3 >= 1000 && $3 < 65534 &&
-    $6 ~ "^/home/[^/]+/?$" &&
-    $7 !~ /(nologin|false)$/ { print $1 }
-')
-HOME_USER=""
-for user in "${HOME_USERS[@]}"; do
-    if [[ $user == jan ]]; then
-        HOME_USER=jan
-        break
-    fi
-done
-if [[ -z $HOME_USER ]]; then
-    if (( ${#HOME_USERS[@]} != 1 )); then
-        echo "ERROR: expected exactly one regular user under /home; found: ${HOME_USERS[*]:-(none)}" >&2
-        exit 1
-    fi
-    HOME_USER=${HOME_USERS[0]}
+export JAN_QGA_GUARD_TOKEN=$guest_agent_owner_token
+default_target=$(systemctl get-default)
+if ! command -v apt >/dev/null 2>&1; then
+    zypper -n install --no-recommends zypper-aptitude
 fi
-HOME_GROUP=$(id -gn "$HOME_USER")
-HOME_DIR=$(getent passwd "$HOME_USER" | cut -d: -f6)
-[[ -d "$HOME_DIR" ]] || { echo "ERROR: home directory does not exist: $HOME_DIR" >&2; exit 1; }
-echo "==> Syncing canonical skeleton home to ${HOME_DIR} (user=${HOME_USER})"
-
-# Sync without --delete: dotfiles deploy, user data survives.
-rsync -a /opt/jan/skel/home/ "${HOME_DIR}/"
-
-chmod 0755 /home
-chmod 0700 "$HOME_DIR" /root
-chown "$HOME_USER":"$HOME_GROUP" -R "$HOME_DIR"
-
-configure-user-dirs() {
-    local user=$1
-    local group=$2
-    local home_dir=$3
-
-    su - "$user" -c 'mkdir -p ~/desk ~/down ~/doc ~/doc/templates ~/media/share ~/media/music ~/media/pic ~/media/video'
-    install -d -o "$user" -g "$group" "$home_dir/.config"
-    cat > "$home_dir/.config/user-dirs.dirs" <<'EOF'
-XDG_DESKTOP_DIR="$HOME/desk"
-XDG_DOWNLOAD_DIR="$HOME/down"
-XDG_TEMPLATES_DIR="$HOME/doc/templates"
-XDG_PUBLICSHARE_DIR="$HOME/media/share"
-XDG_DOCUMENTS_DIR="$HOME/doc"
-XDG_MUSIC_DIR="$HOME/media/music"
-XDG_PICTURES_DIR="$HOME/media/pic"
-XDG_VIDEOS_DIR="$HOME/media/video"
-EOF
-    chown "$user":"$group" "$home_dir/.config/user-dirs.dirs"
-    su - "$user" -c 'rmdir ~/Desktop ~/Documents ~/Downloads ~/Music ~/Pictures ~/Public ~/Templates ~/Videos 2>/dev/null || true'
-}
-
-configure-user-dirs "$HOME_USER" "$HOME_GROUP" "$HOME_DIR"
-
-# Switch only after every network-dependent package operation has finished.
-setup-vm-networkd
-
-# ---------- Re-enable and verify guest agents ----------
+"$SETUP_DIR/vm-cli"
+systemctl set-default "$default_target"
+# shellcheck source=/dev/null
+source "$SETUP_DIR/common-cli-packages.sh"
+apt "${JAN_APT_INSTALL_OPTIONS[@]}" install \
+    terminator rofi mousepad arandr zim \
+    xfce4-fsguard-plugin xfce4-systemload-plugin xfce4-taskmanager jetbrains-mono-fonts
+/usr/local/sbin/install-chrome-vm
+/usr/local/sbin/install-brave-vm
+install-tty11-root
+install-guest-cleanup
+setup-kernel-tweaks initcall_blacklist=sysfb_init,simpledrm_platform_driver_init
 /usr/local/sbin/qga-guard release "$guest_agent_owner_token"
 guest_agent_owner_token=
+unset JAN_QGA_GUARD_TOKEN
 systemctl enable qemu-guest-agent.service
 systemctl start qemu-guest-agent.service spice-vdagentd.service
 systemctl is-enabled --quiet qemu-guest-agent.service
 systemctl is-active --quiet qemu-guest-agent.service
-
-echo "=========== DONE ==========="
+systemctl is-active --quiet spice-vdagentd.service

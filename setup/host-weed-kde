@@ -100,7 +100,8 @@ zypper -n install --no-recommends \
     kdenlive kdiff3 kfind krename krita kstars ksystemlog ktorrent \
     filelight partitionmanager \
     virt-manager virt-install virt-viewer qemu podman lima \
-    "${JAN_COMMON_CLI_PACKAGES[@]}" "${JAN_DISTRO_CLI_PACKAGES[@]}" zypper-aptitude \
+    libguestfs guestfs-tools libguestfs-appliance libguestfs-xfs virtiofsd passt \
+    "${JAN_COMMON_CLI_PACKAGES[@]}" zim "${JAN_DISTRO_CLI_PACKAGES[@]}" zypper-aptitude \
     sshpass jq yq dconf \
     NetworkManager-tui jetbrains-mono-fonts \
     java-17-openjdk-devel maven

@@ -32,12 +32,18 @@ readonly -a JAN_COMMON_CLI_PACKAGES=(
     jdupes
     just
     bats
-    zim
 )
 
-# xz has different package names on Ubuntu and openSUSE.
+# xz has different package names on Debian and openSUSE.
 if command -v zypper >/dev/null 2>&1; then
     readonly -a JAN_DISTRO_CLI_PACKAGES=(xz)
 else
     readonly -a JAN_DISTRO_CLI_PACKAGES=(xz-utils)
+fi
+
+# zypper's apt frontend parses options before the action and uses aptitude's spelling.
+if command -v zypper >/dev/null 2>&1; then
+    readonly -a JAN_APT_INSTALL_OPTIONS=(-y --without-recommends)
+else
+    readonly -a JAN_APT_INSTALL_OPTIONS=(-y --no-install-recommends)
 fi

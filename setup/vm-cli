@@ -1,0 +1,178 @@
+#!/bin/bash
+#
+# Shared text-only VM configuration for Debian 13, Ubuntu 26.04 and Tumbleweed.
+#
+# Symlinks /opt/jan/usr into /usr/local, installs core CLI tools via apt,
+# runs the cross-distro setup helpers, and syncs the canonical dotfiles
+# without --delete (so user data survives re-runs).
+
+# Sanity check: verify running inside a VM
+if ! systemd-detect-virt -q -v; then
+    echo "ERROR: This script must run inside a virtual machine"
+    exit 1
+fi
+
+set -Eeuo pipefail
+if (( EUID != 0 )); then
+    echo "ERROR: vm-cli must run as root" >&2
+    exit 1
+fi
+error_trap() {
+    local rc=$?
+    echo >&2 "${BASH_SOURCE[1]}:${BASH_LINENO[0]}: Command \`$BASH_COMMAND\` failed with exit code $rc"
+    exit "$rc"
+}
+trap error_trap ERR
+
+SETUP_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+# shellcheck source=/dev/null
+source "$SETUP_DIR/common-cli-packages.sh"
+
+# ---------- /opt/jan/usr -> /usr/local symlinks ----------
+
+cp -f -s -r /opt/jan/usr/* /usr/local
+/opt/jan/setup/retire-path-util-names.sh
+export PATH="/usr/local/sbin:/usr/local/bin:$PATH"
+
+# Package work runs in a guest systemd service so QGA/network restarts cannot
+# terminate provisioning. Keep the agent masked only for this process lifetime.
+guest_agent_owner_token=
+cleanup_guest_agent_guard() {
+    local rc=$?
+    trap - EXIT
+    if [[ -n "$guest_agent_owner_token" ]]; then
+        if ! /usr/local/sbin/qga-guard release "$guest_agent_owner_token"; then
+            echo "WARNING: failed to release the QEMU guest-agent guard; watchdog will retry" >&2
+        fi
+    fi
+    exit "$rc"
+}
+trap cleanup_guest_agent_guard EXIT
+if [[ -n ${JAN_QGA_GUARD_TOKEN:-} ]]; then
+    /usr/local/sbin/qga-guard verify "$JAN_QGA_GUARD_TOKEN"
+else
+    guest_agent_owner_token=$(/usr/local/sbin/qga-guard acquire "$$")
+fi
+"$SETUP_DIR/install-cli-packages.sh"
+if command -v zypper >/dev/null 2>&1; then
+    apt "${JAN_APT_INSTALL_OPTIONS[@]}" install systemd-networkd systemd-resolved terminus-bitmap-fonts
+else
+    # Debian/Ubuntu ship networkd in systemd itself.
+    apt "${JAN_APT_INSTALL_OPTIONS[@]}" install systemd systemd-resolved console-setup fonts-terminus
+fi
+
+# Seed canonical files while preserving vendor defaults; no GUI is installed.
+/opt/jan/skel/install
+
+# ---------- Cross-distro setup helpers ----------
+# Each helper detects distro internally; only kernel-tweaks has a real
+# Tumbleweed-specific branch (sdbootutil).
+
+console-font
+setup-pkg-safety || echo "WARNING: pkg safety setup failed (non-fatal)"
+
+# ---------- xdg user-dirs (lowercase) ----------
+
+install -d -m 0755 /etc/xdg
+cat << EOF >  /etc/xdg/user-dirs.defaults
+DESKTOP=desk
+DOWNLOAD=down
+DOCUMENTS=doc
+TEMPLATES=doc/templates
+PUBLICSHARE=media/share
+MUSIC=media/music
+PICTURES=media/pic
+VIDEOS=media/video
+EOF
+
+# ---------- Sync canonical skeleton home (NO --delete) ----------
+# Select only regular login accounts rooted directly under /home. Prefer jan
+# when it is one of those valid accounts; otherwise require an unambiguous one.
+mapfile -t HOME_USERS < <(getent passwd | awk -F: '
+    $3 >= 1000 && $3 < 65534 &&
+    $6 ~ "^/home/[^/]+/?$" &&
+    $7 !~ /(nologin|false)$/ { print $1 }
+')
+HOME_USER=""
+for user in "${HOME_USERS[@]}"; do
+    if [[ $user == jan ]]; then
+        HOME_USER=jan
+        break
+    fi
+done
+if [[ -z $HOME_USER ]]; then
+    if (( ${#HOME_USERS[@]} != 1 )); then
+        echo "ERROR: expected exactly one regular user under /home; found: ${HOME_USERS[*]:-(none)}" >&2
+        exit 1
+    fi
+    HOME_USER=${HOME_USERS[0]}
+fi
+HOME_GROUP=$(id -gn "$HOME_USER")
+HOME_DIR=$(getent passwd "$HOME_USER" | cut -d: -f6)
+[[ -d "$HOME_DIR" ]] || { echo "ERROR: home directory does not exist: $HOME_DIR" >&2; exit 1; }
+echo "==> Syncing canonical skeleton home to ${HOME_DIR} (user=${HOME_USER})"
+
+# Sync without --delete: dotfiles deploy, user data survives.
+rsync -a --chown="$HOME_USER:$HOME_GROUP" /opt/jan/skel/home/ "${HOME_DIR}/"
+
+chmod 0755 /home
+chmod 0700 "$HOME_DIR" /root
+chown "$HOME_USER":"$HOME_GROUP" "$HOME_DIR"
+
+configure-user-dirs() {
+    local user=$1
+    local group=$2
+    local home_dir=$3
+
+    su - "$user" -c 'mkdir -p ~/desk ~/down ~/media/share ~/media/music ~/media/pic ~/media/video'
+    # Host documents may already be mounted here on a retained guest. Never
+    # create directories or recursively change ownership through that share.
+    if ! findmnt --fstab -rn -t virtiofs --mountpoint "$home_dir/doc" >/dev/null &&
+       ! findmnt -rn -t virtiofs --target "$home_dir/doc" >/dev/null; then
+        su - "$user" -c 'mkdir -p ~/doc/templates'
+    fi
+    install -d -o "$user" -g "$group" "$home_dir/.config"
+    cat > "$home_dir/.config/user-dirs.dirs" <<'EOF'
+XDG_DESKTOP_DIR="$HOME/desk"
+XDG_DOWNLOAD_DIR="$HOME/down"
+XDG_TEMPLATES_DIR="$HOME/doc/templates"
+XDG_PUBLICSHARE_DIR="$HOME/media/share"
+XDG_DOCUMENTS_DIR="$HOME/doc"
+XDG_MUSIC_DIR="$HOME/media/music"
+XDG_PICTURES_DIR="$HOME/media/pic"
+XDG_VIDEOS_DIR="$HOME/media/video"
+EOF
+    chown "$user":"$group" "$home_dir/.config/user-dirs.dirs"
+    su - "$user" -c 'rmdir ~/Desktop ~/Documents ~/Downloads ~/Music ~/Pictures ~/Public ~/Templates ~/Videos 2>/dev/null || true'
+}
+
+configure-user-dirs "$HOME_USER" "$HOME_GROUP" "$HOME_DIR"
+
+# Switch only after every network-dependent package operation has finished.
+setup-vm-networkd
+# Service activation precedes DHCP/DNS readiness. Graphical profiles may install
+# further packages after this shared stage, so do not return during the handoff.
+network_ready=0
+for _ in $(seq 1 60); do
+    if ip route show default | grep -q . && timeout 3 getent hosts example.com >/dev/null; then
+        network_ready=1
+        break
+    fi
+    sleep 1
+done
+if (( ! network_ready )); then
+    echo "ERROR: networking did not become ready after the networkd handoff" >&2
+    exit 1
+fi
+
+if [[ -n "$guest_agent_owner_token" ]]; then
+    /usr/local/sbin/qga-guard release "$guest_agent_owner_token"
+    guest_agent_owner_token=
+    systemctl enable qemu-guest-agent.service
+    systemctl start qemu-guest-agent.service
+    systemctl is-enabled --quiet qemu-guest-agent.service
+    systemctl is-active --quiet qemu-guest-agent.service
+fi
+systemctl set-default multi-user.target
+
+echo "=========== CLI DONE ==========="

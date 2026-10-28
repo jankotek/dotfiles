@@ -33,6 +33,19 @@ def digest(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
+def customize_script(disk, script, resolve_dns=False):
+    """Use Bash explicitly; virt-customize's --run otherwise uses distro /bin/sh."""
+    run(["virt-customize", "--memsize", "4096", "--smp", "2", "-a", str(disk),
+         "--upload", str(script) + ":/var/tmp/dotfiles-image-script",
+         "--run-command", "/bin/bash /var/tmp/dotfiles-image-script",
+         "--delete", "/var/tmp/dotfiles-image-script"], timeout=1800)
+    if resolve_dns:
+        # virt-customize bind-mounts resolv.conf while scripts run. Replace it
+        # only after that mount is gone, before the first real guest boot.
+        run(["guestfish", "-a", str(disk), "-i", "rm-f", "/etc/resolv.conf", ":",
+             "ln-s", "/run/systemd/resolve/stub-resolv.conf", "/etc/resolv.conf"])
+
+
 def load_config(path):
     with path.open("rb") as stream:
         config = tomllib.load(stream)

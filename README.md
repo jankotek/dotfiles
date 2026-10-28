@@ -41,7 +41,13 @@ fixture-only; see [test/README.md](test/README.md) for details.
 
 - `vm-image-build` — build a fresh, verified Tumbleweed boot image from the
   original cloud download, then use canonical dotfiles provisioning.
-  See [Build and test baseweed](doc/vm-image.md).
+  `--golden --base PATH` bakes, seals, compacts and tests a text-only VM
+  with separate sparse root, home and swap disks.
+  `--golden --distro debian` and `--golden --distro ubuntu` build Debian 13
+  and Ubuntu 26.04 through the same pipeline.
+  See [Build and test images](doc/vm-image.md).
+- `setup/vm-workstation USER` — promote an existing CLI VM to minimal XFCE
+  with LightDM autologin, preserving its identity and workspace.
 - `herdr-run COMMAND [ARGS...]` — associate a restart command and environment
   with the calling Herdr pane; `herdr-layout save` / `restore` recover its live
   arrangement. Layout and command-mapping edits autosave through Herdr events.

@@ -127,3 +127,7 @@ load ../helpers
     assert_file "$JAN_HOME/desk/mc.desktop"
     assert_file "$JAN_HOME/desk/taskmanager.desktop"
 }
+
+@test "graphical profile includes Zim" {
+    assert_command zim
+}

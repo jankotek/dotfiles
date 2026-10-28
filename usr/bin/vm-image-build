@@ -5,6 +5,11 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 from herdr_tools.common import entry
-from vm_image import main
+if "--golden" in sys.argv[1:]:
+    from vm_golden import main
+elif any(arg == "--distro" or arg.startswith("--distro=") for arg in sys.argv[1:]):
+    from vm_cloud import main
+else:
+    from vm_image import main
 
 sys.exit(entry(main))

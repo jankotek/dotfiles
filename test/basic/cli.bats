@@ -87,10 +87,6 @@ load ../helpers
     assert_command bats
 }
 
-@test "zim is installed" {
-    assert_command zim
-}
-
 @test "jetbrains-mono font is available" {
     fc-list | grep -qi "JetBrains Mono"
 }

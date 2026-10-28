@@ -115,11 +115,11 @@ fi
 
 disable_automatic_apt
 
-apt-get update
+"$SETUP_DIR/install-cli-packages.sh"
 apt-get install -y --no-install-recommends \
   terminator rofi mousepad arandr dconf-cli \
   xfce4-fsguard-plugin xfce4-systemload-plugin xfce4-taskmanager \
-  links "${JAN_COMMON_CLI_PACKAGES[@]}" "${JAN_DISTRO_CLI_PACKAGES[@]}" iftop sshpass \
+  links zim iftop sshpass \
   fonts-jetbrains-mono fonts-terminus console-setup \
   xdotool systemd-resolved
 

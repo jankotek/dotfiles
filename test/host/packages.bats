@@ -102,3 +102,15 @@ load ../helpers
     assert_command Xwayland
     assert_executable /usr/bin/startplasma-wayland
 }
+
+@test "graphical profile includes Zim" {
+    assert_command zim
+}
+
+@test "golden image builder tools and appliance are installed" {
+    rpm -q libguestfs guestfs-tools libguestfs-appliance libguestfs-xfs virtiofsd passt
+    local tool
+    for tool in guestfish virt-cat virt-customize virt-resize virt-sparsify qemu-img; do
+        assert_command "$tool"
+    done
+}
