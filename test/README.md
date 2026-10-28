@@ -10,10 +10,16 @@ test/test-vm.sh                # runs basic/ + vm/       (inside a VM)
 test/test-vm-deploy.sh             # clone xub26 -> provision -> reboot -> test -> destroy
 test/test-vm-deploy.sh --keep      # same, but keep VM for debugging
 test/test-vm-xub26-deploy.sh       # clone xub26 -> setup/vm-xub26 -> test -> destroy
+test/test-vm-baseweed-deploy.sh    # Tumbleweed provisioning and portable checks
+test/test-vm-idempotency.sh        # provision twice and verify user data survives
 ```
 
 `test-vm-deploy.sh` can also be pointed at another base with `BASE_VM`,
 `BASE_DISK`, `SETUP_SCRIPT`, and `VM_NAME_PREFIX`.
+Base VMs must be shut off before cloning. Deployment harnesses require
+`virt-clone` and Python 3; each run owns a separate workspace, UUID, overlay
+and firmware-variable file. Cleanup retains storage if VM identity changes
+or undefinition fails.
 
 ## Test directories
 
@@ -23,7 +29,7 @@ test/test-vm-xub26-deploy.sh       # clone xub26 -> setup/vm-xub26 -> test -> de
 |------|---------------|
 | `cli.bats` | Common CLI tools: git, fzf, curl, aria2c, mc, htop, fish, nano, ncdu, rg, starship, Fresh Editor, iotop, powertop, pwgen, telnet, jdupes, just, bats, zim, JetBrains Mono font |
 | `optjan.bats` | `/opt/jan` directory structure, key scripts exist in repo |
-| `zswap.bats` | zswap enabled with zstd compressor in boot params and at runtime |
+| `kernel-tweaks.bats` | zswap enabled with lzo compression; IPv6 available without the legacy boot-time ban |
 
 ### host/ — Plasma/Wayland/openSUSE host only
 
@@ -31,7 +37,7 @@ test/test-vm-xub26-deploy.sh       # clone xub26 -> setup/vm-xub26 -> test -> de
 |------|---------------|
 | `plasma.bats` | plasmashell, kwin_wayland, Wayland session active, not a VM, konsole, dolphin, virt-manager/remote-viewer GDK_BACKEND=x11 patches, on-disk AC idle/lid PowerDevil settings resolve to do-nothing via kreadconfig6 (every /home user as root, else the current user); live logind HandleLidSwitchExternalPower, HandleLidSwitchDocked and IdleAction all `ignore`) |
 | `agetty.bats` | stock tty1, managed agetty logins on tty2-10, login PAM/logind integration, exec-based Plasma launcher, old greetd cleanup, persistent Full HD framebuffer |
-| `packages.bats` | KDE apps (kdenlive, kdiff3, kfind, krename, krita, kstars, ksystemlog, ktorrent, kwrite, filelight, partitionmanager), virt tools (virt-manager, virt-install, virt-viewer, podman, lima), dev tools (go, maven, java, yq) |
+| `packages.bats` | KDE apps (kdenlive, kdiff3, kfind, krename, krita, kstars, ksystemlog, ktorrent, kwrite, filelight, partitionmanager), virt tools (virt-manager, virt-install, virt-viewer, podman, lima), dev tools (maven, java, yq) |
 | `strix-halo.bats` | AMD Strix Halo GPU params: amdgpu.gttsize, iommu=pt, amd_iommu=on, amdgpu.noretry=0, GTT >= 110GB, fixed VRAM <= 512MB. Skips on non-Strix Halo systems |
 
 ### vm/ — VM tests

@@ -19,78 +19,14 @@ BASE_VM="${BASE_VM:-baseweed}"
 BASE_DISK="${BASE_DISK:-$HOME/.local/share/libvirt/images/${BASE_VM}.qcow2}"
 IMAGES_DIR="$HOME/.local/share/libvirt/images"
 
-VM_NAME="weedtest-$(date +%y%m%d-%H%M%S)-$$"
-VM_DISK="$IMAGES_DIR/${VM_NAME}.qcow2"
-
 KEEP=0
 [[ "${1:-}" == "--keep" ]] && KEEP=1
-VM_DISK_CREATED=0
-VM_DEFINED=0
-
-cleanup() {
-    if [[ $KEEP -eq 1 && ( $VM_DEFINED -eq 1 || $VM_DISK_CREATED -eq 1 ) ]]; then
-        echo ""
-        echo "=== VM '$VM_NAME' kept for debugging ==="
-        echo "  virsh -c qemu:///session console $VM_NAME"
-        echo "  $VM_EXEC $VM_NAME <command>"
-        echo "  Remove: virsh -c qemu:///session destroy $VM_NAME; virsh -c qemu:///session undefine $VM_NAME; rm $VM_DISK"
-        return
-    fi
-    if [[ $VM_DEFINED -eq 1 || $VM_DISK_CREATED -eq 1 ]]; then
-        echo ""
-        echo "=== Cleaning up ==="
-        if [[ $VM_DEFINED -eq 1 ]]; then
-            virsh -c qemu:///session destroy "$VM_NAME" 2>/dev/null || true
-            virsh -c qemu:///session undefine "$VM_NAME" 2>/dev/null || true
-        fi
-        if [[ $VM_DISK_CREATED -eq 1 ]]; then
-            rm -f -- "$VM_DISK"
-        fi
-        echo "Removed resources created for '$VM_NAME'"
-    fi
-}
-trap cleanup EXIT
+# shellcheck source=test/lib/vm-clone.bash
+source "$SCRIPT_DIR/lib/vm-clone.bash"
+init_test_clone weedtest
+prepare_test_clone
 
 echo "=== Creating test VM: $VM_NAME (Tumbleweed) ==="
-echo "Base VM: $BASE_VM"
-echo "Base disk: $BASE_DISK"
-
-if ! virsh -c qemu:///session dominfo "$BASE_VM" >/dev/null 2>&1; then
-    echo "ERROR: base VM not found: $BASE_VM" >&2
-    exit 1
-fi
-if [[ ! -f "$BASE_DISK" ]]; then
-    echo "ERROR: base disk not found: $BASE_DISK" >&2
-    exit 1
-fi
-if virsh -c qemu:///session dominfo "$VM_NAME" >/dev/null 2>&1 || [[ -e "$VM_DISK" ]]; then
-    echo "ERROR: generated disposable VM name already exists: $VM_NAME" >&2
-    exit 1
-fi
-
-BASE_STATE=$(virsh -c qemu:///session domstate "$BASE_VM")
-if [[ "$BASE_STATE" == "running" ]]; then
-    echo "Base VM '$BASE_VM' is running — shutting it down for cloning..."
-    virsh -c qemu:///session shutdown "$BASE_VM"
-    for _ in {1..60}; do
-        [[ "$(virsh -c qemu:///session domstate "$BASE_VM" 2>/dev/null)" == "shut off" ]] && break
-        sleep 1
-    done
-    if [[ "$(virsh -c qemu:///session domstate "$BASE_VM" 2>/dev/null)" != "shut off" ]]; then
-        echo "ERROR: base VM did not shut down; refusing to force-stop it: $BASE_VM" >&2
-        exit 1
-    fi
-fi
-if [[ "$(virsh -c qemu:///session domstate "$BASE_VM")" != "shut off" ]]; then
-    echo "ERROR: base VM must be shut off: $BASE_VM" >&2
-    exit 1
-fi
-
-BASE_XML=$(virsh -c qemu:///session dumpxml "$BASE_VM" --inactive)
-
-echo "Creating overlay disk..."
-qemu-img create -f qcow2 -b "$BASE_DISK" -F qcow2 "$VM_DISK"
-VM_DISK_CREATED=1
 
 # Tumbleweed defaults to SELinux enforcing with a strict qemu-guest-agent
 # domain (`virt_qemu_ga_t`) that blocks the agent from running mount,
@@ -100,13 +36,6 @@ VM_DISK_CREATED=1
 echo "Setting SELinux to permissive on clone..."
 virt-customize -q -a "$VM_DISK" \
     --edit '/etc/selinux/config:s/^SELINUX=enforcing/SELINUX=permissive/'
-
-XML=$BASE_XML
-XML=$(echo "$XML" | sed '/<uuid>/d')
-XML=$(echo "$XML" | sed "s|<name>$BASE_VM</name>|<name>$VM_NAME</name>|")
-XML=$(echo "$XML" | sed "s|$BASE_DISK|$VM_DISK|")
-NEW_MAC="52:54:00:$(printf '%02x:%02x:%02x' $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256)))"
-XML=$(echo "$XML" | sed -E "s|<mac address='52:54:00:[^']+'/>|<mac address='$NEW_MAC'/>|")
 
 # virtiofs requires shared guest memory. The minimal qdistro template used to
 # bootstrap baseweed does not need it itself, so add it to the test clone.
@@ -151,8 +80,7 @@ require_clone_xml "<source file='$VM_DISK'/>" \
     'disposable disk source (BASE_DISK must match the base domain XML)'
 
 echo "Defining VM..."
-echo "$XML" | virsh -c qemu:///session define /dev/stdin
-VM_DEFINED=1
+define_test_clone
 
 echo "Starting VM..."
 "$VM_WAIT" "$VM_NAME"

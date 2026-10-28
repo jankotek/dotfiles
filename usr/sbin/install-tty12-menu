@@ -1,16 +1,17 @@
 #!/bin/bash
+set -euo pipefail
 
-#
-# Puts some into and actions on TTY12
-#
+# Install the information and actions menu on TTY12.
 
-SERVICE_FILE_CONTENT="[Unit]
+install_service() {
+    local service_file="${SYSTEMD_DIR:-/etc/systemd/system}/tty12-menu.service"
+    cat > "$service_file" <<'EOF'
+[Unit]
 Description=Menu and info on TTY12
 
 [Service]
 ExecStart=/usr/local/sbin/tty12-menu
 TTYPath=/dev/tty12
-Type=simple
 User=root
 StandardInput=tty-force
 StandardOutput=tty
@@ -24,16 +25,20 @@ TimeoutStopSec=90
 KillSignal=SIGTERM
 
 [Install]
-WantedBy=multi-user.target"
+WantedBy=multi-user.target
+EOF
 
-# Set the service file path
-SERVICE_FILE_PATH="/etc/systemd/system/tty12-menu.service"
+    systemctl daemon-reload
+    systemctl enable tty12-menu.service
+    systemctl start tty12-menu.service
 
-# Echo the service file content to the file
-echo "$SERVICE_FILE_CONTENT" | tee "$SERVICE_FILE_PATH" > /dev/null
+    echo "Service installed and started successfully."
+}
 
-# Enable and start the service
-systemctl enable tty12-menu.service
-systemctl start tty12-menu.service
-
-echo "Service installed and started successfully."
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+    if [ "$EUID" -ne 0 ]; then
+        echo "Please run as root" >&2
+        exit 1
+    fi
+    install_service
+fi

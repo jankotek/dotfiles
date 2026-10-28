@@ -46,7 +46,8 @@ fi
 if [ "$ARGV_MODE" -eq 1 ]; then
     # Encode each arg as base64. Decoder reads positional params (b64 strings),
     # decodes them into a bash array, then execs that array.
-    DECODER='set -e; a=(); for b in "$@"; do a+=("$(printf %s "$b" | base64 -d)"); done; exec "${a[@]}"'
+    # The sentinel preserves trailing newlines otherwise removed by $(...).
+    DECODER='set -euo pipefail; a=(); for b in "$@"; do v=$(printf %s "$b" | base64 -d && printf .); a+=("${v%.}"); done; exec "${a[@]}"'
 
     B64ARGS=()
     if [ -n "$USER_NAME" ]; then
@@ -75,13 +76,12 @@ fi
 
 RESPONSE=$(virsh -c qemu:///session qemu-agent-command "$VM_NAME" "$PAYLOAD")
 
-if echo "$RESPONSE" | grep -q "error"; then
+if jq -e 'type == "object" and has("error")' <<<"$RESPONSE" >/dev/null; then
     echo "[vm-exec] ERROR: Failed to start command: $RESPONSE" >&2
     exit 1
 fi
 
-PID=$(echo "$RESPONSE" | grep -oP '(?<="pid":)\d+' || true)
-if [ -z "$PID" ] || ! [[ "$PID" =~ ^[0-9]+$ ]]; then
+if ! PID=$(jq -er '.return.pid | select(type == "number" and . > 0 and floor == .)' <<<"$RESPONSE"); then
     echo "[vm-exec] ERROR: Could not extract valid PID from response: $RESPONSE" >&2
     exit 1
 fi
@@ -105,7 +105,7 @@ while true; do
         exit 1
     fi
 
-    if echo "$RESULT" | grep -q "error"; then
+    if jq -e 'type == "object" and has("error")' <<<"$RESULT" >/dev/null; then
         ERROR_COUNT=$((ERROR_COUNT + 1))
         if [ $ERROR_COUNT -lt 5 ]; then
             sleep 2
@@ -116,8 +116,17 @@ while true; do
     fi
     ERROR_COUNT=0
 
-    EXITCODE=$(echo "$RESULT" | jq -r '.return.exitcode')
-    if [ "$EXITCODE" != "null" ]; then
+    if ! jq -e '.return | type == "object" and (.exited | type == "boolean")' <<<"$RESULT" >/dev/null; then
+        echo "[vm-exec] ERROR: Invalid guest command status: $RESULT" >&2
+        exit 1
+    fi
+    if jq -e '.return.exited' <<<"$RESULT" >/dev/null; then
+        if ! EXITCODE=$(jq -er '.return |
+            (if has("exitcode") then .exitcode elif has("signal") then 128 + .signal else null end) |
+            select(type == "number" and . >= 0 and . <= 255 and floor == .)' <<<"$RESULT"); then
+            echo "[vm-exec] ERROR: Invalid guest exit status: $RESULT" >&2
+            exit 1
+        fi
         break
     fi
     WAIT_COUNT=$((WAIT_COUNT + 1))
@@ -129,13 +138,13 @@ done
 
 OUT_DATA=$(echo "$RESULT" | jq -r '.return."out-data"')
 if [ "$OUT_DATA" != "null" ] && [ -n "$OUT_DATA" ]; then
-    echo "$OUT_DATA" | base64 -d || true
+    printf '%s' "$OUT_DATA" | base64 -d
 fi
 
 ERR_DATA=$(echo "$RESULT" | jq -r '.return."err-data"')
 if [ "$ERR_DATA" != "null" ] && [ -n "$ERR_DATA" ]; then
     echo "[vm-exec] --- stderr ---" >&2
-    echo "$ERR_DATA" | base64 -d >&2 || true
+    printf '%s' "$ERR_DATA" | base64 -d >&2
     echo "[vm-exec] --- end stderr ---" >&2
 fi
 

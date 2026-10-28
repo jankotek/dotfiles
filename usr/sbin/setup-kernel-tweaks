@@ -12,6 +12,87 @@ remove_ipv6_ban() {
     sed -E -i ":again; s/(^|[[:space:]\"'])ipv6\\.disable=1([[:space:]\"']|$)/\\1\\2/; t again" "$1"
 }
 
+# Remove complete managed tokens before appending their desired values. Keep
+# unrelated boot arguments as text; never evaluate shell content from GRUB.
+converge_params() {
+    local args=$1 param key pattern matched replacement
+    for param in "${PARAMS[@]}"; do
+        key=${param%%=*}
+        key=${key//./\\.}
+        pattern="(^|[[:space:]])${key}(=[^[:space:]]*)?([[:space:]]|$)"
+        while [[ $args =~ $pattern ]]; do
+            matched=${BASH_REMATCH[0]}
+            replacement=${BASH_REMATCH[1]}
+            args=${args/"$matched"/"$replacement"}
+        done
+        args=${args%"${args##*[![:space:]]}"}
+        args+="${args:+ }$param"
+    done
+    printf '%s\n' "$args"
+}
+
+update_cmdline_file() (
+    local file=$1 mode=$2 line value found=0 temp
+    local grub_start="^([[:space:]]*GRUB_CMDLINE_LINUX_DEFAULT=)([\"'])"
+    temp=$(mktemp "${file}.tmp.XXXXXX")
+    trap 'rm -f "$temp"' EXIT
+    cp -p "$file" "$temp"
+    : > "$temp"
+    while IFS= read -r line || [[ -n $line ]]; do
+        if [[ $mode == grub && $line =~ ^[[:space:]]*GRUB_CMDLINE_LINUX_DEFAULT= ]]; then
+            [[ $line =~ $grub_start ]] || {
+                echo "Unsupported GRUB command-line assignment in $file" >&2
+                return 1
+            }
+            local prefix=${BASH_REMATCH[1]} quote=${BASH_REMATCH[2]} suffix rest char
+            local offset escaped=0 closing=-1
+            rest=${line:${#prefix}+1}
+            # Find the actual shell closing quote, not a quote in an inline
+            # comment. Support escaped quotes in double-quoted assignments.
+            for (( offset=0; offset<${#rest}; offset++ )); do
+                char=${rest:offset:1}
+                if (( escaped )); then
+                    escaped=0
+                elif [[ $quote == '"' && $char == \\ ]]; then
+                    escaped=1
+                elif [[ $char == "$quote" ]]; then
+                    closing=$offset
+                    break
+                fi
+            done
+            if (( closing < 0 )); then
+                echo "Unterminated GRUB command-line assignment in $file" >&2
+                return 1
+            fi
+            suffix=${rest:closing+1}
+            [[ $suffix =~ ^[[:space:]]*(#.*)?$ ]] || {
+                echo "Unsupported GRUB command-line suffix in $file" >&2
+                return 1
+            }
+            value=$(converge_params "${rest:0:closing}")
+            line="$prefix$quote$value$quote$suffix"
+            found=$((found + 1))
+        elif [[ $mode == sdboot && ! $line =~ ^[[:space:]]*(#|$) ]]; then
+            line=$(converge_params "$line")
+            found=$((found + 1))
+        fi
+        printf '%s\n' "$line" >> "$temp"
+    done < "$file"
+    if (( found == 0 )); then
+        value=$(converge_params '')
+        if [[ $mode == grub ]]; then
+            printf 'GRUB_CMDLINE_LINUX_DEFAULT="%s"\n' "$value" >> "$temp"
+        else
+            printf '%s\n' "$value" >> "$temp"
+        fi
+    fi
+    if [[ $mode == sdboot ]] && (( found > 1 )); then
+        echo "Expected one active kernel command line in $file" >&2
+        return 1
+    fi
+    mv -f "$temp" "$file"
+)
+
 add_params_grub() {
     local grub_file=${1:-/etc/default/grub}
     local changed=0
@@ -21,16 +102,8 @@ add_params_grub() {
 
     cp -p "$grub_file" "${grub_file}.bak"
     remove_ipv6_ban "$grub_file"
+    update_cmdline_file "$grub_file" grub
     cmp -s "$grub_file" "${grub_file}.bak" || changed=1
-
-    for param in "${PARAMS[@]}"; do
-        local key="${param%%=*}"
-        # only match the active GRUB_CMDLINE_LINUX_DEFAULT line, not commented/other lines
-        if ! grep -E "^GRUB_CMDLINE_LINUX_DEFAULT=.*\b${key}\b" "$grub_file" >/dev/null; then
-            sed -i "s|^\(GRUB_CMDLINE_LINUX_DEFAULT=\"[^\"]*\)\"|\1 $param\"|" "$grub_file"
-            changed=1
-        fi
-    done
 
     # Ubuntu cloud images override GRUB_CMDLINE_LINUX_DEFAULT in a later
     # 50-cloudimg-settings.cfg file. Append our parameters from a final drop-in
@@ -71,15 +144,8 @@ add_params_sdboot() {
 
     cp -p "$cmdline_file" "${cmdline_file}.bak"
     remove_ipv6_ban "$cmdline_file"
+    update_cmdline_file "$cmdline_file" sdboot
     cmp -s "$cmdline_file" "${cmdline_file}.bak" || changed=1
-
-    for param in "${PARAMS[@]}"; do
-        local key="${param%%=*}"
-        if ! grep -E "\b${key}\b" "$cmdline_file" >/dev/null; then
-            sed -i "s|$| $param|" "$cmdline_file"
-            changed=1
-        fi
-    done
 
     if [[ $changed -eq 0 ]]; then
         echo "Already configured in $cmdline_file"
@@ -99,6 +165,13 @@ main() {
         return 1
     fi
     PARAMS=(zswap.enabled=1 zswap.compressor=lzo "$@")
+    local param
+    for param in "${PARAMS[@]}"; do
+        [[ $param =~ ^[a-zA-Z0-9_.-]+(=[a-zA-Z0-9_,:./+-]*)?$ ]] || {
+            echo "Unsupported kernel parameter: $param" >&2
+            return 2
+        }
+    done
     if [[ -f /etc/kernel/cmdline ]]; then
         add_params_sdboot
     elif [[ -f /etc/default/grub ]]; then

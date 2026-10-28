@@ -98,9 +98,10 @@ Tests use [bats-core](https://github.com/bats-core/bats-core): four test directo
 ```
 
 The deploy script:
-1. Shuts down the base VM (default `xub26`; override with `BASE_VM`)
+1. Requires the base VM to be shut off (default `xub26`; override with `BASE_VM`)
 2. Creates a qcow2 overlay (copy-on-write, fast)
-3. Clones the VM XML (new name `test-YYMMDD-HHMM`, new MAC, same virtiofs share)
+3. Clones the VM XML with a unique name/workspace, UUID, per-interface MACs,
+   and separate firmware variables, retaining the same virtiofs share
 4. Starts the clone, waits for the guest agent
 5. Runs the setup script (default `setup/vm-xub26`; override with `SETUP_SCRIPT`)
 6. Reboots, waits for desktop session (autologin + XFCE)

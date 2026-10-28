@@ -24,6 +24,19 @@ SETUP_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 # shellcheck source=/dev/null
 source "${SETUP_DIR}/common-cli-packages.sh"
 
+guest_agent_owner_token=
+cleanup_guest_agent_guard() {
+    local rc=$?
+    trap - EXIT
+    if [[ -n "$guest_agent_owner_token" ]]; then
+        if ! /usr/local/sbin/qga-guard release "$guest_agent_owner_token"; then
+            echo "WARNING: failed to release the QEMU guest-agent guard; watchdog will retry" >&2
+        fi
+    fi
+    exit "$rc"
+}
+trap cleanup_guest_agent_guard EXIT
+
 # ---------- /opt/jan/usr -> /usr/local symlinks ----------
 
 cp -f -s -r /opt/jan/usr/* /usr/local
@@ -33,13 +46,16 @@ cp -f -s -r /opt/jan/usr/* /usr/local
 
 # ---------- Package install ----------
 
-# Prevent qemu-guest-agent restart while we're still talking to it.
-# (Tumbleweed is rolling: a `zypper refresh` followed by an upgrade may pull
-# a new qemu-ga; with the service masked, post-install scriptlets can't
-# restart it mid-run. The jan-unmask-guest-agents.service below re-enables
-# it at next boot.)
-systemctl mask qemu-guest-agent.service 2>/dev/null || true
-systemctl mask spice-vdagentd.service 2>/dev/null || true
+# Recover masks and the boot-time helper left by older provisioning runs.
+# SPICE does not carry this command's control channel and needs no guard.
+systemctl unmask spice-vdagentd.service
+systemctl disable jan-unmask-guest-agents.service 2>/dev/null || true
+rm -f /etc/systemd/system/jan-unmask-guest-agents.service
+systemctl daemon-reload
+
+# The runtime lease is released on failure; its watchdog recovers after owner
+# death. Reboot also clears the mask, so an interrupted setup cannot persist it.
+guest_agent_owner_token=$(/usr/local/sbin/qga-guard acquire "$$")
 
 zypper -n --gpg-auto-import-keys refresh
 
@@ -146,24 +162,12 @@ configure-user-dirs "$HOME_USER" "$HOME_GROUP" "$HOME_DIR"
 # Switch only after every network-dependent package operation has finished.
 setup-vm-networkd
 
-# ---------- Re-enable guest agents on next boot ----------
-
-systemctl unmask qemu-guest-agent.service 2>/dev/null || true
-systemctl enable qemu-guest-agent.service 2>/dev/null || true
-
-cat > /etc/systemd/system/jan-unmask-guest-agents.service <<UNIT
-[Unit]
-Description=Ensure VM guest agents are unmasked and running
-After=multi-user.target
-
-[Service]
-Type=oneshot
-ExecStart=/bin/sh -c 'systemctl unmask qemu-guest-agent.service spice-vdagentd.service 2>/dev/null; systemctl start qemu-guest-agent.service spice-vdagentd.service 2>/dev/null; true'
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-systemctl daemon-reload
-systemctl enable jan-unmask-guest-agents.service
+# ---------- Re-enable and verify guest agents ----------
+/usr/local/sbin/qga-guard release "$guest_agent_owner_token"
+guest_agent_owner_token=
+systemctl enable qemu-guest-agent.service
+systemctl start qemu-guest-agent.service spice-vdagentd.service
+systemctl is-enabled --quiet qemu-guest-agent.service
+systemctl is-active --quiet qemu-guest-agent.service
 
 echo "=========== DONE ==========="

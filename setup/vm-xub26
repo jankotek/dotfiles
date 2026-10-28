@@ -132,18 +132,18 @@ apt-get install -y --no-install-recommends spice-vdagent qemu-guest-agent
 
 
 apt-get purge -y snapd \
-  tumbler tumbler* \
+  tumbler 'tumbler*' \
   xfce4-terminal \
-  libwebkit2gtk-* \
-  cups* printer-driver* \
+  'libwebkit2gtk-*' \
+  'cups*' 'printer-driver*' \
   xfce4-screensaver \
-  *packagekit* apport* yelp* \
-  xterm xfce4-screensaver xscreensaver \
-  pulseaudio* gstreamer* bluez* pipewire* pavucontrol \
+  '*packagekit*' 'apport*' 'yelp*' \
+  xterm xscreensaver \
+  'pulseaudio*' 'gstreamer*' 'bluez*' 'pipewire*' pavucontrol \
   xserver-xorg-video-all memtest86+ mesa-vulkan-drivers \
-  bind9* colord* \
-  avahi-daemon apparmor *fwup* \
-  poppler-* libavcodec* libcodec* \
+  'bind9*' 'colord*' \
+  avahi-daemon apparmor '*fwup*' \
+  'poppler-*' 'libavcodec*' 'libcodec*' \
   fonts-noto-cjk
 
 block-pkg() {

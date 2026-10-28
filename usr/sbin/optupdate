@@ -227,7 +227,7 @@ download_and_extract() (
         else
             echo "  ⚠ $name: publisher provides no checksum — installing unverified"
         fi
-        tar xzf "$temp_dir/archive.tar.gz" -C "$temp_dir"         --strip-components="$strip" --no-same-owner
+        tar xf "$temp_dir/archive.tar.gz" -C "$temp_dir"         --strip-components="$strip" --no-same-owner
         rm "$temp_dir/archive.tar.gz"
     fi
     rm -rf -- "$temp_dir/.version" "$temp_dir/.installed-sha256"
@@ -745,7 +745,7 @@ install_corretto_all() {
     done
 }
 
-install_gradle() {
+install_gradle() (
     local version sum
     version=$(github_api https://api.github.com/repos/gradle/gradle/releases/latest | grep -oP '"tag_name": "\K[^"]+' | sed 's/^v//') || true
 
@@ -756,7 +756,10 @@ install_gradle() {
 
     local url="https://services.gradle.org/distributions/gradle-${version}-bin.zip"
     local version_file="$BASE_DIR/gradle/.version"
-    local current_version=""
+    local current_version="" lock_fd
+
+    acquire_tool_lock gradle lock_fd
+    : "$lock_fd"
 
     [ -f "$version_file" ] && current_version=$(<"$version_file")
 
@@ -770,20 +773,22 @@ install_gradle() {
     [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for Gradle"; return 1; }
 
     echo "→ Downloading Gradle $version..."
-    local temp_dir="$BASE_DIR/gradle_temp"
-    rm -rf "$temp_dir"
-    mkdir -p "$temp_dir"
+    local temp_dir
+    temp_dir=$(mktemp -d "$BASE_DIR/.jan-update-gradle.staging.XXXXXX")
+    trap 'rm -rf "$temp_dir"' EXIT
 
     download_file "$url" "$temp_dir/gradle.zip"
-    verify_file "$temp_dir/gradle.zip" "$sum" || { rm -rf "$temp_dir"; return 1; }
+    verify_file "$temp_dir/gradle.zip" "$sum"
     unzip -q "$temp_dir/gradle.zip" -d "$temp_dir"
 
-    rm -rf "$BASE_DIR/gradle"
-    mv "$temp_dir/gradle-${version}" "$BASE_DIR/gradle"
-    rm -rf "$temp_dir"
-    echo "$version" > "$version_file"
+    [ -x "$temp_dir/gradle-${version}/bin/gradle" ] || {
+        echo "✗ Gradle archive does not contain bin/gradle"
+        return 1
+    }
+    printf '%s\n' "$version" > "$temp_dir/gradle-${version}/.version"
+    activate_staged_directory "$temp_dir/gradle-${version}" "$BASE_DIR/gradle" gradle
     echo "✓ Gradle $version installed"
-}
+)
 
 install_maven() {
     local version sum
@@ -795,83 +800,12 @@ install_maven() {
     fi
 
     local url="https://dlcdn.apache.org/maven/maven-3/${version}/binaries/apache-maven-${version}-bin.tar.gz"
-    local version_file="$BASE_DIR/maven/.version"
-    local current_version=""
-
-    [ -f "$version_file" ] && current_version=$(<"$version_file")
-
-    if [ "$current_version" = "$version" ] && [ -x "$BASE_DIR/maven/bin/mvn" ]; then
-        echo "✓ Maven already at version $version"
-        return 0
-    fi
-    [ "$current_version" != "$version" ] || echo "→ Rebuilding incomplete Maven $version installation"
-
     # Cross-host verification: artifact from the CDN, canonical sha512 from
     # Apache's origin server — tampering would have to hit both.
     sum=$(fetch_checksum "https://downloads.apache.org/maven/maven-3/${version}/binaries/apache-maven-${version}-bin.tar.gz.sha512" "" 128) || true
     [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for Maven"; return 1; }
 
-    echo "→ Downloading Maven $version..."
-    local temp_dir="$BASE_DIR/maven_temp"
-    rm -rf "$temp_dir"
-    mkdir -p "$temp_dir"
-
-    # Download to file first, verify, then extract
-    download_file "$url" "$temp_dir/maven.tar.gz"
-    verify_file "$temp_dir/maven.tar.gz" "sha512:$sum" || { rm -rf "$temp_dir"; return 1; }
-    tar xzf "$temp_dir/maven.tar.gz" -C "$temp_dir" --strip-components=1
-    rm "$temp_dir/maven.tar.gz"
-
-    rm -rf "$BASE_DIR/maven"
-    mv "$temp_dir" "$BASE_DIR/maven"
-    echo "$version" > "$version_file"
-    echo "✓ Maven $version installed"
-}
-
-install_pgadmin() {
-    # pgAdmin uses tags like "REL-9_10" instead of releases
-    local tag version
-    tag=$(github_api https://api.github.com/repos/pgadmin-org/pgadmin4/tags | grep -oP '"name": "REL-\K[0-9]+_[0-9]+' | head -1) || true
-
-    if [ -z "$tag" ]; then
-        echo "✗ Failed to fetch version for pgAdmin"
-        return 1
-    fi
-
-    # Convert REL-9_10 to 9.10
-    version=$(echo "$tag" | tr '_' '.')
-    local url="https://ftp.postgresql.org/pub/pgadmin/pgadmin4/v${version}/pip/pgadmin4-${version}-py3-none-any.whl"
-    local version_file="$BASE_DIR/pgadmin/.version"
-    local current_version=""
-
-    [ -f "$version_file" ] && current_version=$(cat "$version_file")
-
-    if [ "$current_version" = "$version" ]; then
-        echo "✓ pgAdmin already at version $version"
-        return 0
-    fi
-
-    echo "→ Downloading pgAdmin $version..."
-    local temp_dir="$BASE_DIR/pgadmin_temp"
-    rm -rf "$temp_dir"
-    mkdir -p "$temp_dir"
-
-    download_file "$url" "$temp_dir/pgadmin4.whl"
-    unzip -q "$temp_dir/pgadmin4.whl" -d "$temp_dir"
-
-    rm -rf "$BASE_DIR/pgadmin"
-    mv "$temp_dir" "$BASE_DIR/pgadmin"
-    echo "$version" > "$version_file"
-
-    cat > "$BASE_DIR/pgadmin/pgadmin4" <<'EOF'
-#!/bin/bash
-cd "$(dirname "$0")"
-python3 -m pgadmin4
-EOF
-    chmod +x "$BASE_DIR/pgadmin/pgadmin4"
-
-    echo "✓ pgAdmin $version installed"
-    create_desktop_file "pgadmin4" "pgAdmin 4" "$BASE_DIR/pgadmin/pgadmin4" "$BASE_DIR/pgadmin/pgadmin4/static/img/logo-256.png" "PostgreSQL Tools"
+    download_and_extract "Maven" "maven" "$url" "$version" 1 "sha512:$sum" "bin/mvn"
 }
 
 # expected is the publisher checksum. fallback_url is used for Grok's mirror.
@@ -1024,39 +958,17 @@ install_ffmpeg() {
     version=$(github_api https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest | grep -oP '"tag_name": "\K[^"]+') || true
     local file="ffmpeg-master-latest-linux64-gpl.tar.xz"
     local url="https://github.com/BtbN/FFmpeg-Builds/releases/download/${version}/${file}"
-    local version_file="$BASE_DIR/ffmpeg/.version"
-    local current_version=""
 
     if [ -z "$version" ]; then
         echo "✗ Failed to fetch version for FFmpeg"
         return 1
     fi
 
-    [ -f "$version_file" ] && current_version=$(cat "$version_file")
-
-    if [ "$current_version" = "$version" ] && [ -x "$BASE_DIR/ffmpeg/bin/ffmpeg" ]; then
-        echo "✓ FFmpeg already at version $version"
-        return 0
-    fi
-    [ "$current_version" != "$version" ] || echo "→ Rebuilding incomplete FFmpeg $version installation"
-
     sum=$(fetch_checksum "https://github.com/BtbN/FFmpeg-Builds/releases/download/${version}/checksums.sha256" "$file") || true
     [ -n "$sum" ] || { echo "✗ Failed to fetch checksum for FFmpeg"; return 1; }
 
-    echo "→ Downloading FFmpeg $version..."
-    local temp_dir="$BASE_DIR/ffmpeg_temp"
-    rm -rf "$temp_dir"
-    mkdir -p "$temp_dir"
-
-    download_file "$url" "$temp_dir/ffmpeg.tar.xz"
-    verify_file "$temp_dir/ffmpeg.tar.xz" "$sum" || { rm -rf "$temp_dir"; return 1; }
-    tar xJf "$temp_dir/ffmpeg.tar.xz" -C "$temp_dir" --strip-components=1
-    rm "$temp_dir/ffmpeg.tar.xz"
-
-    rm -rf "$BASE_DIR/ffmpeg"
-    mv "$temp_dir" "$BASE_DIR/ffmpeg"
-    echo "$version" > "$version_file"
-    echo "✓ FFmpeg $version installed"
+    download_and_extract "FFmpeg" "ffmpeg" "$url" "$version" 1 "$sum" "bin/ffmpeg" \
+        "bin/ffplay bin/ffprobe"
 }
 
 # Default install set; pass tool names as arguments to install a subset.

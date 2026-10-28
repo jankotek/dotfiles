@@ -17,41 +17,13 @@ BASE_VM="${BASE_VM:-xub26}"
 BASE_DISK="${BASE_DISK:-$HOME/.local/share/libvirt/images/${BASE_VM}.qcow2}"
 IMAGES_DIR="$HOME/.local/share/libvirt/images"
 
-VM_NAME="idempo-$(date +%y%m%d-%H%M)"
-VM_DISK="$IMAGES_DIR/${VM_NAME}.qcow2"
-
 KEEP=0
 [[ "${1:-}" == "--keep" ]] && KEEP=1
-
-cleanup() {
-    if [[ $KEEP -eq 1 ]]; then
-        echo "=== VM '$VM_NAME' kept for debugging ==="
-        return
-    fi
-    virsh -c qemu:///session destroy "$VM_NAME" 2>/dev/null || true
-    virsh -c qemu:///session undefine "$VM_NAME" 2>/dev/null || true
-    rm -f "$VM_DISK"
-}
-trap cleanup EXIT
-
-if [[ "$(virsh -c qemu:///session domstate "$BASE_VM" 2>/dev/null)" == "running" ]]; then
-    virsh -c qemu:///session shutdown "$BASE_VM"
-    for _ in $(seq 1 60); do
-        [[ "$(virsh -c qemu:///session domstate "$BASE_VM")" == "shut off" ]] && break
-        sleep 1
-    done
-fi
-
-qemu-img create -f qcow2 -b "$BASE_DISK" -F qcow2 "$VM_DISK"
-
-XML=$(virsh -c qemu:///session dumpxml "$BASE_VM" --inactive)
-XML=$(echo "$XML" | sed '/<uuid>/d')
-XML=$(echo "$XML" | sed "s|<name>$BASE_VM</name>|<name>$VM_NAME</name>|")
-XML=$(echo "$XML" | sed "s|$BASE_DISK|$VM_DISK|")
-NEW_MAC="52:54:00:$(printf '%02x:%02x:%02x' $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256)))"
-XML=$(echo "$XML" | sed -E "s|<mac address='52:54:00:[^']+'/>|<mac address='$NEW_MAC'/>|")
-
-echo "$XML" | virsh -c qemu:///session define /dev/stdin
+# shellcheck source=test/lib/vm-clone.bash
+source "$SCRIPT_DIR/lib/vm-clone.bash"
+init_test_clone idempo
+prepare_test_clone
+define_test_clone
 "$VM_WAIT" "$VM_NAME"
 
 echo "=== First setup/vm-xub26 ==="

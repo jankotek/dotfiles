@@ -60,3 +60,55 @@ CONFIG
     cmp "$config" "$config.expected"
     [[ $(wc -l < "$CALLS") == 2 ]]
 }
+
+@test "GRUB replaces stale values and duplicates without matching other keys" {
+    local config="$BATS_TEST_TMPDIR/grub"
+    cat > "$config" <<'CONFIG'
+# GRUB_CMDLINE_LINUX_DEFAULT="zswap.enabled=0"
+GRUB_CMDLINE_LINUX_DEFAULT='quiet zswap.enabled=0 custom.zswap.enabled=0 zswap.compressor=zstd zswap.enabled=0' # keep
+CONFIG
+    add_params_grub "$config" "$BATS_TEST_TMPDIR/no-dropins"
+    grep -qx '# GRUB_CMDLINE_LINUX_DEFAULT="zswap.enabled=0"' "$config"
+    grep -qx "GRUB_CMDLINE_LINUX_DEFAULT='quiet custom.zswap.enabled=0 zswap.enabled=1 zswap.compressor=lzo' # keep" "$config"
+    cp "$config" "$config.expected"
+    add_params_grub "$config" "$BATS_TEST_TMPDIR/no-dropins"
+    cmp "$config" "$config.expected"
+}
+
+@test "systemd-boot ignores comments and converges stale values" {
+    local config="$BATS_TEST_TMPDIR/cmdline"
+    printf '%s\n' '# zswap.enabled=0' '' 'root=UUID=example zswap.enabled=0 zswap.compressor=zstd' > "$config"
+    add_params_sdboot "$config"
+    [[ $(head -1 "$config") == '# zswap.enabled=0' ]]
+    [[ $(tail -1 "$config") == 'root=UUID=example zswap.enabled=1 zswap.compressor=lzo' ]]
+    cp "$config" "$config.expected"
+    add_params_sdboot "$config"
+    cmp "$config" "$config.expected"
+}
+
+@test "systemd-boot with only comments gets one active command line" {
+    local config="$BATS_TEST_TMPDIR/cmdline"
+    echo '# zswap.enabled=0' > "$config"
+    add_params_sdboot "$config"
+    [[ $(tail -1 "$config") == 'zswap.enabled=1 zswap.compressor=lzo' ]]
+}
+
+@test "GRUB preserves quoted inline comments and escaped value quotes" {
+    local config="$BATS_TEST_TMPDIR/grub"
+    cat > "$config" <<'CONFIG'
+GRUB_CMDLINE_LINUX_DEFAULT="quiet log=\"keep\" zswap.enabled=0" # keep "local defaults"
+CONFIG
+    add_params_grub "$config" "$BATS_TEST_TMPDIR/no-dropins"
+    grep -qx 'GRUB_CMDLINE_LINUX_DEFAULT="quiet log=\\"keep\\" zswap.enabled=1 zswap.compressor=lzo" # keep "local defaults"' "$config"
+    run bash -c 'source "$1"; [[ $GRUB_CMDLINE_LINUX_DEFAULT == "quiet log=\"keep\" zswap.enabled=1 zswap.compressor=lzo" ]]' _ "$config"
+    [[ $status == 0 ]]
+}
+
+@test "GRUB rejects any unsupported active assignment without replacing the source" {
+    local config="$BATS_TEST_TMPDIR/grub"
+    printf '%s\n' 'GRUB_CMDLINE_LINUX_DEFAULT="quiet"' 'GRUB_CMDLINE_LINUX_DEFAULT=$CUSTOM_ARGS' > "$config"
+    cp "$config" "$config.expected"
+    run update_cmdline_file "$config" grub
+    [[ $status -ne 0 ]]
+    cmp "$config" "$config.expected"
+}

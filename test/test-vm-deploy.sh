@@ -18,63 +18,17 @@ BASE_DISK="${BASE_DISK:-$IMAGES_DIR/${BASE_VM}.qcow2}"
 SETUP_SCRIPT="${SETUP_SCRIPT:-/opt/jan/setup/vm-xub26}"
 VM_NAME_PREFIX="${VM_NAME_PREFIX:-test}"
 
-VM_NAME="${VM_NAME_PREFIX}-$(date +%y%m%d-%H%M)"
-VM_DISK="$IMAGES_DIR/${VM_NAME}.qcow2"
-
 KEEP=0
-if [[ "${1:-}" == "--keep" ]]; then
-    KEEP=1
-fi
-
-cleanup() {
-    if [[ $KEEP -eq 1 ]]; then
-        echo ""
-        echo "=== VM '$VM_NAME' kept for debugging ==="
-        echo "  virsh console $VM_NAME"
-        echo "  $VM_EXEC $VM_NAME <command>"
-        echo "  To remove: virsh destroy $VM_NAME; virsh undefine $VM_NAME; rm $VM_DISK"
-        return
-    fi
-    echo ""
-    echo "=== Cleaning up ==="
-    virsh destroy "$VM_NAME" 2>/dev/null || true
-    virsh undefine "$VM_NAME" 2>/dev/null || true
-    rm -f "$VM_DISK"
-    echo "Removed VM '$VM_NAME' and disk overlay"
-}
-trap cleanup EXIT
+[[ "${1:-}" == "--keep" ]] && KEEP=1
+# shellcheck source=test/lib/vm-clone.bash
+source "$SCRIPT_DIR/lib/vm-clone.bash"
+init_test_clone "$VM_NAME_PREFIX"
+prepare_test_clone
 
 echo "=== Creating test VM: $VM_NAME ==="
 echo "Base VM: $BASE_VM"
 echo "Base disk: $BASE_DISK"
 echo "Setup script: $SETUP_SCRIPT"
-
-if [[ ! -e "$BASE_DISK" ]]; then
-    echo "ERROR: base disk not found: $BASE_DISK" >&2
-    exit 1
-fi
-
-# 0. Base VM must be shut off (QEMU locks the backing file)
-BASE_STATE=$(virsh domstate "$BASE_VM" 2>/dev/null || echo "unknown")
-if [[ "$BASE_STATE" == "unknown" ]]; then
-    echo "ERROR: base VM not found: $BASE_VM" >&2
-    exit 1
-fi
-if [[ "$BASE_STATE" == "running" ]]; then
-    echo "Base VM '$BASE_VM' is running — shutting it down for cloning..."
-    virsh shutdown "$BASE_VM"
-    for _ in $(seq 1 60); do
-        [[ "$(virsh domstate "$BASE_VM" 2>/dev/null)" == "shut off" ]] && break
-        sleep 1
-    done
-    if [[ "$(virsh domstate "$BASE_VM" 2>/dev/null)" != "shut off" ]]; then
-        echo "Timeout waiting for $BASE_VM to shut down, forcing off..."
-        virsh destroy "$BASE_VM"
-    fi
-    echo "Base VM stopped"
-fi
-
-BASE_XML=$(virsh dumpxml "$BASE_VM" --inactive)
 
 require_template_xml() {
     local pattern=$1
@@ -133,29 +87,8 @@ require_template_dir_entry /etc/systemd/system/multi-user.target.wants qemu-gues
 require_template_dir_entry /etc/systemd/system/multi-user.target.wants spice-vdagentd.service 'enabled spice-vdagentd service'
 require_template_file_contains /etc/fstab '^[[:space:]]*opt-jan[[:space:]]+/opt/jan[[:space:]]+virtiofs[[:space:]]' '/opt/jan virtiofs fstab entry'
 
-# 1. Create qcow2 overlay backed by the base image
-echo "Creating overlay disk..."
-qemu-img create -f qcow2 -b "$BASE_DISK" -F qcow2 "$VM_DISK"
-
-# 2. Export base VM XML and patch it for the clone
-XML=$BASE_XML
-
-# Remove uuid (libvirt will generate a new one)
-XML=$(echo "$XML" | sed '/<uuid>/d')
-
-# Replace VM name
-XML=$(echo "$XML" | sed "s|<name>$BASE_VM</name>|<name>$VM_NAME</name>|")
-
-# Replace disk path
-XML=$(echo "$XML" | sed "s|$BASE_DISK|$VM_DISK|")
-
-# Generate a new MAC address (keep 52:54:00 prefix)
-NEW_MAC="52:54:00:$(printf '%02x:%02x:%02x' $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256)))"
-XML=$(echo "$XML" | sed -E "s|<mac address='52:54:00:[^']+'\/>|<mac address='$NEW_MAC'/>|")
-
-# 3. Define and start the clone
-echo "Defining VM..."
-echo "$XML" | virsh define /dev/stdin
+# Define only after the template checks succeed.
+define_test_clone
 
 echo "Starting VM..."
 "$VM_WAIT" "$VM_NAME"
@@ -168,15 +101,15 @@ echo "=== Running $SETUP_SCRIPT ==="
 # 5. Reboot to apply systemd services and other changes
 echo ""
 echo "=== Cold restarting VM ==="
-virsh shutdown "$VM_NAME" 2>/dev/null || true
+virsh -c qemu:///session shutdown "$VM_NAME" 2>/dev/null || true
 for _ in $(seq 1 30); do
-    [[ "$(virsh domstate "$VM_NAME" 2>/dev/null)" == "shut off" ]] && break
+    [[ "$(virsh -c qemu:///session domstate "$VM_NAME" 2>/dev/null)" == "shut off" ]] && break
     sleep 1
 done
-if [[ "$(virsh domstate "$VM_NAME" 2>/dev/null)" != "shut off" ]]; then
-    virsh destroy "$VM_NAME"
+if [[ "$(virsh -c qemu:///session domstate "$VM_NAME" 2>/dev/null)" != "shut off" ]]; then
+    virsh -c qemu:///session destroy "$VM_NAME"
 fi
-virsh start "$VM_NAME" >/dev/null
+virsh -c qemu:///session start "$VM_NAME" >/dev/null
 "$VM_WAIT" "$VM_NAME"
 
 # Wait for desktop session (autologin + XFCE startup)

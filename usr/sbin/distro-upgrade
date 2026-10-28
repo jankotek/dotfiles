@@ -1,49 +1,55 @@
 #!/bin/bash
+set -euo pipefail
 
-if [ "$EUID" -ne 0 ]; then
-  echo "Please run as root"
-  exit 1
-fi
+upgrade_system() {
+  # suse
+  if command -v zypper &> /dev/null; then
+    zypper --non-interactive update
 
-# suse
-if command -v zypper &> /dev/null; then
-  zypper --non-interactive update
+  # fedora
+  elif command -v dnf &> /dev/null; then
+    dnf -y update
 
-# fedora
-elif command -v dnf &> /dev/null; then
-  dnf -y update
+  # debian/ubuntu
+  elif command -v apt-get &> /dev/null; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" dist-upgrade -y
+    apt-get autoremove -y
+    apt-get clean
 
-# debian/ubuntu
-elif command -v apt-get &> /dev/null; then
-  export DEBIAN_FRONTEND=noninteractive
-  apt-get update
-  apt-get -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" dist-upgrade -y
-  apt-get autoremove -y
-  apt-get clean
+    # --force-confold keeps locally-modified config files, but the new maintainer
+    # version is dropped as *.dpkg-dist / *.dpkg-new. Surface these so security-
+    # relevant default changes don't go unnoticed.
+    mapfile -t diverged < <(find /etc -type f \( -name '*.dpkg-dist' -o -name '*.dpkg-new' \) 2>/dev/null)
+    if [ "${#diverged[@]}" -gt 0 ]; then
+      echo
+      echo "== Config files diverged from new package defaults =="
+      printf '  %s\n' "${diverged[@]}"
+      echo "Review with: diff <orig> <file>  — then merge and remove the .dpkg-* file."
+    fi
 
-  # --force-confold keeps locally-modified config files, but the new maintainer
-  # version is dropped as *.dpkg-dist / *.dpkg-new. Surface these so security-
-  # relevant default changes don't go unnoticed.
-  mapfile -t diverged < <(find /etc -type f \( -name '*.dpkg-dist' -o -name '*.dpkg-new' \) 2>/dev/null)
-  if [ "${#diverged[@]}" -gt 0 ]; then
-    echo
-    echo "== Config files diverged from new package defaults =="
-    printf '  %s\n' "${diverged[@]}"
-    echo "Review with: diff <orig> <file>  — then merge and remove the .dpkg-* file."
+  elif command -v apt &> /dev/null; then
+    # termux and some other distros
+    apt upgrade -y
+
+  else
+    echo "Unsupported distribution"
+    exit 1
   fi
 
-elif command -v apt &> /dev/null; then
-  # termux and some other distros
-  apt upgrade -y
+  # Do not run optional deployment hooks here. jan-dotfiles-update is not part of
+  # this repository, so its service/session side effects cannot be audited. Keep
+  # the system upgrade safe for an administrator logged in on the stock tty1;
+  # update or deploy dotfiles explicitly as a separate operation.
 
-else
-  echo "Unsupported distribution"
-  exit 1
+  echo "== System updated successfully =="
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+  if [ "$EUID" -ne 0 ]; then
+    echo "Please run as root" >&2
+    exit 1
+  fi
+  upgrade_system
 fi
-
-# Do not run optional deployment hooks here. jan-dotfiles-update is not part of
-# this repository, so its service/session side effects cannot be audited. Keep
-# the system upgrade safe for an administrator logged in on the stock tty1;
-# update or deploy dotfiles explicitly as a separate operation.
-
-echo "== System updated successfully =="
