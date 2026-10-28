@@ -94,3 +94,16 @@ load ../helpers
 @test "jetbrains-mono font is available" {
     fc-list | grep -qi "JetBrains Mono"
 }
+
+@test "archive and download prerequisites are installed" {
+    local tool
+    for tool in wget unzip tar gzip xz zstd python3 gdu; do
+        assert_command "$tool"
+    done
+}
+
+@test "apt compatibility frontend is installed on Tumbleweed" {
+    command -v zypper >/dev/null || skip "not a zypper system"
+    rpm -q zypper-aptitude
+    assert_executable /usr/bin/apt
+}

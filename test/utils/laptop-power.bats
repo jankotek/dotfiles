@@ -249,3 +249,15 @@ setup() {
     grep -q 'RUN+="/usr/bin/systemctl restart --no-block laptop-power-event.service"' \
         "$UDEV_RULES_DIR/80-laptop-power.rules"
 }
+
+@test "installer supplies the power profile client even when acpid exists" {
+    source "$BATS_TEST_DIRNAME/../../usr/sbin/install-laptop-power"
+    command() {
+        if [[ $* == '-v acpid' || $* == '-v zypper' ]]; then return 0; fi
+        if [[ $* == '-v powerprofilesctl' ]]; then return 1; fi
+        builtin command "$@"
+    }
+    zypper() { printf '%s\n' "$*" > "$CALLS"; }
+    ensure_dependencies
+    [[ $(< "$CALLS") == '--non-interactive install --no-recommends power-profiles-daemon' ]]
+}

@@ -73,10 +73,6 @@ load ../helpers
 
 # --- Dev tools ---
 
-@test "go is installed" {
-    assert_command go
-}
-
 @test "maven is installed" {
     assert_command mvn
 }
@@ -87,4 +83,22 @@ load ../helpers
 
 @test "yq is installed" {
     assert_command yq
+}
+
+@test "host has a usable power profile service" {
+    assert_command powerprofilesctl
+    powerprofilesctl get
+}
+
+@test "host excludes standalone Xorg and X11 Plasma while retaining XWayland" {
+    local package
+    for package in xorg-x11-server xorg-x11-server-wrapper plasma6-session-x11 kwin6-x11 xterm xterm-bin; do
+        if rpm -q "$package"; then
+            echo "unexpected host package: $package" >&2
+            return 1
+        fi
+    done
+    rpm -q plasma6-session
+    assert_command Xwayland
+    assert_executable /usr/bin/startplasma-wayland
 }

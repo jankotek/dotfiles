@@ -1,29 +1,27 @@
 #!/bin/bash
 #
-# Kernel boot parameter tweaks: zswap (lzo), IPv6 disabled, plus optional
+# Kernel boot parameter tweaks: zswap (lzo), plus optional
 # parameters supplied by machine-specific bootstrap scripts.
 # Supports GRUB (/etc/default/grub) and systemd-boot (/etc/kernel/cmdline).
 #
 
-if [ "$EUID" -ne 0 ]; then
-    echo "Please run as root"
-    exit 1
-fi
+set -euo pipefail
 
-PARAMS=(
-    zswap.enabled=1
-    zswap.compressor=lzo
-    ipv6.disable=1
-    "$@"
-)
+# Remove the IPv6 ban installed by older versions, preserving other arguments.
+remove_ipv6_ban() {
+    sed -E -i ":again; s/(^|[[:space:]\"'])ipv6\\.disable=1([[:space:]\"']|$)/\\1\\2/; t again" "$1"
+}
 
 add_params_grub() {
-    local grub_file="/etc/default/grub"
+    local grub_file=${1:-/etc/default/grub}
     local changed=0
-    local cloud_dropin="/etc/default/grub.d/50-cloudimg-settings.cfg"
-    local jan_dropin="/etc/default/grub.d/99-jan-kernel-tweaks.cfg"
+    local dropin_dir=${2:-/etc/default/grub.d}
+    local cloud_dropin="$dropin_dir/50-cloudimg-settings.cfg"
+    local jan_dropin="$dropin_dir/99-jan-kernel-tweaks.cfg"
 
     cp -p "$grub_file" "${grub_file}.bak"
+    remove_ipv6_ban "$grub_file"
+    cmp -s "$grub_file" "${grub_file}.bak" || changed=1
 
     for param in "${PARAMS[@]}"; do
         local key="${param%%=*}"
@@ -63,7 +61,7 @@ add_params_grub() {
 }
 
 add_params_sdboot() {
-    local cmdline_file="/etc/kernel/cmdline"
+    local cmdline_file=${1:-/etc/kernel/cmdline}
     local changed=0
 
     if ! command -v sdbootutil &>/dev/null; then
@@ -72,6 +70,8 @@ add_params_sdboot() {
     fi
 
     cp -p "$cmdline_file" "${cmdline_file}.bak"
+    remove_ipv6_ban "$cmdline_file"
+    cmp -s "$cmdline_file" "${cmdline_file}.bak" || changed=1
 
     for param in "${PARAMS[@]}"; do
         local key="${param%%=*}"
@@ -93,13 +93,23 @@ add_params_sdboot() {
     sdbootutil update-all-entries
 }
 
-if [ -f /etc/kernel/cmdline ]; then
-    add_params_sdboot
-elif [ -f /etc/default/grub ]; then
-    add_params_grub
-else
-    echo "No supported bootloader config found"
-    exit 1
-fi
+main() {
+    if (( EUID != 0 )); then
+        echo "Please run as root" >&2
+        return 1
+    fi
+    PARAMS=(zswap.enabled=1 zswap.compressor=lzo "$@")
+    if [[ -f /etc/kernel/cmdline ]]; then
+        add_params_sdboot
+    elif [[ -f /etc/default/grub ]]; then
+        add_params_grub
+    else
+        echo "No supported bootloader config found" >&2
+        return 1
+    fi
+    echo "Reboot to apply changes (including restoring IPv6)."
+}
 
-echo "Reboot to apply changes."
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+    main "$@"
+fi

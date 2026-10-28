@@ -5,7 +5,9 @@ load ../helpers
 
 @test "systemd-networkd manages VM Ethernet with DHCP" {
     assert_file_contains /etc/systemd/network/05-jan-wired.network '^Type=ether$'
-    assert_file_contains /etc/systemd/network/05-jan-wired.network '^DHCP=ipv4$'
+    assert_file_contains /etc/systemd/network/05-jan-wired.network '^DHCP=yes$'
+    assert_file_contains /etc/systemd/network/05-jan-wired.network '^IPv6AcceptRA=yes$'
+    assert_file_contains /etc/systemd/network/05-jan-wired.network '^LinkLocalAddressing=ipv6$'
     systemctl is-enabled --quiet systemd-networkd.service
     systemctl is-active --quiet systemd-networkd.service
     ip -4 address show scope global | grep -q 'inet '

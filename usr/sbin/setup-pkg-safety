@@ -1,5 +1,7 @@
 #!/bin/bash
 #
+# Preseed safety configuration for optional language package managers.
+# This helper installs no packages.
 # Hardens package managers against supply chain attacks:
 #
 # npm/pnpm:  ignore-scripts=true in /etc/npmrc

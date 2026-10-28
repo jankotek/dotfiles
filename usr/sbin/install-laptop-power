@@ -10,16 +10,19 @@ POLICY_COMMAND="$REPO_DIR/usr/sbin/laptop-power"
 
 fail() { echo "install-laptop-power: $*" >&2; return 1; }
 
-ensure_acpid() {
-    command -v acpid &>/dev/null && return
+ensure_dependencies() {
+    local -a packages=()
+    command -v acpid &>/dev/null || packages+=(acpid)
+    command -v powerprofilesctl &>/dev/null || packages+=(power-profiles-daemon)
+    (( ${#packages[@]} )) || return 0
 
-    echo 'Installing acpid for lid and AC-adapter events...'
+    echo "Installing laptop power dependencies: ${packages[*]}"
     if command -v zypper &>/dev/null; then
-        zypper --non-interactive install --no-recommends acpid
+        zypper --non-interactive install --no-recommends "${packages[@]}"
     elif command -v apt-get &>/dev/null; then
-        DEBIAN_FRONTEND=noninteractive apt-get install -y acpid
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${packages[@]}"
     else
-        fail 'acpid is required, and no supported package manager was found.'
+        fail 'acpid and power-profiles-daemon are required; no supported package manager was found.'
     fi
 }
 
@@ -114,9 +117,10 @@ main() {
         return 1
     }
 
-    ensure_acpid
+    ensure_dependencies
     write_configuration
 
+    systemctl start power-profiles-daemon.service
     systemctl daemon-reload
     udevadm control --reload-rules
     systemctl enable --now acpid.service

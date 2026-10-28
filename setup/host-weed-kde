@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# host-weed-kde — finish a fresh openSUSE Tumbleweed + KDE Plasma install.
+# host-weed-kde — install Plasma Wayland and tools on openSUSE Tumbleweed.
 #
 # Counterpart to setup/vm-baseweed, but for a bare-metal / desktop HOST
 # running Plasma 6 on Wayland (not a headless XFCE VM). It:
@@ -65,7 +65,6 @@ ln -sfn /usr/local/share/jan-xdg-local-first.sh \
     /etc/profile.d/jan-xdg-local-first.sh
 ln -sfn /usr/local/share/fontconfig/conf.avail/60-jan-jetbrains-mono.conf \
     /etc/fonts/conf.d/60-jan-jetbrains-mono.conf
-fc-cache -f
 
 # Repo helpers now live in /usr/local/{sbin,bin}. Make sure they're on
 # PATH for the rest of this script regardless of how it was invoked (a
@@ -77,36 +76,42 @@ export PATH="/usr/local/sbin:/usr/local/bin:$PATH"
 echo "==> Refreshing repositories"
 zypper -n refresh
 
+# Enforce host policy before resolving the desktop installation. XWayland
+# (xorg-x11-server-wayland) stays available for X11 applications under Plasma.
+LOCK_PKGS=(
+    PackageKit emacs icewm vim vim-small xterm xterm-bin
+    xorg-x11-server xorg-x11-server-wrapper plasma6-session-x11 kwin6-x11
+)
+echo "==> Removing and locking unwanted packages"
+for pkg in "${LOCK_PKGS[@]}"; do
+    if rpm -q "$pkg" &>/dev/null; then
+        zypper -n remove "$pkg"
+    fi
+    zypper -n addlock "$pkg"
+done
+zypper -n addlock -t pattern kde_pim
+
 # Core set: confirmed-valid package names, must succeed.
 echo "==> Installing KDE apps, virt stack, and CLI tools"
 zypper -n install --no-recommends \
+    plasma6-session plasma6-nm plasma6-pa xdg-desktop-portal-kde6 \
+    pipewire-pulseaudio wireplumber power-profiles-daemon \
     konsole dolphin kate kwrite ark gwenview okular spectacle \
     kdenlive kdiff3 kfind krename krita kstars ksystemlog ktorrent \
     filelight partitionmanager \
     virt-manager virt-install virt-viewer qemu podman lima \
-    "${JAN_COMMON_CLI_PACKAGES[@]}" \
+    "${JAN_COMMON_CLI_PACKAGES[@]}" "${JAN_DISTRO_CLI_PACKAGES[@]}" zypper-aptitude \
     sshpass jq yq dconf \
     NetworkManager-tui jetbrains-mono-fonts \
     java-17-openjdk-devel maven
+
+fc-cache -f
+systemctl start power-profiles-daemon.service
 
 # Seed future accounts (including lab users) with the curated common,
 # Plasma-safe, and XFCE-safe defaults. openSUSE continues to merge its vendor
 # files from /usr/etc/skel; this installs only administrator overrides.
 "${REPO_DIR}/skel/install"
-
-# ---------- Package locks (the "masked" packages) ----------
-# Remove if present, then lock so they can't be pulled back in. The X server
-# is locked because this host runs pure Wayland; vim/emacs/PackageKit are
-# deliberately unwanted.
-
-LOCK_PKGS=(PackageKit emacs icewm vim vim-small xterm xorg-x11-server)
-echo "==> Removing and locking unwanted packages"
-for pkg in "${LOCK_PKGS[@]}"; do
-    rpm -q "$pkg" &>/dev/null && zypper -n rm -u "$pkg" 2>/dev/null || true
-    zypper -n addlock "$pkg" 2>/dev/null || true
-done
-# Block the kde_pim pattern (kmail/akonadi stack).
-zypper -n addlock -t pattern kde_pim 2>/dev/null || true
 
 # ---------- Mask unused / replaced services ----------
 # Plasma is started from agetty logins (below). The rest are simply not used.

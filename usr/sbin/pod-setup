@@ -56,7 +56,20 @@ install_if_missing() {
     done
     if [[ ${#missing[@]} -gt 0 ]]; then
         echo "==> Installing missing tools: ${missing[*]}"
-        if command -v apt-get &>/dev/null; then
+        if command -v zypper &>/dev/null; then
+            local pkgs=()
+            for m in "${missing[@]}"; do
+                case "$m" in
+                    podman)      pkgs+=(podman) ;;
+                    pasta)       pkgs+=(passt) ;;
+                    newuidmap)   pkgs+=(shadow) ;;
+                    slirp4netns) pkgs+=(slirp4netns) ;;
+                    setfacl)     pkgs+=(acl) ;;
+                    *)           pkgs+=("$m") ;;
+                esac
+            done
+            zypper -n install "${pkgs[@]}"
+        elif command -v apt-get &>/dev/null; then
             apt-get update -qq
             local pkgs=()
             for m in "${missing[@]}"; do
@@ -70,19 +83,6 @@ install_if_missing() {
                 esac
             done
             apt-get install -y -qq "${pkgs[@]}"
-        elif command -v zypper &>/dev/null; then
-            local pkgs=()
-            for m in "${missing[@]}"; do
-                case "$m" in
-                    podman)      pkgs+=(podman) ;;
-                    pasta)       pkgs+=(passt) ;;
-                    newuidmap)   pkgs+=(shadow) ;;
-                    slirp4netns) pkgs+=(slirp4netns) ;;
-                    setfacl)     pkgs+=(acl) ;;
-                    *)           pkgs+=("$m") ;;
-                esac
-            done
-            zypper -n install "${pkgs[@]}"
         else
             echo "ERROR: unsupported package manager." >&2
             exit 1

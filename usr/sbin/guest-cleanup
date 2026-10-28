@@ -42,12 +42,12 @@ rm -rf /lib/firmware/* /usr/lib/firmware/*
 
 rm -rf /usr/share/doc/*
 
-if command -v apt-get >/dev/null; then
+if command -v zypper >/dev/null; then
+    zypper --non-interactive clean --all
+elif command -v apt-get >/dev/null; then
     ubuntu-remove-older-kernel
     apt-get autoremove -y
     apt-get clean
-elif command -v zypper >/dev/null; then
-    zypper --non-interactive clean --all
 fi
 
 # needed for systemd, otherwise it will show as failed

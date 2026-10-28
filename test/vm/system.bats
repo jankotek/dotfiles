@@ -82,7 +82,7 @@ load ../helpers
         skip "not an Ubuntu cloud-image GRUB configuration"
     assert_file_contains "$dropin" 'zswap.enabled=1'
     assert_file_contains "$dropin" 'zswap.compressor=lzo'
-    assert_file_contains "$dropin" 'ipv6.disable=1'
+    assert_file_not_contains "$dropin" 'ipv6.disable=1'
 }
 
 @test "tty11-root service is enabled" {

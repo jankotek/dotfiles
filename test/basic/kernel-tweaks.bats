@@ -16,6 +16,8 @@ load ../helpers
     assert_file_contains /proc/cmdline 'zswap.compressor=lzo'
 }
 
-@test "ipv6 is disabled" {
-    assert_file_contains /proc/cmdline 'ipv6.disable=1'
+@test "ipv6 is available" {
+    assert_file_not_contains /proc/cmdline 'ipv6.disable=1'
+    assert_file /proc/sys/net/ipv6/conf/all/disable_ipv6
+    [[ $(< /proc/sys/net/ipv6/conf/all/disable_ipv6) == 0 ]]
 }

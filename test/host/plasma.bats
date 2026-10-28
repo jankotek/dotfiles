@@ -12,10 +12,15 @@ load ../helpers
 }
 
 @test "wayland session is active" {
-    [[ "$XDG_SESSION_TYPE" == "wayland" ]] || \
-    [[ -n "$WAYLAND_DISPLAY" ]]
+    # QGA and SSH checks run outside the graphical session. Inspect the
+    # actual compositor owned by the tested account instead of caller env.
+    local uid
+    uid=$(stat -c %u "$JAN_HOME")
+    pgrep -u "$uid" -x kwin_wayland
+    pgrep -u "$uid" -x plasmashell
 }
 
+# bats test_tags=bare-metal
 @test "not running inside a VM" {
     ! systemd-detect-virt -q -v 2>/dev/null
 }

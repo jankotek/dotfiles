@@ -50,7 +50,7 @@ zypper -n --gpg-auto-import-keys refresh
 zypper -n install --no-recommends \
     terminator rofi mousepad arandr \
     xfce4-fsguard-plugin xfce4-systemload-plugin xfce4-taskmanager \
-    "${JAN_COMMON_CLI_PACKAGES[@]}" \
+    "${JAN_COMMON_CLI_PACKAGES[@]}" "${JAN_DISTRO_CLI_PACKAGES[@]}" zypper-aptitude \
     iftop diffutils \
     systemd-networkd systemd-resolved \
     jetbrains-mono-fonts terminus-bitmap-fonts

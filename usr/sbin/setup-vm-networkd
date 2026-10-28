@@ -20,21 +20,13 @@ cat > /etc/systemd/network/05-jan-wired.network <<'EOF'
 Type=ether
 
 [Network]
-DHCP=ipv4
-IPv6AcceptRA=no
-LinkLocalAddressing=no
+DHCP=yes
+IPv6AcceptRA=yes
+LinkLocalAddressing=ipv6
 EOF
 
 # Package names differ, but both VM families use systemd-resolved for DNS.
-if command -v apt-get >/dev/null 2>&1; then
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get purge -y network-manager network-manager-gnome
-    cat > /etc/apt/preferences.d/block-network-manager.pref <<'EOF'
-Package: network-manager network-manager-gnome
-Pin: release *
-Pin-Priority: -1
-EOF
-elif command -v zypper >/dev/null 2>&1; then
+if command -v zypper >/dev/null 2>&1; then
     networkmanager_packages=()
     for package in NetworkManager NetworkManager-tui; do
         rpm -q "$package" >/dev/null 2>&1 && networkmanager_packages+=("$package")
@@ -45,6 +37,14 @@ elif command -v zypper >/dev/null 2>&1; then
     zypper -n addlock NetworkManager NetworkManager-tui
     systemctl disable --now wicked.service wicked-nanny.service 2>/dev/null || true
     systemctl mask wicked.service wicked-nanny.service 2>/dev/null || true
+elif command -v apt-get >/dev/null 2>&1; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get purge -y network-manager network-manager-gnome
+    cat > /etc/apt/preferences.d/block-network-manager.pref <<'EOF'
+Package: network-manager network-manager-gnome
+Pin: release *
+Pin-Priority: -1
+EOF
 else
     echo "ERROR: unsupported package manager" >&2
     exit 1

@@ -105,7 +105,7 @@ load ../helpers
         assert_file_contains "$OPT_JAN/$script" '^setup-vm-networkd$'
     done
     assert_file_contains "$OPT_JAN/usr/sbin/setup-vm-networkd" \
-        '^DHCP=ipv4$'
+        '^DHCP=yes$'
     assert_file_contains "$OPT_JAN/usr/sbin/setup-vm-networkd" \
         'apt-get purge -y network-manager network-manager-gnome'
 }
@@ -266,4 +266,41 @@ load ../helpers
     for script in setup/vm-xub26 setup/vm-baseweed; do
         assert_file_not_contains "$OPT_JAN/$script" 'home-root'
     done
+}
+
+@test "base packages include archive tools and exclude language package managers" {
+    source "$OPT_JAN/setup/common-cli-packages.sh"
+    local package
+    for package in "${JAN_COMMON_CLI_PACKAGES[@]}"; do
+        case $package in
+            *pip*|npm*|pnpm*|yarn*|uv|bun|rubygem*|gem)
+                echo "unexpected base package manager: $package" >&2
+                return 1 ;;
+        esac
+    done
+    for package in unzip tar gzip zstd python3 wget gdu; do
+        [[ " ${JAN_COMMON_CLI_PACKAGES[*]} " == *" $package "* ]]
+    done
+    assert_file_contains "$OPT_JAN/setup/vm-xub26" 'apt-get install -y --no-install-recommends'
+}
+
+@test "Tumbleweed installs the distro apt compatibility frontend" {
+    local script
+    for script in setup/host-weed-kde setup/vm-baseweed; do
+        assert_file_contains "$OPT_JAN/$script" 'zypper-aptitude'
+    done
+    # apt-get also exists on openSUSE now. Package names must come from zypper.
+    for script in usr/sbin/setup-vm-networkd usr/sbin/guest-cleanup usr/sbin/pod-setup; do
+        run bash -c 'text=$(cat "$1"); z=${text%%command -v zypper*}; a=${text%%command -v apt-get*}; (( ${#z} < ${#a} ))' _ "$OPT_JAN/$script"
+        [[ $status == 0 ]]
+    done
+}
+
+@test "host blocks Xorg before explicitly installing Plasma Wayland" {
+    local script="$OPT_JAN/setup/host-weed-kde"
+    assert_file_contains "$script" 'plasma6-session plasma6-nm'
+    assert_file_contains "$script" 'xorg-x11-server xorg-x11-server-wrapper plasma6-session-x11 kwin6-x11'
+    assert_file_contains "$script" 'xterm xterm-bin'
+    run bash -c 'text=$(cat "$1"); locks=${text%%zypper -n addlock*}; install=${text%%zypper -n install*}; (( ${#locks} < ${#install} ))' _ "$script"
+    [[ $status == 0 ]]
 }

@@ -116,10 +116,10 @@ fi
 disable_automatic_apt
 
 apt-get update
-apt-get install -y \
+apt-get install -y --no-install-recommends \
   terminator rofi mousepad arandr dconf-cli \
   xfce4-fsguard-plugin xfce4-systemload-plugin xfce4-taskmanager \
-  links "${JAN_COMMON_CLI_PACKAGES[@]}" iftop sshpass \
+  links "${JAN_COMMON_CLI_PACKAGES[@]}" "${JAN_DISTRO_CLI_PACKAGES[@]}" iftop sshpass \
   fonts-jetbrains-mono fonts-terminus console-setup \
   xdotool systemd-resolved
 
@@ -128,7 +128,7 @@ apt-get install -y \
 /opt/jan/skel/install
 
 # Guest agents — install but don't restart (masked above)
-apt-get install -y spice-vdagent qemu-guest-agent
+apt-get install -y --no-install-recommends spice-vdagent qemu-guest-agent
 
 
 apt-get purge -y snapd \
