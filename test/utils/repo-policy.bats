@@ -432,3 +432,17 @@ load ../helpers
     assert_file_contains "$script" 'XDG_DIR:-/etc/xdg'
     assert_file_contains "$OPT_JAN/setup/host-weed-kde" '^setup-plasma-defaults'
 }
+
+@test "the Fonts dialog agrees with the configured rendering" {
+    # The KDE Fonts module reads the per-user fontconfig file, not kdeglobals,
+    # and writes it only when the user applies a change. Without seeding it a
+    # new account reports "none" while rendering is actually RGB.
+    local user="$OPT_JAN/skel/home/.config/fontconfig/fonts.conf"
+    assert_file "$user"
+    assert_file_contains "$user" '<const>rgb</const>'
+    assert_file_contains "$user" '<const>hintslight</const>'
+    # All three sources must agree, or the dialog and the rendering diverge.
+    assert_file_contains \
+        "$OPT_JAN/usr/share/fontconfig/conf.avail/60-jan-subpixel.conf" '<const>rgb</const>'
+    assert_file_contains "$OPT_JAN/usr/sbin/setup-plasma-defaults" 'XftSubPixel=rgb'
+}
