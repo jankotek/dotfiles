@@ -139,3 +139,56 @@ ini_value() {
         [[ "$value" == 's "ignore"' ]] || { echo "$prop=$value" >&2; return 1; }
     done
 }
+
+@test "the wallpaper is installed and distribution images are untouched" {
+    assert_file /usr/local/share/jan-wallpaper.jpg
+    if [[ -L /usr/local/share/jan-wallpaper.jpg ]]; then
+        echo "wallpaper is a symlink; it must resolve without the checkout" >&2
+        return 1
+    fi
+    # Provisioning must not redirect rpm-owned images at the repo wallpaper: a
+    # package update would restore them and silently revert the background.
+    local dirs=() dir hijacked=() scan=0
+    for dir in /usr/share/wallpapers /usr/share/backgrounds; do
+        [[ -d "$dir" ]] && dirs+=("$dir")
+    done
+    if (( ! ${#dirs[@]} )); then
+        return 0
+    fi
+    # Process substitution would hide find's status, so scan to a file: an
+    # unreadable subtree must fail loudly rather than report nothing wrong.
+    find "${dirs[@]}" \( -lname '/usr/local/*' -o -xtype l \) -print0 \
+        > "$BATS_TEST_TMPDIR/hijacked" || scan=$?
+    if (( scan != 0 )); then
+        echo "could not scan the wallpaper directories (find exit $scan)" >&2
+        return 1
+    fi
+    mapfile -t -d '' hijacked < "$BATS_TEST_TMPDIR/hijacked"
+    if (( ${#hijacked[@]} )); then
+        echo "redirected or dangling distribution wallpapers:" >&2
+        printf '  %s\n' "${hijacked[@]}" >&2
+        return 1
+    fi
+}
+
+@test "lock screen shows the installed wallpaper on a dark background" {
+    command -v kreadconfig6 &>/dev/null || skip "kreadconfig6 not installed"
+    assert_file /usr/local/etc/xdg/kscreenlockerrc
+    # Read the administrator cascade with an empty per-user config: the caller
+    # may be root over SSH with no XDG_CONFIG_DIRS, and a user override must
+    # not be able to mask a broken system default.
+    locker_default() {
+        XDG_CONFIG_HOME="$BATS_TEST_TMPDIR/empty-config" \
+            XDG_CONFIG_DIRS=/usr/local/etc/xdg:/etc/xdg:/usr/etc/xdg \
+            kreadconfig6 --file kscreenlockerrc "$@"
+    }
+    [[ $(locker_default --group Greeter --key WallpaperPlugin) == org.kde.image ]]
+    local group=(--group Greeter --group Wallpaper --group org.kde.image --group General)
+    # org.kde.image defaults Color to #ffffff; an unreadable image must not
+    # leave a white lock screen.
+    [[ $(locker_default "${group[@]}" --key Color) == 0,0,0 ]]
+    local image
+    image=$(locker_default "${group[@]}" --key Image)
+    [[ $image == /usr/local/share/jan-wallpaper.jpg ]]
+    assert_file "$image"
+}

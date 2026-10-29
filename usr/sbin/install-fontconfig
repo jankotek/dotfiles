@@ -1,0 +1,34 @@
+#!/bin/bash
+#
+# Link this repo's fontconfig fragments into /etc/fonts/conf.d. Subpixel and
+# hinting defaults belong in fontconfig rather than a toolkit config so Qt, GTK
+# and XFCE all render identically on the host and inside the VMs.
+set -euo pipefail
+
+CONF_AVAIL=${JAN_FONTCONFIG_AVAIL:-/usr/local/share/fontconfig/conf.avail}
+CONF_DIR=${JAN_FONTCONFIG_CONF_D:-/etc/fonts/conf.d}
+
+install_fontconfig() {
+    if [[ ! -d $CONF_AVAIL ]]; then
+        echo "install-fontconfig: missing $CONF_AVAIL" >&2
+        return 1
+    fi
+    install -d -m 0755 "$CONF_DIR"
+    # Link every fragment, so adding one to the repo needs no change here.
+    local conf
+    for conf in "$CONF_AVAIL"/*.conf; do
+        [[ -e $conf ]] || continue
+        ln -sfn "$conf" "$CONF_DIR/${conf##*/}"
+    done
+    if command -v fc-cache >/dev/null; then
+        fc-cache -f >/dev/null
+    fi
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+    if (( EUID != 0 )); then
+        echo 'install-fontconfig: must run as root' >&2
+        exit 1
+    fi
+    install_fontconfig
+fi

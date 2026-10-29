@@ -94,9 +94,6 @@ cp -f -s -r /opt/jan/usr/* /usr/local
 /opt/jan/setup/retire-path-util-names.sh
 /usr/local/sbin/install-chrome-vm
 /usr/local/sbin/install-brave-vm
-# cursors do not work in /usr/local/share/icons
-cp -f -s -r /usr/local/share/icons/DMZ* /usr/share/icons/
-cp -f -s -r /usr/local/share/icons/Rare* /usr/share/icons/
 
 
 # Set non-interactive mode for apt/dpkg
@@ -165,6 +162,8 @@ apt-get clean
 install-tty11-root
 install-guest-cleanup
 console-font || echo "WARNING: console font setup failed (non-fatal)"
+install-fontconfig || echo "WARNING: fontconfig setup failed (non-fatal)"
+install-cursor-theme || echo "WARNING: cursor theme setup failed (non-fatal)"
 # sysfb/simpledrm may take DRM card0 before virtio_gpu and later disappear,
 # leaving virtio_gpu at card1. spice-vdagent expects card0 when mapping the
 # SPICE display to XRandR, so this breaks resize and absolute pointer mapping.

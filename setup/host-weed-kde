@@ -63,8 +63,6 @@ ln -sfn /usr/local/share/color-schemes/Sweet-dark.colors \
     /usr/local/etc/xdg/kdeglobals
 ln -sfn /usr/local/share/jan-xdg-local-first.sh \
     /etc/profile.d/jan-xdg-local-first.sh
-ln -sfn /usr/local/share/fontconfig/conf.avail/60-jan-jetbrains-mono.conf \
-    /etc/fonts/conf.d/60-jan-jetbrains-mono.conf
 
 # Repo helpers now live in /usr/local/{sbin,bin}. Make sure they're on
 # PATH for the rest of this script regardless of how it was invoked (a
@@ -78,14 +76,18 @@ zypper -n refresh
 
 # Enforce host policy before resolving the desktop installation. XWayland
 # (xorg-x11-server-wayland) stays available for X11 applications under Plasma.
+# Locking the X server and its wrapper is what makes an X11 Plasma session
+# unusable; Plasma 6.8 itself no longer ships a separate X11 session package.
 LOCK_PKGS=(
     PackageKit emacs icewm vim vim-small xterm xterm-bin
-    xorg-x11-server xorg-x11-server-wrapper plasma6-session-x11 kwin6-x11
+    xorg-x11-server xorg-x11-server-wrapper
 )
 echo "==> Removing and locking unwanted packages"
 for pkg in "${LOCK_PKGS[@]}"; do
+    # A refused removal (reverse dependency we still need) must not abort the
+    # run before anything is installed. The lock below still blocks reinstalls.
     if rpm -q "$pkg" &>/dev/null; then
-        zypper -n remove "$pkg"
+        zypper -n remove "$pkg" || echo "WARNING: could not remove $pkg; lock still applies" >&2
     fi
     zypper -n addlock "$pkg"
 done
@@ -107,7 +109,7 @@ zypper -n install --no-recommends \
     java-17-openjdk-devel maven
 
 fc-cache -f
-systemctl start power-profiles-daemon.service
+systemctl enable --now power-profiles-daemon.service
 
 # Seed future accounts (including lab users) with the curated common,
 # Plasma-safe, and XFCE-safe defaults. openSUSE continues to merge its vendor
@@ -127,6 +129,8 @@ done
 
 echo "==> Running setup helpers"
 console-font            || echo "WARNING: console font setup failed (non-fatal)"
+install-fontconfig      || echo "WARNING: fontconfig setup failed (non-fatal)"
+install-cursor-theme    || echo "WARNING: cursor theme setup failed (non-fatal)"
 console-framebuffer
 setup-pkg-safety        || echo "WARNING: pkg safety setup failed (non-fatal)"
 setup-kernel-tweaks     || echo "WARNING: kernel tweaks setup failed (non-fatal)"
@@ -142,30 +146,24 @@ if lspci -nn 2>/dev/null | grep -qi 'Strix Halo'; then
     setup-strix-halo    || echo "WARNING: strix-halo setup failed (non-fatal)"
 fi
 
-# ---------- Replace all wallpapers with a single image ----------
-# Point every wallpaper/background image under /usr/share at the single
-# wallpaper shipped in the repo (usr/share/jan-wallpaper.jpg, deployed to
-# /usr/local/share/jan-wallpaper.jpg by the symlink step above), so KDE (and
-# anything else) always shows it regardless of which theme / resolution
-# variant it picks. Symlinks are idempotent, so re-runs are safe.
+# ---------- Install the single wallpaper ----------
+# Plasma names this path in the desktop and lock-screen defaults (see
+# skel/.../layout-templates and usr/etc/xdg/kscreenlockerrc), so install a real
+# copy rather than the /usr/local -> /opt/jan symlink the step above creates: a
+# checkout that is absent, moved or unmounted must not blank the background.
+#
+# Deliberately does NOT rewrite the distribution's own images under
+# /usr/share/wallpapers. Those files are rpm-owned, so a package update would
+# restore them and silently revert the wallpaper.
 
-echo "==> Replacing /usr/share wallpapers with a single image"
+echo "==> Installing the wallpaper"
+WALLPAPER_SOURCE="${REPO_DIR}/usr/share/jan-wallpaper.jpg"
 WALLPAPER_FILE="/usr/local/share/jan-wallpaper.jpg"
-if [[ -e "$WALLPAPER_FILE" ]]; then
-    WALL_DIRS=()
-    for d in /usr/share/wallpapers /usr/share/backgrounds; do
-        [[ -d "$d" ]] && WALL_DIRS+=("$d")
-    done
-    if [[ ${#WALL_DIRS[@]} -gt 0 ]]; then
-        find "${WALL_DIRS[@]}" \( -type f -o -type l \) \
-            \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' \
-               -o -iname '*.webp' -o -iname '*.bmp' -o -iname '*.svg' \) \
-            -print0 | while IFS= read -r -d '' img; do
-            ln -sf "$WALLPAPER_FILE" "$img"
-        done
-    fi
+if [[ -f "$WALLPAPER_SOURCE" ]]; then
+    rm -f "$WALLPAPER_FILE"
+    install -D -m 0644 "$WALLPAPER_SOURCE" "$WALLPAPER_FILE"
 else
-    echo "WARNING: ${WALLPAPER_FILE} missing — keeping existing wallpapers" >&2
+    echo "WARNING: ${WALLPAPER_SOURCE} missing — no wallpaper installed" >&2
 fi
 
 # Boot straight to the graphical session.

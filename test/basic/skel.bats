@@ -274,6 +274,14 @@ STUB
         'clock.writeConfig("customDateFormat", "MM-dd ddd")'
     assert_file_contains "$layout" \
         'clock.writeConfig("use24hFormat", 2)'
+    # The desktop background is named here rather than inherited from the
+    # distribution look-and-feel, whose wallpaper package may not be installed.
+    assert_file_contains "$layout" \
+        'writeConfig("Image", wallpaper)'
+    assert_file_contains "$layout" \
+        'wallpaper = "/usr/local/share/jan-wallpaper.jpg"'
+    assert_file_contains "$layout" \
+        'writeConfig("Color", "0,0,0")'
 }
 
 @test "skeleton has no account-specific path or generated desktop state" {

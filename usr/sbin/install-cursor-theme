@@ -1,0 +1,44 @@
+#!/bin/bash
+#
+# Expose the bundled cursor themes where libXcursor actually looks. Its built-in
+# search path is
+#   ~/.local/share/icons:~/.icons:/usr/share/icons:/usr/share/pixmaps
+# which does NOT include /usr/local/share/icons, and XCURSOR_PATH is unset by
+# default, so a theme wired only into /usr/local is invisible to X11, XWayland
+# and KWin. Link it into /usr/share/icons instead. Only new names are created;
+# an existing packaged directory is never replaced.
+set -euo pipefail
+
+CURSOR_SRC=${JAN_CURSOR_SRC:-/usr/local/share/icons}
+CURSOR_DIR=${JAN_CURSOR_DIR:-/usr/share/icons}
+# Deliberately no "default" theme. Debian and Ubuntu manage
+# /usr/share/icons/default/index.theme through update-alternatives, so linking
+# it would either fight dpkg or silently do nothing; every surface that selects
+# a cursor (Plasma kcminputrc, GTK via dconf, XFCE via xsettings) names the
+# theme directly instead.
+read -r -a CURSOR_THEMES <<< "${JAN_CURSOR_THEMES:-DMZhaloG RareAeroW7}"
+
+install_cursor_theme() {
+    if [[ ! -d $CURSOR_SRC ]]; then
+        echo "install-cursor-theme: missing $CURSOR_SRC" >&2
+        return 1
+    fi
+    install -d -m 0755 "$CURSOR_DIR"
+    local theme
+    for theme in "${CURSOR_THEMES[@]}"; do
+        [[ -d "$CURSOR_SRC/$theme" ]] || continue
+        if [[ -e "$CURSOR_DIR/$theme" && ! -L "$CURSOR_DIR/$theme" ]]; then
+            echo "install-cursor-theme: $CURSOR_DIR/$theme is packaged; leaving it alone" >&2
+            continue
+        fi
+        ln -sfn "$CURSOR_SRC/$theme" "$CURSOR_DIR/$theme"
+    done
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+    if (( EUID != 0 )); then
+        echo 'install-cursor-theme: must run as root' >&2
+        exit 1
+    fi
+    install_cursor_theme
+fi

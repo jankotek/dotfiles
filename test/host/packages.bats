@@ -92,12 +92,17 @@ load ../helpers
 
 @test "host excludes standalone Xorg and X11 Plasma while retaining XWayland" {
     local package
-    for package in xorg-x11-server xorg-x11-server-wrapper plasma6-session-x11 kwin6-x11 xterm xterm-bin; do
-        if rpm -q "$package"; then
+    for package in xorg-x11-server xorg-x11-server-wrapper xterm xterm-bin; do
+        if rpm -q "$package" >/dev/null 2>&1; then
             echo "unexpected host package: $package" >&2
             return 1
         fi
     done
+    # Plasma 6.8 dropped the X11 session upstream; nothing may provide it.
+    if command -v startplasma-x11 >/dev/null 2>&1; then
+        echo "unexpected X11 Plasma session binary" >&2
+        return 1
+    fi
     rpm -q plasma6-session
     assert_command Xwayland
     assert_executable /usr/bin/startplasma-wayland

@@ -120,9 +120,10 @@ main() {
     ensure_dependencies
     write_configuration
 
-    systemctl start power-profiles-daemon.service
     systemctl daemon-reload
     udevadm control --reload-rules
+    # D-Bus activated, but enable it so laptop-power finds it after a reboot.
+    systemctl enable --now power-profiles-daemon.service
     systemctl enable --now acpid.service
     systemctl reload-or-restart acpid.service
     systemctl enable laptop-power-sleep.service

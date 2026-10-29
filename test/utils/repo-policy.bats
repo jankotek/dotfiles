@@ -299,8 +299,113 @@ load ../helpers
 @test "host blocks Xorg before explicitly installing Plasma Wayland" {
     local script="$OPT_JAN/setup/host-weed-kde"
     assert_file_contains "$script" 'plasma6-session plasma6-nm'
-    assert_file_contains "$script" 'xorg-x11-server xorg-x11-server-wrapper plasma6-session-x11 kwin6-x11'
+    assert_file_contains "$script" 'xorg-x11-server xorg-x11-server-wrapper'
     assert_file_contains "$script" 'xterm xterm-bin'
+    # Phantom lock names pass vacuously and hide a real gap. Plasma 6.8 ships
+    # no separate X11 session package, so these must not be relied upon.
+    assert_file_not_contains "$script" 'plasma6-session-x11'
+    assert_file_not_contains "$script" 'kwin6-x11'
     run bash -c 'text=$(cat "$1"); locks=${text%%zypper -n addlock*}; install=${text%%zypper -n install*}; (( ${#locks} < ${#install} ))' _ "$script"
     [[ $status == 0 ]]
+}
+
+@test "the wallpaper is installed without touching distribution files" {
+    local script="$OPT_JAN/setup/host-weed-kde"
+    assert_file "$OPT_JAN/usr/share/jan-wallpaper.jpg"
+    # A real copy, not the /usr/local -> /opt/jan symlink: Plasma stores this
+    # absolute path, so it must resolve without the checkout.
+    assert_file_contains "$script" 'install -D -m 0644 "\$WALLPAPER_SOURCE" "\$WALLPAPER_FILE"'
+    assert_file_contains "$script" 'WALLPAPER_SOURCE="\${REPO_DIR}/usr/share/jan-wallpaper.jpg"'
+    # Images under /usr/share/wallpapers are rpm-owned, so redirecting them makes
+    # the wallpaper revert on the next package update. The script may still read
+    # those directories to repair an older run; what it must never do again is
+    # select images there and point them at the repo wallpaper.
+    assert_file_not_contains "$script" 'ln -sf.*WALLPAPER_FILE'
+    assert_file_not_contains "$script" "iname '\*\.jpe?g'"
+    assert_file_not_contains "$script" 'wallpaper-branding'
+}
+
+@test "Plasma defaults name the installed wallpaper on a dark background" {
+    local layout="$OPT_JAN/skel/home/.local/share/plasma/layout-templates/org.opensuse.desktop.defaultPanel/contents/layout.js"
+    local locker="$OPT_JAN/usr/etc/xdg/kscreenlockerrc"
+    # Desktop and lock screen are the only consumers; both name the image
+    # directly so neither depends on a distribution wallpaper being installed.
+    for file in "$layout" "$locker"; do
+        assert_file_contains "$file" '/usr/local/share/jan-wallpaper.jpg'
+        assert_file_contains "$file" '0,0,0'
+    done
+    assert_file_contains "$layout" 'wallpaperPlugin = "org.kde.image"'
+    assert_file_contains "$layout" 'currentConfigGroup = \["Wallpaper", "org.kde.image", "General"\]'
+    # Scoped like the look-and-feel layout that loads it, not across activities.
+    assert_file_contains "$layout" 'desktopsForActivity(currentActivity())'
+}
+
+@test "lock screen defaults name an installed image and a dark fallback" {
+    local rc="$OPT_JAN/usr/etc/xdg/kscreenlockerrc"
+    assert_file "$rc"
+    assert_file_contains "$rc" '^WallpaperPlugin=org.kde.image$'
+    assert_file_contains "$rc" '^Image=/usr/local/share/jan-wallpaper.jpg$'
+    # org.kde.image defaults Color to #ffffff, so an unreadable image leaves a
+    # white lock screen. Pin the Sweet-dark background instead.
+    assert_file_contains "$rc" '^Color=0,0,0$'
+    assert_file_contains \
+        "$OPT_JAN/usr/share/color-schemes/Sweet-dark.colors" '^BackgroundNormal=0,0,0$'
+}
+
+@test "the bundled cursor is the default at 48px for host and VMs" {
+    assert_file "$OPT_JAN/dist/cursor/DMZhaloG/cursor.theme"
+    assert_symlink "$OPT_JAN/usr/share/icons/DMZhaloG" \
+        "$OPT_JAN/dist/cursor/DMZhaloG"
+    # A cursor theme must not inherit itself; that is a lookup loop.
+    assert_file_not_contains "$OPT_JAN/dist/cursor/DMZhaloG/cursor.theme" \
+        '^Inherits=DMZhaloG$'
+    # Plasma, system-wide so accounts that already exist pick it up...
+    assert_file_contains "$OPT_JAN/usr/etc/xdg/kcminputrc" '^cursorTheme=DMZhaloG$'
+    assert_file_contains "$OPT_JAN/usr/etc/xdg/kcminputrc" '^cursorSize=48$'
+    # ...and per-user, because Plasma prepends ~/.config/kdedefaults to its
+    # search path and the openSUSE look-and-feel writes breeze_cursors there,
+    # which outranks any system file.
+    assert_file_contains "$OPT_JAN/skel/home/.config/kcminputrc" '^cursorTheme=DMZhaloG$'
+    assert_file_contains "$OPT_JAN/skel/home/.config/kcminputrc" '^cursorSize=48$'
+    # libXcursor does not search /usr/local/share/icons, so the themes must be
+    # linked into /usr/share/icons by every profile that installs them.
+    assert_executable "$OPT_JAN/usr/sbin/install-cursor-theme"
+    # update-alternatives owns this path on Debian/Ubuntu; do not ship it.
+    [[ ! -e "$OPT_JAN/usr/share/icons/default" ]]
+    assert_file_not_contains "$OPT_JAN/usr/sbin/install-cursor-theme" \
+        '^read -r -a CURSOR_THEMES.*default'
+    local script
+    for script in setup/host-weed-kde setup/vm-cli setup/vm-xub26; do
+        assert_file_contains "$OPT_JAN/$script" '^install-cursor-theme'
+        # The helper replaces a hand-rolled copy that had no packaged-directory
+        # guard, so no profile may reintroduce one.
+        assert_file_not_contains "$OPT_JAN/$script" 'cp .*/usr/share/icons'
+    done
+    # GTK, via dconf; and XFCE, via the xsettings channel.
+    assert_file_contains "$OPT_JAN/skel/home/.config/dconf-import.ini" \
+        "^cursor-theme='DMZhaloG'$"
+    assert_file_contains "$OPT_JAN/skel/home/.config/dconf-import.ini" \
+        '^cursor-size=48$'
+    local xsettings="$OPT_JAN/skel/home/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml"
+    assert_file_contains "$xsettings" 'name="CursorThemeName" type="string" value="DMZhaloG"'
+    assert_file_contains "$xsettings" 'name="CursorThemeSize" type="int" value="48"'
+}
+
+@test "RGB subpixel rendering is wired for every toolkit" {
+    local fragment="$OPT_JAN/usr/share/fontconfig/conf.avail/60-jan-subpixel.conf"
+    assert_file "$fragment"
+    assert_file_contains "$fragment" '<const>rgb</const>'
+    assert_file_contains "$fragment" '<const>hintslight</const>'
+    # Qt reads kdeglobals in preference to fontconfig, so the two must agree.
+    assert_file_contains "$OPT_JAN/skel/home/.config/kdeglobals" '^XftSubPixel=rgb$'
+    assert_file_contains "$OPT_JAN/skel/home/.config/kdeglobals" '^XftHintStyle=hintslight$'
+    assert_file_contains \
+        "$OPT_JAN/skel/home/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml" \
+        'name="RGBA" type="string" value="rgb"'
+    # Host and both VM families must install the fragments.
+    local script
+    for script in setup/host-weed-kde setup/vm-cli setup/vm-xub26; do
+        assert_file_contains "$OPT_JAN/$script" '^install-fontconfig'
+    done
+    assert_executable "$OPT_JAN/usr/sbin/install-fontconfig"
 }

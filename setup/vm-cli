@@ -69,6 +69,8 @@ fi
 # Tumbleweed-specific branch (sdbootutil).
 
 console-font
+install-fontconfig || echo "WARNING: fontconfig setup failed (non-fatal)"
+install-cursor-theme || echo "WARNING: cursor theme setup failed (non-fatal)"
 setup-pkg-safety || echo "WARNING: pkg safety setup failed (non-fatal)"
 
 # ---------- xdg user-dirs (lowercase) ----------

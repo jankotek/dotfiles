@@ -1,0 +1,7 @@
+# Plasma prepends ~/.config/kdedefaults to its config search path, and the
+# openSUSE look-and-feel writes cursorTheme=breeze_cursors there. Only the
+# per-user file outranks that, so the choice has to live here as well as in
+# usr/etc/xdg/kcminputrc.
+[Mouse]
+cursorTheme=DMZhaloG
+cursorSize=48

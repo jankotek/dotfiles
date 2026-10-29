@@ -1,0 +1,11 @@
+# Lock screen background. Without this the greeter inherits the distribution
+# default wallpaper, which need not be installed, and falls back to a plain
+# light background. Name the one wallpaper this repo installs, and keep the
+# fallback colour the Sweet-dark background rather than white.
+[Greeter]
+WallpaperPlugin=org.kde.image
+
+[Greeter][Wallpaper][org.kde.image][General]
+Image=/usr/local/share/jan-wallpaper.jpg
+FillMode=2
+Color=0,0,0

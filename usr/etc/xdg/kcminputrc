@@ -1,0 +1,7 @@
+# Cursor theme and size for Plasma. DMZhaloG ships in dist/cursor and reaches
+# /usr/local/share/icons through the repo's usr/ -> /usr/local symlink step, so
+# no copy is needed here. Set system-wide rather than in skel/ so accounts that
+# already exist pick it up; a per-user setting still overrides it.
+[Mouse]
+cursorTheme=DMZhaloG
+cursorSize=48

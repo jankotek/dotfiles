@@ -1,5 +1,11 @@
 [General]
 ColorScheme=Sweet-dark
+# Qt honours these over fontconfig, so they must agree with
+# usr/share/fontconfig/conf.avail/60-jan-subpixel.conf.
+XftAntialias=true
+XftHinting=true
+XftHintStyle=hintslight
+XftSubPixel=rgb
 
 [Icons]
 Theme=Sweet-Purple
