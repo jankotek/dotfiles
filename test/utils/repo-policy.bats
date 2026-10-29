@@ -409,3 +409,26 @@ load ../helpers
     done
     assert_executable "$OPT_JAN/usr/sbin/install-fontconfig"
 }
+
+@test "the panel template has something to load it" {
+    # The template is applied by plasma6-theme-openSUSE's look-and-feel, which
+    # calls loadTemplate("org.opensuse.desktop.defaultPanel"). Plasma is
+    # installed with --no-recommends, so without that package nothing calls it
+    # and the panel silently reverts to the stock bottom bar with an icons-only
+    # task manager.
+    assert_file_contains "$OPT_JAN/setup/host-weed-kde" 'plasma6-theme-openSUSE'
+    # KPackage only honours the per-user copy: a copy under /usr/local/share
+    # loses to /usr/share, so the template stays in skel.
+    assert_file "$OPT_JAN/skel/home/.local/share/plasma/layout-templates/org.opensuse.desktop.defaultPanel/contents/layout.js"
+    [[ ! -e "$OPT_JAN/usr/share/plasma/layout-templates" ]]
+}
+
+@test "font rendering defaults reach accounts that already exist" {
+    # skel/ only seeds NEW accounts, and Qt prefers kdeglobals over fontconfig,
+    # so the rendering keys must also be written to the system kdeglobals.
+    local script="$OPT_JAN/usr/sbin/setup-plasma-defaults"
+    assert_executable "$script"
+    assert_file_contains "$script" 'XftSubPixel=rgb'
+    assert_file_contains "$script" 'XDG_DIR:-/etc/xdg'
+    assert_file_contains "$OPT_JAN/setup/host-weed-kde" '^setup-plasma-defaults'
+}

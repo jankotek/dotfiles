@@ -97,6 +97,7 @@ zypper -n addlock -t pattern kde_pim
 echo "==> Installing KDE apps, virt stack, and CLI tools"
 zypper -n install --no-recommends \
     plasma6-session plasma6-nm plasma6-pa xdg-desktop-portal-kde6 \
+    plasma6-theme-openSUSE \
     pipewire-pulseaudio wireplumber power-profiles-daemon \
     konsole dolphin kate kwrite ark gwenview okular spectacle \
     kdenlive kdiff3 kfind krename krita kstars ksystemlog ktorrent \
@@ -131,6 +132,7 @@ echo "==> Running setup helpers"
 console-font            || echo "WARNING: console font setup failed (non-fatal)"
 install-fontconfig      || echo "WARNING: fontconfig setup failed (non-fatal)"
 install-cursor-theme    || echo "WARNING: cursor theme setup failed (non-fatal)"
+setup-plasma-defaults   || echo "WARNING: Plasma defaults setup failed (non-fatal)"
 console-framebuffer
 setup-pkg-safety        || echo "WARNING: pkg safety setup failed (non-fatal)"
 setup-kernel-tweaks     || echo "WARNING: kernel tweaks setup failed (non-fatal)"

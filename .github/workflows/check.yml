@@ -14,7 +14,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install test tools
-        run: sudo apt-get update && sudo apt-get install -y bats jq rsync shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bats jq rsync shellcheck
+          # kreadconfig6/kwriteconfig6. Without them test/utils/plasma-defaults.bats
+          # skips every case and the job stays green while the helper is broken.
+          sudo apt-get install -y libkf6config-bin
 
       - name: Check shell syntax and warnings
         shell: bash

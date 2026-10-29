@@ -1,0 +1,50 @@
+#!/bin/bash
+#
+# System-wide Plasma defaults that must also reach accounts which already
+# exist.
+#
+# LookAndFeelPackage selects the look-and-feel whose layout script runs
+# loadTemplate("org.opensuse.desktop.defaultPanel") — the only thing that
+# applies this repo's panel. The openSUSE installer writes this key, so an
+# installed desktop already has it, but a minimal or image-built system does
+# not: Plasma then falls back to Breeze, loads the KDE template id instead and
+# comes up with the stock bottom panel and an icons-only task manager.
+#
+# The font rendering keys are here because Qt reads kdeglobals in preference to
+# fontconfig; without them a Qt application ignores 60-jan-subpixel.conf and
+# KDE's Fonts dialog reports "none".
+#
+# These live in $XDG_DIR/kdeglobals, not /usr/local/etc/xdg/kdeglobals, which
+# host-weed-kde points at the Sweet-dark colour scheme. The keys set here fall
+# through to this lower-priority file while ColorScheme still comes from the
+# colour scheme above it. They are defaults, not locks: a user who changes
+# them in System Settings keeps their value.
+set -euo pipefail
+
+XDG_DIR=${XDG_DIR:-/etc/xdg}
+LOOK_AND_FEEL=${JAN_LOOK_AND_FEEL:-org.openSUSE.desktop}
+
+setup_plasma_defaults() {
+    if ! command -v kwriteconfig6 >/dev/null; then
+        echo 'setup-plasma-defaults: kwriteconfig6 is required (KDE Plasma 6)' >&2
+        return 1
+    fi
+    install -d -m 0755 "$XDG_DIR"
+    local file="$XDG_DIR/kdeglobals" pair
+    # An absolute --file path makes kwriteconfig6 write that exact file rather
+    # than resolving one through the caller's own configuration cascade.
+    kwriteconfig6 --file "$file" --group KDE --key LookAndFeelPackage "$LOOK_AND_FEEL"
+    # Must agree with usr/share/fontconfig/conf.avail/60-jan-subpixel.conf.
+    for pair in XftAntialias=true XftHinting=true XftHintStyle=hintslight XftSubPixel=rgb; do
+        kwriteconfig6 --file "$file" --group General --key "${pair%%=*}" "${pair#*=}"
+    done
+    chmod 0644 "$file"
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+    if (( EUID != 0 )); then
+        echo 'setup-plasma-defaults: must run as root' >&2
+        exit 1
+    fi
+    setup_plasma_defaults
+fi
