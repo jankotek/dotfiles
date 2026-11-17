@@ -21,8 +21,8 @@ readonly -a JAN_COMMON_CLI_PACKAGES=(
     powertop
     fish
     starship
-    iotop
-    ncdu
+    iotop-c
+    gdu
     nano
     mosh
     ripgrep
