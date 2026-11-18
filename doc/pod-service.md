@@ -102,7 +102,7 @@ If you must listen on port 80 inside the container (e.g. Apache default), add `A
 After running the setup script:
 
 ```bash
-sudo ./setup-pod-service.sh freshrss
+sudo pod-setup freshrss
 ```
 
 Edit `/var/pod/freshrss/app.container`:

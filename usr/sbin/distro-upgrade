@@ -4,7 +4,12 @@ set -euo pipefail
 upgrade_system() {
   # suse
   if command -v zypper &> /dev/null; then
-    zypper --non-interactive update
+    # Tumbleweed snapshots need dup (package renames, splits, vendor changes).
+    if grep -qx 'ID="\?opensuse-tumbleweed"\?' "${OS_RELEASE:-/etc/os-release}" 2>/dev/null; then
+      zypper --non-interactive dup
+    else
+      zypper --non-interactive update
+    fi
 
   # fedora
   elif command -v dnf &> /dev/null; then

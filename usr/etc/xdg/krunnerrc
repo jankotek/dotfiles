@@ -1,0 +1,5 @@
+# KRunner and the launcher's search must not offer Baloo file search. The
+# indexer (kf6-baloo-file) is locked out by setup/host-weed-kde, and its
+# D-Bus runner (plasma-baloorunner.service) is masked for every user.
+[Plugins]
+baloosearchEnabled=false

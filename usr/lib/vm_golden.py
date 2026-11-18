@@ -173,7 +173,7 @@ done
 if systemctl is-active --quiet sshd || systemctl is-active --quiet ssh; then :; else exit 1; fi
 ip route show default | grep -q .
 getent hosts example.com >/dev/null
-for tool in mc htop git fzf lazygit curl wget unzip tar gzip xz zstd python3 gdu aria2c fish starship ncdu nano mosh rg rsync pwgen telnet jdupes just bats tmux; do
+for tool in mc htop git fzf lazygit curl wget unzip tar gzip xz zstd python3 gdu aria2c fish starship nano mosh rg rsync pwgen telnet jdupes just bats tmux; do
     command -v "$tool" >/dev/null
 done
 for tool in go zim Xorg; do

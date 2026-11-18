@@ -3,6 +3,9 @@
 # Offline regression tests for upgrading an existing IntelliJ IDEA tree.
 
 setup() {
+    # As root, optupdate re-execs with a clean environment and would drop the
+    # PATH stubs (and create a real system user); these fixtures are unprivileged.
+    (( EUID != 0 )) || skip "optupdate fixtures must run unprivileged"
     export TEST_ROOT="$BATS_TEST_TMPDIR/idea-upgrade"
     export JAN_OPT="$TEST_ROOT/opt"
     export FIXTURE_DIR="$TEST_ROOT/fixture"
@@ -38,32 +41,52 @@ plugins = [line.split()[0] for line in (root / 'plugin-files').read_text().split
 ]))
 PYTHON
 
-    cat > "$FIXTURE_DIR/archive/idea-2026.2.2/bin/idea.sh" <<'EOF'
-#!/bin/bash
+    # optupdate runs the installer with an empty environment, so the stub
+    # carries its fixture paths itself and failure toggles are flag files.
+    {
+        printf '#!/bin/bash\nFIXTURE_DIR=%q\nJAN_OPT=%q\nFIXTURE_PLUGIN_LOG=%q\n' \
+            "$FIXTURE_DIR" "$JAN_OPT" "$FIXTURE_PLUGIN_LOG"
+        cat <<'EOF'
 set -euo pipefail
 if [[ ${1:-} == installPlugins ]]; then
+    # Nothing from the caller's environment may reach the IDE's JVM.
+    [[ -z ${JAVA_TOOL_OPTIONS+x} && -z ${LEAK_CANARY+x} ]]
+    [[ $IDEA_VM_OPTIONS != /nonexistent/evil.vmoptions ]]
+    [[ $PATH == /usr/bin:/bin ]]
     expected="installPlugins $(cut -d ' ' -f 1 "$FIXTURE_DIR/plugin-files" | paste -sd ' ')"
     [[ $* == "$expected" ]]
     [[ -f $IDEA_PROPERTIES ]]
     plugin_dir=$(sed -n 's/^idea.plugins.path=//p' "$IDEA_PROPERTIES")
     [[ $plugin_dir == "$JAN_OPT"/.jan-update-idea.staging.*/.plugin-install/plugins ]]
     tree=${plugin_dir%/.plugin-install/plugins}
+    [[ $HOME == "$tree/.plugin-install/home" && $TMPDIR == "$tree/.plugin-install/tmp" ]]
+    [[ $IDEA_VM_OPTIONS == "$tree/.plugin-install/idea.vmoptions" ]]
+    grep -qx -- "-Duser.home=$HOME" "$IDEA_VM_OPTIONS"
     while read -r _ file; do
         [[ ! -e $tree/plugins/${file%%/*} ]]
     done < "$FIXTURE_DIR/plugin-files"
     printf '%s\n' "$*" >> "$FIXTURE_PLUGIN_LOG"
-    [[ ${FAIL_IDEA_PLUGINS:-0} != 1 ]] || exit 1
+    [[ ! -e $FIXTURE_DIR/fail-plugins ]] || exit 1
     while read -r plugin file; do
-        if [[ ${INCOMPLETE_IDEA_PLUGINS:-0} == 1 && $plugin == com.jetbrains.rust ]]; then
+        if [[ -e $FIXTURE_DIR/incomplete-plugins && $plugin == com.jetbrains.rust ]]; then
             continue
         fi
         mkdir -p "$(dirname "$plugin_dir/$file")"
         printf '%s fixture\n' "$plugin" > "$plugin_dir/$file"
     done < "$FIXTURE_DIR/plugin-files"
+    [[ ! -e $FIXTURE_DIR/escaping-symlink ]] || ln -s /etc/shadow "$plugin_dir/ini/lib/escape.jar"
+    if [[ -e $FIXTURE_DIR/symlinked-plugin-dir ]]; then
+        mv "$plugin_dir" "$FIXTURE_DIR/outside-plugins"
+        ln -s "$FIXTURE_DIR/outside-plugins" "$plugin_dir"
+    fi
+    if [[ -e $FIXTURE_DIR/fifo-in-plugins ]]; then
+        mkfifo "$plugin_dir/ini/lib/pipe"
+    fi
 else
     printf 'IntelliJ fixture 2026.2.2\n'
 fi
 EOF
+    } > "$FIXTURE_DIR/archive/idea-2026.2.2/bin/idea.sh"
     chmod 0755 "$FIXTURE_DIR/archive/idea-2026.2.2/bin/idea.sh"
     tar czf "$FIXTURE_DIR/idea.tar.gz" -C "$FIXTURE_DIR/archive" idea-2026.2.2
     sha256sum "$FIXTURE_DIR/idea.tar.gz" | awk '{print $1}' \
@@ -127,6 +150,8 @@ run_idea_update() {
         FIXTURE_DOWNLOAD_LOG="$FIXTURE_DOWNLOAD_LOG" \
         FIXTURE_MV_FAILURE_LOG="$FIXTURE_MV_FAILURE_LOG" \
         FAIL_IDEA_ACTIVATION="${FAIL_IDEA_ACTIVATION:-0}" \
+        IDEA_VM_OPTIONS=/nonexistent/evil.vmoptions \
+        JAVA_TOOL_OPTIONS=-Dfixture.leak=1 LEAK_CANARY=1 \
         "$OPT_JAN/usr/sbin/optupdate" idea
 }
 
@@ -209,7 +234,7 @@ run_idea_update() {
 
 @test "plugin download failure preserves old IDEA and cleans staging" {
     seed_old_idea
-    export FAIL_IDEA_PLUGINS=1
+    touch "$FIXTURE_DIR/fail-plugins"
     run_idea_update
     [[ $status -ne 0 ]]
     [[ $(<"$JAN_OPT/idea/.version") == 2025.2.5 ]]
@@ -220,7 +245,7 @@ run_idea_update() {
 
 @test "installer success without all plugins preserves old IDEA" {
     seed_old_idea
-    export INCOMPLETE_IDEA_PLUGINS=1
+    touch "$FIXTURE_DIR/incomplete-plugins"
     run_idea_update
     [[ $status -ne 0 ]]
     [[ $output == *'plugin installation is incomplete'* ]]
@@ -244,7 +269,7 @@ run_idea_update() {
     [[ $status -eq 0 ]]
     cp "$JAN_OPT/idea/.jetbrains-plugins" "$TEST_ROOT/old-manifest"
     sed -i 's/262.1/262.2/g' "$FIXTURE_DIR/plugins.json"
-    export FAIL_IDEA_PLUGINS=1
+    touch "$FIXTURE_DIR/fail-plugins"
     run_idea_update
     [[ $status -ne 0 ]]
     cmp "$JAN_OPT/idea/.jetbrains-plugins" "$TEST_ROOT/old-manifest"
@@ -271,4 +296,33 @@ run_idea_update() {
     [[ $status -eq 0 ]]
     [[ ! -e $JAN_OPT/idea/plugins/plugin-classpath.txt ]]
     [[ $(wc -l < "$FIXTURE_DOWNLOAD_LOG") -eq 1 ]]
+}
+
+@test "plugin output with a symlink leaving the plugin directory is rejected" {
+    seed_old_idea
+    touch "$FIXTURE_DIR/escaping-symlink"
+    run_idea_update
+    [[ $status -ne 0 ]]
+    [[ $output == *'symlink leaves the plugin directory'* ]]
+    [[ $(<"$JAN_OPT/idea/.version") == 2025.2.5 ]]
+    ! compgen -G "$JAN_OPT/.jan-update-idea.staging.*" >/dev/null
+}
+
+@test "a plugin directory replaced by a symlink is rejected" {
+    seed_old_idea
+    touch "$FIXTURE_DIR/symlinked-plugin-dir"
+    run_idea_update
+    [[ $status -ne 0 ]]
+    [[ $output == *'plugin directory is missing or a symlink'* ]]
+    [[ $(<"$JAN_OPT/idea/.version") == 2025.2.5 ]]
+    ! compgen -G "$JAN_OPT/.jan-update-idea.staging.*" >/dev/null
+}
+
+@test "plugin output with a FIFO is rejected" {
+    seed_old_idea
+    touch "$FIXTURE_DIR/fifo-in-plugins"
+    run_idea_update
+    [[ $status -ne 0 ]]
+    [[ $output == *'plugin output contains a special file'* ]]
+    [[ $(<"$JAN_OPT/idea/.version") == 2025.2.5 ]]
 }

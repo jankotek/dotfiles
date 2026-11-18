@@ -70,6 +70,10 @@ if [ "$ARGV_MODE" -eq 1 ]; then
          }
         }' -- "${B64ARGS[@]}")
 else
+    if [ -n "$USER_NAME" ]; then
+        echo "ERROR: --user requires --argv" >&2
+        exit 2
+    fi
     CMD="$*"
     PAYLOAD=$(jq -nc --arg cmd "$CMD" '{execute:"guest-exec", arguments:{path:"/bin/sh", arg:["-c",$cmd], "capture-output":true}}')
 fi

@@ -35,6 +35,18 @@ install -d -o root -g root -m 0755 "$DESTINATION"
 # ownership; archive mode keeps executable helpers and desktop launchers.
 rsync -a --chown=root:root "$SOURCE_DIR/" "$DESTINATION/"
 
+# Grok skill discovery was dropped. Remove only the per-skill links earlier
+# versions installed, then the directories if that leaves them empty; a home
+# with real Grok data (create-user also runs this on homes) keeps it.
+if [[ -d $DESTINATION/.grok/skills && ! -L $DESTINATION/.grok/skills ]]; then
+    for link in "$DESTINATION"/.grok/skills/*; do
+        if [[ -L $link && $(readlink -- "$link") == /opt/jan/agent/skills/* ]]; then
+            rm -f -- "$link"
+        fi
+    done
+    rmdir --ignore-fail-on-non-empty -- "$DESTINATION/.grok/skills" "$DESTINATION/.grok"
+fi
+
 # Git cannot retain empty directories. These become part of every new home and
 # agree with .config/user-dirs.dirs and /etc/xdg/user-dirs.defaults.
 while IFS= read -r relative_dir; do

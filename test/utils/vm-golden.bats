@@ -25,8 +25,8 @@ setup() {
 @test "apt frontend uses distro-specific recommendation flags and archive names" {
     run bash -c 'command() { if [[ $* == "-v zypper" ]]; then return 0; fi; builtin command "$@"; }; source "$1"; printf "%s\n" "${JAN_APT_INSTALL_OPTIONS[*]}" "${JAN_DISTRO_CLI_PACKAGES[*]}"' _ "$OPT_JAN/setup/common-cli-packages.sh"
     [ "$status" -eq 0 ]
-    [[ $output == *'--without-recommends'* && $output == *$'\nxz' ]]
+    [[ $output == *'--without-recommends'* && $output == *$'\nxz git-core' ]]
     run bash -c 'command() { if [[ $* == "-v zypper" ]]; then return 1; fi; builtin command "$@"; }; source "$1"; printf "%s\n" "${JAN_APT_INSTALL_OPTIONS[*]}" "${JAN_DISTRO_CLI_PACKAGES[*]}"' _ "$OPT_JAN/setup/common-cli-packages.sh"
     [ "$status" -eq 0 ]
-    [[ $output == *'--no-install-recommends'* && $output == *xz-utils ]]
+    [[ $output == *'--no-install-recommends'* && $output == *'xz-utils git' ]]
 }

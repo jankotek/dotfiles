@@ -42,15 +42,19 @@ _human_home_users() {
 
 # --- Fix 1: home users in render+video ---
 
-@test "every /home/* human user is in the render group" {
+@test "every /home/* human non-lab user is in the render group" {
     while read -r user _; do
+        # Lab accounts keep exactly users+lab (create-lab-users).
+        id -nG "$user" | tr ' ' '\n' | grep -qxF lab && continue
         id -nG "$user" | tr ' ' '\n' | grep -qxF render \
             || { echo "$user not in render" >&2; return 1; }
     done < <(_human_home_users)
 }
 
-@test "every /home/* human user is in the video group" {
+@test "every /home/* human non-lab user is in the video group" {
     while read -r user _; do
+        # Lab accounts keep exactly users+lab (create-lab-users).
+        id -nG "$user" | tr ' ' '\n' | grep -qxF lab && continue
         id -nG "$user" | tr ' ' '\n' | grep -qxF video \
             || { echo "$user not in video" >&2; return 1; }
     done < <(_human_home_users)

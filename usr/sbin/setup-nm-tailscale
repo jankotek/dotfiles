@@ -1,0 +1,51 @@
+#!/bin/bash
+#
+# Keep NetworkManager away from Tailscale's tailscale0 interface.
+#
+# tailscaled owns that interface's addresses, routes and DNS. If NetworkManager
+# also manages it, the two fight over the device and over /etc/resolv.conf,
+# and DNS breaks whenever Tailscale or the uplink changes. A per-device section
+# is used instead of [keyfile] unmanaged-devices, which another drop-in setting
+# the same key would silently replace.
+#
+# Distro-agnostic and idempotent. Does nothing where NetworkManager is absent
+# (systemd-networkd guests match only Type=ether, so they ignore tailscale0).
+
+set -euo pipefail
+
+if (( EUID != 0 )); then
+    echo "Please run as root" >&2
+    exit 1
+fi
+
+readonly CONF=/etc/NetworkManager/conf.d/90-jan-tailscale-unmanaged.conf
+
+if [[ ! -d /etc/NetworkManager ]] && ! command -v NetworkManager >/dev/null 2>&1; then
+    echo "NetworkManager is not installed; nothing to configure"
+    exit 0
+fi
+
+install -d -m 0755 /etc/NetworkManager/conf.d
+cat > "$CONF.new" <<'EOF'
+# Managed by /opt/jan/usr/sbin/setup-nm-tailscale.
+# tailscaled manages tailscale0 itself; NetworkManager must leave it alone.
+[device-jan-tailscale]
+match-device=interface-name:tailscale0
+managed=0
+EOF
+chmod 0644 "$CONF.new"
+mv -f -- "$CONF.new" "$CONF"
+if command -v restorecon >/dev/null 2>&1; then
+    restorecon "$CONF" 2>/dev/null || true
+fi
+
+# A reload rereads conf.d without dropping existing connections, but does not
+# release a device NetworkManager already manages; do that explicitly. The
+# drop-in covers later boots and new tailscale0 devices.
+if systemctl is-active --quiet NetworkManager.service; then
+    nmcli general reload conf
+    if [[ -e /sys/class/net/tailscale0 ]]; then
+        nmcli device set tailscale0 managed no
+    fi
+fi
+echo "NetworkManager ignores tailscale0 ($CONF)"

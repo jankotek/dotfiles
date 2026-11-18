@@ -18,7 +18,7 @@ Description=Clear /tmp folder on boot
 DefaultDependencies=no
 After=local-fs.target
 # Run before tmpfiles recreates boot-time directories such as the
-# pam_namespace instance parents (/tmp/tmp-inst).
+# pam_namespace instance parents.
 Before=systemd-tmpfiles-setup.service shutdown.target
 Conflicts=shutdown.target
 

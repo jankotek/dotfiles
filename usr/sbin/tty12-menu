@@ -30,14 +30,8 @@ while true; do
   echo -e "\e[96m==== MEM FREE ====\e[0m"
   free -h
 
-  echo ""
-  echo -e "\e[96m==== PROCESS CPU ====\e[0m"
-
-ps aux --sort=-%cpu | head -n 6 | awk '{printf "%-8s %-6s %-10s %-10s %-40.40s\n", $1, $2, $3, $4, $11}'
-
-  echo ""
-  echo -e "\e[96m==== PROCESS MEM ====\e[0m"
-ps aux --sort=-%mem | head -n 3 | awk '{printf "%-8s %-6s %-10s %-10s %-40.40s\n", $1, $2, $3, $4, $11}'
+  # No process list: this runs as root on an unauthenticated console and
+  # would show every user's processes, which hidepid hides from lab users.
 
   echo ""
   echo -e "\e[96m==== IP ====\e[0m"

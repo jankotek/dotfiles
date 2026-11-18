@@ -43,8 +43,8 @@ load ../helpers
     assert_command nano
 }
 
-@test "ncdu is installed" {
-    assert_command ncdu
+@test "gdu is installed" {
+    assert_command gdu
 }
 
 @test "rg (ripgrep) is installed" {
@@ -73,6 +73,19 @@ load ../helpers
 
 @test "telnet is installed" {
     assert_command telnet
+}
+
+@test "bwrap and socat are installed for the Claude Code sandbox" {
+    assert_command bwrap
+    assert_command socat
+}
+
+@test "btop is installed" {
+    assert_command btop
+}
+
+@test "hashdeep is installed" {
+    assert_command hashdeep
 }
 
 @test "jdupes is installed" {

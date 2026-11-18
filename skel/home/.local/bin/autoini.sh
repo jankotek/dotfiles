@@ -15,7 +15,6 @@ xfconf-query -c xfce4-session -np '/shutdown/ShowHybridSleep' -t 'bool' -s 'fals
 
 xfconf-query -c xfce4-session -np '/backdrop/screen0/xinerama-stretch' -t 'bool' -s 'true'
 
-xdg-settings set default-web-browser browser-helper.desktop
 
 
 # Trust desktop shortcuts (prevents XFCE "untrusted launcher" dialog)
@@ -26,4 +25,5 @@ for f in ~/desk/*.desktop; do
     gio set "$f" metadata::xfce-exe-checksum "$checksum" 2>/dev/null || true
 done
 
-rm -rf -- "$HOME/Desktop"
+# Only the empty legacy directory; ~/desk is the XDG desktop.
+rmdir -- "$HOME/Desktop" 2>/dev/null || true

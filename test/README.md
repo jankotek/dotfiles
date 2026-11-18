@@ -27,7 +27,7 @@ or undefinition fails.
 
 | File | What it checks |
 |------|---------------|
-| `cli.bats` | Common CLI tools: git, fzf, curl, aria2c, mc, htop, fish, nano, ncdu, rg, starship, Fresh Editor, iotop, powertop, pwgen, telnet, jdupes, just, bats, zim, JetBrains Mono font |
+| `cli.bats` | Common CLI tools: git, fzf, curl, aria2c, mc, htop, fish, nano, gdu, rg, starship, Fresh Editor, iotop, powertop, pwgen, telnet, jdupes, just, bats, zim, JetBrains Mono font |
 | `optjan.bats` | `/opt/jan` directory structure, key scripts exist in repo |
 | `kernel-tweaks.bats` | zswap enabled with lzo compression; IPv6 available without the legacy boot-time ban |
 
@@ -49,7 +49,7 @@ or undefinition fails.
 | `agents.bats` | Running inside VM, spice-vdagent installed + service enabled + process running as jan, spice-vdagentd running, qemu-guest-agent installed + enabled |
 | `system.bats` | /opt/jan/usr symlinked into /usr/local, core GUI tools installed, home owned by jan with 0700, automatic APT updates disabled, unwanted packages removed, tty11-root enabled |
 | `network.bats` | Portable VM networking: DHCP configuration with a live IPv4 address/default route, working DNS through systemd-resolved, and NetworkManager removed/masked |
-| `provisioned-home.bats` | Canonical skeleton applied to the detected primary VM user with correct ownership, including real `~/.agents/skills`, `~/.claude/skills`, `~/.grok/skills`, and `~/.pi/agent/skills` directories of per-skill links to `/opt/jan/agent/skills/<name>` |
+| `provisioned-home.bats` | Canonical skeleton applied to the detected primary VM user with correct ownership, including real `~/.agents/skills`, `~/.claude/skills`, and `~/.pi/agent/skills` directories of per-skill links to `/opt/jan/agent/skills/<name>` |
 
 ### utils/ — fixture checks and manual integration tests
 
@@ -73,17 +73,16 @@ CI category, and CI selects files by that tag:
 | `vm-tmux-live.bats` | Opt-in disposable qdistro overlay VM: QGA-anchored SSH trust, guest tmux handoff, pause/resume, managed save/start, and wrong-host rejection |
 | `browser-vm.bats` | Offline fixtures for shared `/opt` Chrome and Brave Origin desktop/PATH integration, including absent-browser no-op behavior |
 | `model-presets.bats` | Offline checks for caller-relative model downloads, Qwen generation/embedding presets, slot sizing, and Muse BF16 KV cache |
-| `update-opt.bats` | Downloads Herdr, Mjolnir, Codex, Grok, Pi, Claude Code, Obsidian, and Fresh Editor into temporary `JAN_OPT` trees; verifies native binaries, publisher checksums, version tracking, and idempotent re-runs (network-heavy) |
-| `update-opt-all.bats` | Runs the complete default `optupdate` installation and verifies every expected executable, including the complete Mjolnir bundle and all Corretto JDKs (CI-only; very network-heavy) |
+| `update-opt.bats` | Downloads Herdr, Codex, Pi, Claude Code, Obsidian, and Fresh Editor into temporary `JAN_OPT` trees; verifies native binaries, publisher checksums, version tracking, the sandboxed Obsidian launcher, and idempotent re-runs (network-heavy) |
+| `update-opt-all.bats` | Runs the complete default `optupdate` installation and verifies every expected executable, including all Corretto JDKs (CI-only; very network-heavy) |
 | `update-opt-idea-upgrade.bats` | Uses a tiny offline fixture to verify upgrade from legacy Community IDEA, shared JetBrains language/build plugins, independent compatible plugin updates, idempotence, missing-plugin repair, and preservation after checksum, plugin, or activation failure |
-| `update-opt-mjolnir.bats` | Uses a tiny offline tar.gz fixture to verify the complete Mjolnir bundle, checksum/version tracking, idempotence, and repair of missing workers |
 | `utilities.bats` | Fixture checks for utility help, dotfile dry-runs, missing-user guidance, atomic verified downloads, vm-list, pod-doctor, sshd-audit, opt-status, and clean-check reports |
 | `repo-policy.bats` | Fast, fixture-only checks for canonical dotfiles, error traps, download policy, and provisioning safety limits |
 | `pod-subid-allocation.bats` | Fixture-only unit tests for non-overlapping subordinate UID/GID allocation; does not require root |
-| `pod-security.bats` | Creates a temporary pod user via `pod-setup`, verifies subordinate-ID preservation and matching UID/GID ranges plus all security hardening layers (nologin shell, locked password, nogroup, 0700 home, sudo denied, cron denied, filesystem ACLs, podman configs, linger, cgroup delegation, sysctl port restriction), then deletes everything |
+| `pod-security.bats` | Creates a temporary pod user via `pod-setup`, verifies subordinate-ID preservation and matching UID/GID ranges plus all security hardening layers (nologin shell, locked password, nogroup, 0700 home, sudo denied, cron denied, filesystem ACLs, podman configs, linger, cgroup delegation, sysctl port restriction), then reruns it against symlinks the pod user planted and an edited Quadlet file, then deletes everything |
 | `laptop-power.bats` | Fixture sysfs trees and a stubbed `systemctl` for lid/AC CPU limits, per-user quotas, low-battery suspend, frequency readback, locking, and installer hooks |
 | `ac-no-suspend.bats` | Fixture config dirs for `setup-ac-no-suspend` (logind drop-in, merging PowerDevil AC defaults into an existing `/etc/xdg/powerdevilrc` across KConfig syntax variants) and a stubbed `kwriteconfig6`/`systemctl` for the per-user `ac-no-suspend` |
-| `lab-hardening.bats` | Fixture `/etc` tree and vendor PAM dir for `setup-lab-hardening`: private `/tmp` and `/var/tmp` via pam_namespace (lab sessions required, others optional), pam-config `common-session` wrapping, `systemd-user` coverage, lab slice memory/CPU/task caps, logind kill on logout, the loopback nftables rule (DNS and ports 10000+ allowed), and idempotent cron/at deny |
+| `lab-hardening.bats` | Fixture `/etc` tree and vendor PAM dir for `setup-lab-hardening`: private `/tmp` and `/var/tmp` via pam_namespace (lab sessions required, others optional), pam-config `common-session` wrapping, `systemd-user` coverage, lab slice memory/CPU/task caps, removal of the old logind kill-on-logout drop-in, the loopback nftables rule (DNS and ports 10000+ allowed, subordinate UIDs included, tailscale0 blocked, atomic reload), and idempotent cron/at deny |
 | `lab-hardening-live.bats` | Disposable Tumbleweed guest: real SSH/PAM and systemd user sessions, failed isolation rejecting login, provisioning twice, firewall connections, resource caps, and boot ordering after reboot. Run with `LAB_TEST_BASE=/path/from/vm-image-build.qcow2`; removes its VM and disk, retaining logs beside the base image |
 | `proc-hidepid.bats` | Fixture unit dir and stubbed `getent` for `setup-proc-hidepid`: which accounts keep the full process view (interactive, non-lab), the boot-time `hidepid=invisible` remount, and `proc` drop-ins for logind, polkit, rtkit, NetworkManager, and D-Bus |
 | `kernel-zbook-build.bats` | CLI checks only: help through the deployment symlink, argument rejection, and the root requirement; never builds a kernel |

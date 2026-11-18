@@ -8,3 +8,7 @@
 # Python utility bytecode
 __pycache__/
 *.py[cod]
+
+# Ad-hoc review output belongs outside the repository
+/*-review.md
+/*-review.log

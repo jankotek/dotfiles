@@ -49,24 +49,9 @@ set_grub_video_parameter() {
     replace_grub_assignment "$file" GRUB_CMDLINE_LINUX_DEFAULT "${output[*]}"
 }
 
-if [[ -f /etc/default/grub ]]; then
-    changed=0
-    replace_grub_assignment /etc/default/grub GRUB_GFXMODE "$RESOLUTION,auto" && changed=1
-    replace_grub_assignment /etc/default/grub GRUB_GFXPAYLOAD_LINUX "$RESOLUTION" && changed=1
-    set_grub_video_parameter /etc/default/grub && changed=1
-    if (( changed )); then
-        if command -v update-grub >/dev/null 2>&1; then
-            update-grub
-        elif command -v grub2-mkconfig >/dev/null 2>&1; then
-            grub2-mkconfig -o /boot/grub2/grub.cfg
-        else
-            echo "ERROR: no GRUB configuration generator was found" >&2
-            exit 1
-        fi
-    else
-        echo "Already configured in /etc/default/grub"
-    fi
-elif [[ -f /etc/kernel/cmdline ]]; then
+# Same precedence as setup-kernel-tweaks: grub2-bls and systemd-boot take the
+# command line from /etc/kernel/cmdline even when /etc/default/grub exists.
+if [[ -f /etc/kernel/cmdline ]]; then
     # systemd-boot has no GRUB framebuffer handoff.  Use the kernel's generic
     # framebuffer mode request, replacing any prior unqualified video= value.
     read -r -a params < /etc/kernel/cmdline
@@ -90,6 +75,23 @@ elif [[ -f /etc/kernel/cmdline ]]; then
         sdbootutil update-all-entries
     else
         echo "Already configured in /etc/kernel/cmdline"
+    fi
+elif [[ -f /etc/default/grub ]]; then
+    changed=0
+    replace_grub_assignment /etc/default/grub GRUB_GFXMODE "$RESOLUTION,auto" && changed=1
+    replace_grub_assignment /etc/default/grub GRUB_GFXPAYLOAD_LINUX "$RESOLUTION" && changed=1
+    set_grub_video_parameter /etc/default/grub && changed=1
+    if (( changed )); then
+        if command -v update-grub >/dev/null 2>&1; then
+            update-grub
+        elif command -v grub2-mkconfig >/dev/null 2>&1; then
+            grub2-mkconfig -o /boot/grub2/grub.cfg
+        else
+            echo "ERROR: no GRUB configuration generator was found" >&2
+            exit 1
+        fi
+    else
+        echo "Already configured in /etc/default/grub"
     fi
 else
     echo "ERROR: no supported bootloader configuration was found" >&2

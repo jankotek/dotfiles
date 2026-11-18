@@ -35,7 +35,6 @@ primary_vm_user() {
     for dir in \
         "$home/.agents/skills" \
         "$home/.claude/skills" \
-        "$home/.grok/skills" \
         "$home/.pi/agent/skills"; do
         [[ -d $dir && ! -L $dir ]]
         [[ $(readlink -- "$dir/host-lab-vm-cli") == /opt/jan/agent/skills/host-lab-vm-cli ]]

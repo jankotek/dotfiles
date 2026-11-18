@@ -433,8 +433,37 @@ CONTAINER_CONF_DIR="${HOME_DIR}/.config/containers"
 # This avoids any need for /tmp or /var/tmp access.
 POD_TMP="${HOME_DIR}/.tmp"
 
-install -d -o "$NAME" -g nogroup -m 0700 \
-    "$HOME_DIR" \
+# Everything below $HOME_DIR belongs to the pod account, which may have
+# replaced any entry with a symlink since the last run. Root therefore only
+# handles $HOME_DIR itself (its parent /var/pod is root's and 0711); every
+# path inside it is created and written with the pod account's identity, so
+# a planted link can only redirect writes to files that account could
+# already change.
+as_pod() {
+    setpriv --reuid="$NAME" --regid=nogroup --clear-groups --reset-env -- "$@"
+}
+
+# pod_write MODE PATH: replace PATH with stdin, as the pod account. The old
+# entry is unlinked first so a symlink is replaced instead of written through.
+pod_write() {
+    as_pod sh -c 'umask 077; rm -f -- "$2"; cat > "$2"; chmod "$1" "$2"' \
+        _ "$1" "$2"
+}
+
+# pod_write_new MODE PATH: as pod_write, but keep an existing PATH. Used for
+# the Quadlet units, which operators edit after the first run.
+pod_write_new() {
+    as_pod sh -c '
+        if [ -e "$2" ] || [ -L "$2" ]; then
+            cat >/dev/null
+            echo "    keeping existing $2"
+            exit 0
+        fi
+        umask 077; cat > "$2"; chmod "$1" "$2"' _ "$1" "$2"
+}
+
+install -d -o "$NAME" -g nogroup -m 0700 "$HOME_DIR"
+as_pod install -d -m 0700 \
     "${HOME_DIR}/.config" \
     "${HOME_DIR}/.config/containers" \
     "$QUADLET_DIR" \
@@ -447,11 +476,11 @@ install -d -o "$NAME" -g nogroup -m 0700 \
     "$POD_TMP"
 
 # Empty dir used to mask /home and /root inside containers.
-install -d -o "$NAME" -g nogroup -m 0000 "${HOME_DIR}/.empty"
+as_pod install -d -m 0000 "${HOME_DIR}/.empty"
 
 # ---------- containers.conf — hardened defaults ----------
 
-cat > "${CONTAINER_CONF_DIR}/containers.conf" <<CONF
+pod_write 0600 "${CONTAINER_CONF_DIR}/containers.conf" <<CONF
 [containers]
 # Drop all capabilities; add back only what individual containers need.
 default_capabilities = []
@@ -481,11 +510,10 @@ no_new_privileges = true
 env = ["TMPDIR=${POD_TMP}"]
 CONF
 
-chown "$NAME":nogroup "${CONTAINER_CONF_DIR}/containers.conf"
 
 # ---------- storage.conf — explicit paths ----------
 
-cat > "${CONTAINER_CONF_DIR}/storage.conf" <<CONF
+pod_write 0600 "${CONTAINER_CONF_DIR}/storage.conf" <<CONF
 [storage]
 driver = "overlay"
 graphroot = "${HOME_DIR}/.local/share/containers/storage"
@@ -495,11 +523,10 @@ runroot = "/run/user/${USER_UID}/containers"
 mount_program = "/usr/bin/fuse-overlayfs"
 CONF
 
-chown "$NAME":nogroup "${CONTAINER_CONF_DIR}/storage.conf"
 
 # ---------- registries.conf ----------
 
-cat > "${CONTAINER_CONF_DIR}/registries.conf" <<'CONF'
+pod_write 0600 "${CONTAINER_CONF_DIR}/registries.conf" <<'CONF'
 unqualified-search-registries = ["docker.io"]
 
 [[registry]]
@@ -507,13 +534,12 @@ prefix = "docker.io"
 location = "docker.io"
 CONF
 
-chown "$NAME":nogroup "${CONTAINER_CONF_DIR}/registries.conf"
 
 # ---------- Quadlet files ----------
 
 if [[ "$QUADLET_POD" == true ]]; then
     # Podman 5.x+ — native .pod file support.
-    cat > "${QUADLET_DIR}/${NAME}.pod" <<EOF
+    pod_write_new 0600 "${QUADLET_DIR}/${NAME}.pod" <<EOF
 [Unit]
 Description=Pod ${NAME}
 Wants=network-online.target
@@ -541,7 +567,7 @@ else
     SERVICE_NAME="${NAME}-app.service"
 fi
 
-cat > "${QUADLET_DIR}/${NAME}-app.container" <<EOF
+pod_write_new 0600 "${QUADLET_DIR}/${NAME}-app.container" <<EOF
 [Unit]
 Description=${NAME} application container
 Wants=network-online.target
@@ -606,8 +632,6 @@ Volume=${HOME_DIR}/data:/data:Z
 WantedBy=default.target
 EOF
 
-chown -R "$NAME":nogroup "$QUADLET_DIR"
-
 # ---------- symlinks at top level for convenience ----------
 # Everything you'd ever want to edit is one ls away in /var/pod/<name>/.
 
@@ -615,33 +639,24 @@ echo "==> Creating convenience symlinks"
 
 # Quadlet definitions (the main config you'll edit)
 if [[ "$QUADLET_POD" == true ]]; then
-    ln -sfn "${QUADLET_DIR}/${NAME}.pod"  "${HOME_DIR}/pod.conf"
-    chown -h "$NAME":nogroup "${HOME_DIR}/pod.conf"
+    as_pod ln -sfn "${QUADLET_DIR}/${NAME}.pod"  "${HOME_DIR}/pod.conf"
 fi
-ln -sfn "${QUADLET_DIR}/${NAME}-app.container"  "${HOME_DIR}/app.container"
+as_pod ln -sfn "${QUADLET_DIR}/${NAME}-app.container"  "${HOME_DIR}/app.container"
 
 # Podman engine / storage / registry config
-ln -sfn "${CONTAINER_CONF_DIR}/containers.conf"  "${HOME_DIR}/containers.conf"
-ln -sfn "${CONTAINER_CONF_DIR}/storage.conf"     "${HOME_DIR}/storage.conf"
-ln -sfn "${CONTAINER_CONF_DIR}/registries.conf"  "${HOME_DIR}/registries.conf"
+as_pod ln -sfn "${CONTAINER_CONF_DIR}/containers.conf"  "${HOME_DIR}/containers.conf"
+as_pod ln -sfn "${CONTAINER_CONF_DIR}/storage.conf"     "${HOME_DIR}/storage.conf"
+as_pod ln -sfn "${CONTAINER_CONF_DIR}/registries.conf"  "${HOME_DIR}/registries.conf"
 
 # Environment vars injected into the user systemd session
-ln -sfn "${HOME_DIR}/.config/environment.d/pod.conf" "${HOME_DIR}/environment.conf"
+as_pod ln -sfn "${HOME_DIR}/.config/environment.d/pod.conf" "${HOME_DIR}/environment.conf"
 
 # Record the service name for helper scripts.
-echo "$SERVICE_NAME" > "${HOME_DIR}/.service-name"
-chown "$NAME":nogroup "${HOME_DIR}/.service-name"
-
-chown -h "$NAME":nogroup \
-    "${HOME_DIR}/app.container" \
-    "${HOME_DIR}/containers.conf" \
-    "${HOME_DIR}/storage.conf" \
-    "${HOME_DIR}/registries.conf" \
-    "${HOME_DIR}/environment.conf"
+echo "$SERVICE_NAME" | pod_write 0600 "${HOME_DIR}/.service-name"
 
 # ---------- helper scripts ----------
 
-cat > "${HOME_DIR}/bin/upgrade" <<'SCRIPT'
+pod_write 0700 "${HOME_DIR}/bin/upgrade" <<'SCRIPT'
 #!/usr/bin/env bash
 # Pull latest images for all containers in the pod, then restart.
 set -euo pipefail
@@ -661,7 +676,7 @@ echo "==> Done."
 podman ps -a --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"
 SCRIPT
 
-cat > "${HOME_DIR}/bin/recreate" <<'SCRIPT'
+pod_write 0700 "${HOME_DIR}/bin/recreate" <<'SCRIPT'
 #!/usr/bin/env bash
 # Reload Quadlet files and restart the service.
 set -euo pipefail
@@ -676,7 +691,7 @@ echo "==> Status:"
 systemctl --user status "$SVC" --no-pager || true
 SCRIPT
 
-cat > "${HOME_DIR}/bin/status" <<'SCRIPT'
+pod_write 0700 "${HOME_DIR}/bin/status" <<'SCRIPT'
 #!/usr/bin/env bash
 # Show pod/container and service status.
 set -euo pipefail
@@ -695,21 +710,16 @@ echo "=== Service ==="
 systemctl --user status "$SVC" --no-pager 2>/dev/null || true
 SCRIPT
 
-chmod 0700 "${HOME_DIR}/bin/"*
-chown "$NAME":nogroup "${HOME_DIR}/bin/"*
-
 # ---------- environment file for the user session ----------
 # This ensures TMPDIR and XDG vars are set whenever the user's
 # systemd instance starts (including at boot via linger).
 
-install -d -o "$NAME" -g nogroup -m 0700 "${HOME_DIR}/.config/environment.d"
+as_pod install -d -m 0700 "${HOME_DIR}/.config/environment.d"
 
-cat > "${HOME_DIR}/.config/environment.d/pod.conf" <<EOF
+pod_write 0600 "${HOME_DIR}/.config/environment.d/pod.conf" <<EOF
 TMPDIR=${POD_TMP}
 XDG_RUNTIME_DIR=/run/user/${USER_UID}
 EOF
-
-chown "$NAME":nogroup "${HOME_DIR}/.config/environment.d/pod.conf"
 
 # ---------- sysctl: raise unprivileged port floor to 1024 for this user ----------
 # This is a kernel-level guarantee — even if someone manages to add
@@ -879,10 +889,13 @@ if [[ "$MAC" == "selinux" ]]; then
     echo "    If you hit denials: ausearch -m AVC -ts recent"
 fi
 
-# ---------- tmpfiles.d — ensure /run/user/<UID> exists at boot ----------
+# ---------- tmpfiles.d — boot-time state ----------
+# /run/user/<UID> for the lingering user manager, and the /tmp deny ACL set
+# below: /tmp is a tmpfs, so that ACL is otherwise gone after a reboot.
 
 cat > "/etc/tmpfiles.d/podman-${NAME}.conf" <<EOF
 d /run/user/${USER_UID} 0700 ${NAME} nogroup -
+a+ /tmp - - - - u:${NAME}:---
 EOF
 
 install -d -o "$NAME" -g nogroup -m 0700 "/run/user/${USER_UID}" 2>/dev/null || true
@@ -911,10 +924,10 @@ done
 # ---------- symlinks to system-level config (read-only for the user) ----------
 
 # These are owned by root but visible from the home dir for easy discovery.
-ln -sfn "/etc/tmpfiles.d/podman-${NAME}.conf"  "${HOME_DIR}/tmpfiles.conf"
-ln -sfn "/etc/sysctl.d/90-podman-${NAME}.conf"  "${HOME_DIR}/sysctl.conf"
+as_pod ln -sfn "/etc/tmpfiles.d/podman-${NAME}.conf"  "${HOME_DIR}/tmpfiles.conf"
+as_pod ln -sfn "/etc/sysctl.d/90-podman-${NAME}.conf"  "${HOME_DIR}/sysctl.conf"
 if [[ "$MAC" == "apparmor" ]]; then
-    ln -sfn "/etc/apparmor.d/podman-${NAME}"     "${HOME_DIR}/apparmor.conf"
+    as_pod ln -sfn "/etc/apparmor.d/podman-${NAME}"     "${HOME_DIR}/apparmor.conf"
 fi
 
 # ---------- enable the pod service ----------
@@ -930,8 +943,10 @@ run_as_user() {
         bash -c "cd ${HOME_DIR} && $1"
 }
 
-sleep 1
 systemd-tmpfiles --create "/etc/tmpfiles.d/podman-${NAME}.conf" 2>/dev/null || true
+# Linger starts the user manager asynchronously; start it here so its bus
+# exists before the systemctl --user calls below.
+systemctl start "user@${USER_UID}.service"
 
 run_as_user "systemctl --user daemon-reload"
 run_as_user "systemctl --user enable --now ${SERVICE_NAME}" || \
@@ -947,7 +962,7 @@ cat <<EOF
 
   User:     ${NAME}  (uid ${USER_UID}, nologin, ssh=denied, cron=denied)
   Home:     ${HOME_DIR}/
-  Ports:    >= 1024 only (sysctl + AppArmor + no NET_BIND_SERVICE)
+  Ports:    >= 1024 only (sysctl + no NET_BIND_SERVICE)
 
   Config files at top level of ${HOME_DIR}/:
 

@@ -3,6 +3,9 @@
 # Verify archive upgrades preserve working installs when a later step fails.
 
 setup() {
+    # As root, optupdate re-execs with a clean environment and would drop the
+    # PATH stubs (and create a real system user); these fixtures are unprivileged.
+    (( EUID != 0 )) || skip "optupdate fixtures must run unprivileged"
     export JAN_OPT="$BATS_TEST_TMPDIR/opt"
     export FIXTURE_DIR="$BATS_TEST_TMPDIR/fixtures"
     export FIXTURE_BIN="$BATS_TEST_TMPDIR/bin"
@@ -21,6 +24,12 @@ for tool, version, binary, suffix in (
         path = tree / 'bin' / name
         path.write_text(f'#!/bin/sh\necho new-{tool}\n')
         path.chmod(0o755)
+    # Hostile permissions that must never survive installation.
+    (tree / 'lib').mkdir()
+    (tree / 'lib').chmod(0o2777)
+    for name, mode in (('setuid-helper', 0o4755), ('world-writable', 0o666)):
+        (tree / 'lib' / name).write_text('x\n')
+        (tree / 'lib' / name).chmod(mode)
     archive = root / (tool + suffix)
     if suffix == '.zip':
         with zipfile.ZipFile(archive, 'w') as bundle:
@@ -155,4 +164,76 @@ assert_old_preserved() {
     [[ $status -ne 0 ]]
     [[ $output == *'Unknown tool: pgadmin'* ]]
     [[ ! -e $FIXTURE_DIR/downloads ]]
+}
+
+@test "archive installs carry no setuid, setgid, sticky or group/other-writable bits" {
+    local tool privileged
+    for tool in gradle maven ffmpeg; do
+        update_tool "$tool"
+        [[ $status -eq 0 ]]
+        [[ -f $JAN_OPT/$tool/lib/setuid-helper ]]
+        privileged=$(find "$JAN_OPT/$tool" -perm /7022 ! -type l)
+        [[ -z $privileged ]] || { echo "$privileged" >&2; return 1; }
+    done
+}
+
+@test "the final sweep strips setuid bits left by older installs" {
+    mkdir -p "$JAN_OPT/obsidian"
+    printf 'x\n' > "$JAN_OPT/obsidian/chrome-sandbox"
+    chmod 4755 "$JAN_OPT/obsidian/chrome-sandbox"
+    mkdir -p "$JAN_OPT/vendor"
+    printf 'x\n' > "$JAN_OPT/vendor/chrome-sandbox"
+    chmod 4755 "$JAN_OPT/vendor/chrome-sandbox"
+    update_tool maven
+    [[ $status -eq 0 ]]
+    [[ $output == *"Removing setuid/setgid bit: $JAN_OPT/obsidian/chrome-sandbox"* ]]
+    [[ $(stat -c %a "$JAN_OPT/obsidian/chrome-sandbox") == 755 ]]
+    # Software optupdate does not manage keeps its mode.
+    [[ $(stat -c %a "$JAN_OPT/vendor/chrome-sandbox") == 4755 ]]
+}
+
+@test "Grok is no longer an optupdate download and old copies are removed" {
+    mkdir -p "$JAN_OPT/bin" "$JAN_OPT/.versions"
+    printf '#!/bin/sh\n' > "$JAN_OPT/bin/grok"
+    printf '1.0.0\n' > "$JAN_OPT/.versions/grok"
+    printf '%064d\n' 0 > "$JAN_OPT/.versions/grok.sha256"
+    update_tool grok
+    [[ $status -ne 0 ]]
+    [[ $output == *'Unknown tool: grok'* ]]
+    update_tool maven
+    [[ $status -eq 0 ]]
+    [[ $output == *'Removed the retired Grok CLI'* ]]
+    [[ ! -e $JAN_OPT/bin/grok && ! -e $JAN_OPT/.versions/grok && ! -e $JAN_OPT/.versions/grok.sha256 ]]
+}
+
+@test "archives containing a FIFO are refused and the old install is kept" {
+    seed_old maven
+    python3 - "$FIXTURE_DIR" <<'PY2'
+import hashlib, pathlib, sys, tarfile
+root = pathlib.Path(sys.argv[1])
+archive = root / 'maven.tar.gz'
+with tarfile.open(archive, 'w:gz') as bundle:
+    bundle.add(root / 'maven-3.9.11', arcname='maven-3.9.11')
+    fifo = tarfile.TarInfo('maven-3.9.11/lib/pipe')
+    fifo.type = tarfile.FIFOTYPE
+    bundle.addfile(fifo)
+(root / 'maven.sum').write_text(hashlib.sha512(archive.read_bytes()).hexdigest() + '\n')
+PY2
+    update_tool maven
+    assert_old_preserved maven
+    [[ $output == *'Refusing special file in download'* ]]
+}
+
+@test "Mjolnir is no longer an optupdate download and old installs are removed" {
+    mkdir -p "$JAN_OPT/mjolnir" "$JAN_OPT/bin"
+    printf '#!/bin/sh\n' > "$JAN_OPT/mjolnir/mj"
+    printf '2.70.0\n' > "$JAN_OPT/mjolnir/.version"
+    ln -s "$JAN_OPT/mjolnir/mj" "$JAN_OPT/bin/mj"
+    update_tool mjolnir
+    [[ $status -ne 0 ]]
+    [[ $output == *'Unknown tool: mjolnir'* ]]
+    update_tool maven
+    [[ $status -eq 0 ]]
+    [[ $output == *'Removed the retired Mjolnir bundle'* ]]
+    [[ ! -e $JAN_OPT/mjolnir && ! -L $JAN_OPT/bin/mj ]]
 }

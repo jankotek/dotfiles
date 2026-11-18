@@ -16,14 +16,13 @@ Personal dotfiles and system provisioning repo. Checked out at `/opt/jan` on tar
 | `usr/sbin/` | Admin scripts (run as root) | Symlinked into `/usr/local/sbin` |
 | `usr/share/` | Fonts, icons, themes, cursors | Symlinked into `/usr/local/share` |
 | `dist/` | Bundled theme assets (Sweet, candy-icons, xfwm, cursors) and their `justfile` updater | Referenced by `usr/share/` links |
-| `setup/` | Per-machine provisioning scripts; `setup/host` is a minimal distro-agnostic hardening pass that installs no packages | Idempotent; safe to re-run |
+| `setup/` | Per-machine provisioning scripts; `setup/host` is a minimal distro-agnostic hardening pass that installs no packages apart from the console font, and on a real host refuses a checkout that is not root-owned | Idempotent; safe to re-run |
 | `test/` | Bats suites for host, VM, and fixture checks | See Testing below |
 | `doc/` | Operational notes; `doc/todo/` holds open work | Not deployed |
 | `agent/` | Local GGUF download scripts, `llama-models.ini` presets, `serve-all.sh` | Run by hand on the model machine; downloads are gitignored |
 | `agent/skills/` | Canonical skill packages (repo-specific and general) | Not scanned by harnesses; source of truth |
-| `.agents/skills/` | Codex/Grok/Pi shared discovery | Real directory of per-skill symlinks into `agent/skills/` |
+| `.agents/skills/` | Codex/Pi shared discovery | Real directory of per-skill symlinks into `agent/skills/` |
 | `.claude/skills/` | Claude Code discovery | Same per-skill symlink shape |
-| `.grok/skills/` | Grok native discovery | Same per-skill symlink shape |
 | `.pi/skills/` | Pi project discovery | Same per-skill symlink shape |
 
 
@@ -33,7 +32,7 @@ Personal dotfiles and system provisioning repo. Checked out at `/opt/jan` on tar
 - `skel/home/` is the single source for user dotfiles. Host provisioning only
   installs `/etc/skel`; VM provisioners sync it without `--delete` into their
   disposable VM homes
-- New homes get real `~/.agents/skills`, `~/.claude/skills`, `~/.grok/skills`,
+- New homes get real `~/.agents/skills`, `~/.claude/skills`,
   and `~/.pi/agent/skills` directories of per-skill links to
   `/opt/jan/agent/skills/<name>`
 - PATH commands in `usr/bin/` and `usr/sbin/` use domain-first kebab-case stems
@@ -72,7 +71,7 @@ Tests use [bats-core](https://github.com/bats-core/bats-core): four test directo
 
 | Directory | Runs on | What it verifies |
 |-----------|---------|-----------------|
-| `test/basic/` | everywhere | `/opt/jan` structure, CLI tools (fish, htop, ncdu, aria2c, yq, java, maven, ...), JetBrains Mono and console fonts, kernel tweaks, package safety locks, `/etc/skel` contents |
+| `test/basic/` | everywhere | `/opt/jan` structure, CLI tools (fish, htop, gdu, aria2c, yq, java, maven, ...), JetBrains Mono and console fonts, kernel tweaks, package safety locks, `/etc/skel` contents |
 | `test/host/` | host only | Plasma/Wayland, KDE apps (kdenlive, krita, kdiff3, ...), virt tools, stock tty1 plus managed agetty on tty2-10, GDK_BACKEND=x11 patches, monitor fixes, Strix Halo GPU parameters |
 | `test/vm/` | VM only | Deployed dotfiles (.bashrc, git, user-dirs), XFCE/X11, terminator, rofi, autologin (xfce4-panel + xfdesktop running as jan), spice/qemu agents (installed + running), display resize loop, symlinks into /usr/local, purged packages (snapd, xfce4-terminal), systemd services |
 | `test/utils/` | CI / manual | Fixture tests, network installs, and opt-in destructive integration tests; each file declares its CI category (below) |

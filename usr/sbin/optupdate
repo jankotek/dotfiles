@@ -1,11 +1,61 @@
-#!/bin/bash
+#!/bin/bash -p
 set -e
 set -o pipefail
+
+# As root, never trust the caller's environment (sudo -E, su without -l):
+# variables such as LD_PRELOAD, JAVA_TOOL_OPTIONS, IDEA_VM_OPTIONS, JAVA_HOME,
+# CURL_HOME or HOME would steer root's tools or the IDE it starts. Re-exec once
+# with a fixed PATH, root's own HOME, and a short allow-list. bash -p ignores
+# BASH_ENV and exported functions; the tools below resolve through a fixed PATH.
+# The check is on the environment itself (only allow-listed names, the fixed
+# PATH, root's HOME), so no marker variable can fake a clean start.
+if [ "$EUID" -eq 0 ]; then
+    inherited_path=${PATH-}
+    PATH=/usr/sbin:/usr/bin:/sbin:/bin
+    clean_path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    root_home=$(getent passwd 0 | cut -d: -f6)
+    passed_vars="JAN_OPT GITHUB_API_TOKEN TERM http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY all_proxy ALL_PROXY"
+    environment_clean=1
+    [ "$inherited_path" = "$clean_path" ] || environment_clean=0
+    [ "${HOME-}" = "$root_home" ] && [ "${LANG-}" = C.UTF-8 ] || environment_clean=0
+    while IFS= read -r var; do
+        # bash itself exports PWD, OLDPWD, SHLVL and _.
+        case " PATH HOME LANG PWD OLDPWD SHLVL _ $passed_vars " in
+            *" $var "*) ;;
+            *) environment_clean=0 ;;
+        esac
+    done < <(compgen -e)
+    if [ "$environment_clean" -eq 0 ]; then
+        clean_env=("PATH=$clean_path" "HOME=$root_home" LANG=C.UTF-8)
+        for var in $passed_vars; do
+            [ -z "${!var+x}" ] || clean_env+=("$var=${!var}")
+        done
+        exec /usr/bin/env -i "${clean_env[@]}" /bin/bash -p "$(readlink -f -- "$0")" "$@"
+    fi
+    PATH=$clean_path
+    unset inherited_path clean_path root_home passed_vars environment_clean var
+fi
 
 # GitHub API token (optional, increases rate limit from 60 to 5000 requests/hour)
 GITHUB_API_TOKEN="${GITHUB_API_TOKEN:-}"
 
 BASE_DIR="${JAN_OPT:-/opt}"
+# As root, the destination and every directory above it must be root-owned and
+# not group/other-writable; otherwise its owner could swap entries under root.
+if [ "$EUID" -eq 0 ] && [ -e "$BASE_DIR" ]; then
+    BASE_DIR=$(readlink -f -- "$BASE_DIR")
+    dir=$BASE_DIR
+    while :; do
+        read -r owner mode < <(stat -c '%u %a' -- "$dir")
+        if [ "$owner" != 0 ] || (( 8#$mode & 8#022 )); then
+            echo "✗ Error: $dir must be owned by root and not group/other-writable when running as root"
+            exit 1
+        fi
+        [ "$dir" = / ] && break
+        dir=$(dirname -- "$dir")
+    done
+    unset dir owner mode
+fi
 if [ ! -w "$BASE_DIR" ]; then
     echo "✗ Error: $BASE_DIR is not writeable by current user"
     echo "  Set JAN_OPT to a writeable directory or run with appropriate permissions"
@@ -32,6 +82,7 @@ download_file() {
     local url=$1 output=$2
     if command -v aria2c >/dev/null 2>&1; then
         aria2c \
+            --no-conf=true \
             --allow-overwrite=true \
             --auto-file-renaming=false \
             --continue=true \
@@ -103,15 +154,12 @@ fetch_checksum() {
 }
 
 # verify_file <file> <expected>
-# <expected> is a sha256 hex digest, "sha512:<hex>" for sha512, or "md5:<hex>".
+# <expected> is a sha256 hex digest or "sha512:<hex>" for sha512.
 verify_file() {
     local file=$1 expected=$2 algo=sha256
     if [[ "$expected" == sha512:* ]]; then
         algo=sha512
         expected=${expected#sha512:}
-    elif [[ "$expected" == md5:* ]]; then
-        algo=md5
-        expected=${expected#md5:}
     fi
     expected=${expected,,}
     local actual
@@ -133,6 +181,21 @@ installed_binary_matches() {
     [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || return 1
     actual=$(sha256sum "$file" | awk '{print $1}')
     [ "$actual" = "$expected" ]
+}
+
+# normalize_tree_permissions <dir>
+# Downloads must never install privileged or writable files: strip setuid,
+# setgid and sticky bits (Obsidian's Electron archive ships chrome-sandbox
+# setuid root), drop group/other write, keep everything readable, and refuse
+# device nodes, FIFOs and sockets outright.
+normalize_tree_permissions() {
+    local tree=$1 special
+    special=$(find "$tree" \( -type b -o -type c -o -type p -o -type s \) -print -quit)
+    if [ -n "$special" ]; then
+        echo "✗ Refusing special file in download: $special"
+        return 1
+    fi
+    chmod -R a-s,a-t,u+rwX,go+rX,go-w "$tree"
 }
 
 make_shared_directory() {
@@ -231,6 +294,8 @@ download_and_extract() (
         rm "$temp_dir/archive.tar.gz"
     fi
     rm -rf -- "$temp_dir/.version" "$temp_dir/.installed-sha256"
+    # Normalize before any prepare step runs downloaded code against the tree.
+    normalize_tree_permissions "$temp_dir"
 
     if [ -z "$executable" ] || [ ! -f "$temp_dir/$executable" ]         || [ -L "$temp_dir/$executable" ] || [ ! -s "$temp_dir/$executable" ]; then
         echo "✗ $name archive does not contain expected executable: $executable"
@@ -253,7 +318,7 @@ download_and_extract() (
     if [ -n "$prepare" ]; then
         "$prepare" "$temp_dir" install
     fi
-    chmod -R a-s,a-t,u+rwX,go+rX,go-w "$temp_dir"
+    normalize_tree_permissions "$temp_dir"
     chmod 0755 "$temp_dir" "$temp_dir/$executable"
     sha256sum "$temp_dir/$executable" | awk '{print $1}' > "$temp_dir/.installed-sha256"
     printf '%s\n' "$version" > "$temp_dir/.version"
@@ -365,6 +430,149 @@ for plugin_id in sys.argv[1:]:
 ' "${ids[@]}" <<<"$json"
 }
 
+# The IDE that installs plugins is downloaded code. As root, run it as this
+# dedicated system account, never as root.
+readonly IDEA_PLUGIN_USER=optupdate
+
+ensure_idea_plugin_user() {
+    local entry uid shell home uid_min
+    if entry=$(getent passwd "$IDEA_PLUGIN_USER"); then
+        # Reuse only the dedicated no-login system account; never an existing
+        # login or service account that happens to have this name.
+        IFS=: read -r _ _ uid _ _ home shell <<<"$entry"
+        # openSUSE ships login.defs under /usr/etc; /etc may only override it.
+        uid_min=$(cat /etc/login.defs /usr/etc/login.defs 2>/dev/null \
+            | awk '$1 == "UID_MIN" { print $2; exit }' || true)
+        if (( uid == 0 || uid >= ${uid_min:-1000} )) || [ "$home" != /nonexistent ] \
+            || [[ $shell != */nologin && $shell != /bin/false ]]; then
+            echo "✗ Account $IDEA_PLUGIN_USER exists but is not optupdate's no-login system account"
+            return 1
+        fi
+        return 0
+    fi
+    local nologin
+    nologin=$(command -v nologin || echo /bin/false)
+    useradd --system --user-group --no-create-home --home-dir /nonexistent \
+        --shell "$nologin" --comment "optupdate IntelliJ plugin installer" \
+        "$IDEA_PLUGIN_USER"
+}
+
+# run_idea_plugin_installer <tree> <work> <plugin-id>...
+# Run "idea.sh installPlugins" with an empty environment (a caller's
+# IDEA_VM_OPTIONS, JAVA_HOME and friends would otherwise choose the JVM and its
+# options; only our own options file is passed) and,
+# as root, as IDEA_PLUGIN_USER without privileges: it can read the staged IDE
+# and write only <work>. Root afterwards kills anything it left behind and
+# takes the results over.
+run_idea_plugin_installer() {
+    local tree=$1 work=$2 rc=0 var
+    shift 2
+    mkdir -p "$work/home" "$work/tmp"
+    # The JVM takes user.home from the passwd entry, not $HOME; point it into
+    # the work tree as well. idea.sh appends this file to the IDE's defaults.
+    printf -- '-Duser.home=%s\n-Djava.io.tmpdir=%s\n' "$work/home" "$work/tmp" \
+        > "$work/idea.vmoptions"
+    local -a ide_env=(
+        PATH=/usr/bin:/bin
+        "HOME=$work/home"
+        "TMPDIR=$work/tmp"
+        LANG=C.UTF-8
+        "IDEA_PROPERTIES=$work/idea.properties"
+        "IDEA_VM_OPTIONS=$work/idea.vmoptions"
+    )
+    for var in http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY; do
+        [ -z "${!var+x}" ] || ide_env+=("$var=${!var}")
+    done
+    if [ "$EUID" -ne 0 ]; then
+        /usr/bin/env -i "${ide_env[@]}" "$tree/bin/idea.sh" installPlugins "$@"
+        return
+    fi
+    command -v pgrep >/dev/null && command -v pkill >/dev/null \
+        || { echo "✗ pgrep and pkill (procps) are required"; return 1; }
+    ensure_idea_plugin_user
+    # One installer at a time machine-wide: the cleanup below kills every
+    # process of IDEA_PLUGIN_USER, which must not hit another root run.
+    local lock_fd
+    exec {lock_fd}>/run/lock/optupdate-idea-plugins.lock
+    flock "$lock_fd"
+    # The staging tree is created 0700; the installer must be able to read it.
+    chmod 0755 "$tree"
+    chown -R "$IDEA_PLUGIN_USER:$IDEA_PLUGIN_USER" "$work"
+    if command -v systemd-run >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+        # A transient service: everything it starts is killed with its cgroup
+        # when it exits, it gets a private /tmp, and it can write only <work>
+        # (homes stay readable in case JAN_OPT lives under one). Not --pipe:
+        # SELinux refuses passing a service caller's descriptors to systemd.
+        # The log is streamed while the service runs.
+        # systemd (init_t under SELinux) may append to files in /run but not
+        # to usr_t files in /opt; a fresh root-only directory keeps the
+        # installer from pointing the log elsewhere.
+        local log_dir log tail_pid
+        log_dir=$(mktemp -d /run/optupdate-idea.XXXXXX)
+        log=$log_dir/install.log
+        : > "$log"
+        tail -n +1 -f "$log" &
+        tail_pid=$!
+        systemd-run --quiet --wait --collect --service-type=exec \
+            --uid="$IDEA_PLUGIN_USER" --gid="$IDEA_PLUGIN_USER" \
+            -p NoNewPrivileges=yes -p CapabilityBoundingSet= \
+            -p PrivateTmp=yes -p ProtectSystem=strict -p ProtectHome=read-only \
+            -p "ReadWritePaths=$work" -p RemoveIPC=yes \
+            -p "StandardOutput=append:$log" -p "StandardError=append:$log" \
+            -- /usr/bin/env -i "${ide_env[@]}" "$tree/bin/idea.sh" installPlugins "$@" </dev/null || rc=$?
+        sleep 1
+        kill "$tail_pid" 2>/dev/null || true
+        wait "$tail_pid" 2>/dev/null || true
+        rm -rf -- "$log_dir"
+    else
+        setpriv --reuid="$IDEA_PLUGIN_USER" --regid="$IDEA_PLUGIN_USER" --clear-groups \
+            --no-new-privs --inh-caps=-all --bounding-set=-all \
+            /usr/bin/env -i "${ide_env[@]}" "$tree/bin/idea.sh" installPlugins "$@" || rc=$?
+    fi
+    kill_idea_plugin_user || rc=1
+    # Take the output over before validating it: root-owned and writable by
+    # nobody else, so no other account can change it after the checks.
+    chown -R -P root:root "$work"
+    chmod -R a-s,go-w "$work"
+    exec {lock_fd}>&-
+    return "$rc"
+}
+
+# Nothing may keep running as IDEA_PLUGIN_USER once root takes the results
+# over; repeat until no process is left (a fork can race one pkill pass).
+kill_idea_plugin_user() {
+    local _
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        pgrep -u "$IDEA_PLUGIN_USER" >/dev/null || return 0
+        pkill -KILL -u "$IDEA_PLUGIN_USER" || true
+        sleep 0.2
+    done
+    echo "✗ Processes of $IDEA_PLUGIN_USER survived; not trusting the plugin output"
+    return 1
+}
+
+# Plugin output comes from the unprivileged installer: accept only regular
+# files, directories, and symlinks that stay inside the plugin directory.
+check_idea_plugin_output() {
+    local plugins link target
+    if [ ! -d "$1" ] || [ -L "$1" ]; then
+        echo "✗ JetBrains plugin directory is missing or a symlink: $1"
+        return 1
+    fi
+    plugins=$(readlink -f -- "$1")
+    if [ -n "$(find "$plugins" ! -type f ! -type d ! -type l -print -quit)" ]; then
+        echo "✗ JetBrains plugin output contains a special file"
+        return 1
+    fi
+    while IFS= read -r -d '' link; do
+        target=$(readlink -m -- "$link")
+        case "$target" in
+            "$plugins"/*) ;;
+            *) echo "✗ JetBrains plugin symlink leaves the plugin directory: $link"; return 1 ;;
+        esac
+    done < <(find "$plugins" -type l -print0)
+}
+
 prepare_idea_plugins() {
     local tree=$1 mode=$2 entry
     # plugin_releases is local to install_idea and inherited by this callback.
@@ -397,8 +605,8 @@ idea.system.path=$work/system
 idea.log.path=$work/log
 idea.plugins.path=$work/plugins
 EOF
-    IDEA_PROPERTIES="$work/idea.properties" \
-        "$tree/bin/idea.sh" installPlugins "${ids[@]}"
+    run_idea_plugin_installer "$tree" "$work" "${ids[@]}"
+    check_idea_plugin_output "$work/plugins"
     for entry in "${IDEA_PLUGINS[@]}"; do
         if [ ! -s "$work/plugins/${entry#* }" ]; then
             echo "✗ JetBrains plugin installation is incomplete: ${entry%% *}"
@@ -413,6 +621,13 @@ EOF
         mv -T "$plugin" "$tree/plugins/$(basename "$plugin")"
     done
     rm -rf "$work"
+    if [ "$EUID" -eq 0 ]; then
+        chown -R -P root:root "$tree/plugins"
+        if [ -n "$(find "$tree" ! -user 0 -print -quit)" ]; then
+            echo "✗ IntelliJ IDEA tree contains files not owned by root"
+            return 1
+        fi
+    fi
     # IDEA's prebuilt index lists only the publisher's original bundle. Without
     # it, JetBrains' loader scans plugins/ and discovers our shared additions.
     # https://github.com/JetBrains/intellij-community/blob/master/platform/core-impl/src/com/intellij/ide/plugins/PluginDescriptorLoader.kt
@@ -475,35 +690,6 @@ install_herdr() {
     }
 
     download_single_binary "Herdr" "herdr" "$url" "$version" "$sum"
-}
-
-install_mjolnir() {
-    local release tag version arch file url sum
-    release=$(github_api https://api.github.com/repos/BrokkAi/mjolnir/releases/latest)
-    tag=$(github_release_tag "$release" || true)
-    version=${tag#v}
-
-    case "$(uname -m)" in
-        x86_64|amd64) arch=x86_64 ;;
-        aarch64|arm64) arch=aarch64 ;;
-        *)
-            echo "✗ Mjolnir does not publish a Linux binary for architecture $(uname -m)"
-            return 1
-            ;;
-    esac
-
-    file="brokk-mjolnir-${tag}-${arch}-unknown-linux-gnu.tar.gz"
-    url="https://github.com/BrokkAi/mjolnir/releases/download/${tag}/${file}"
-    sum=$(fetch_checksum "${url}.sha256" "$file")
-    [[ "$tag" == v* && "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+ && "$sum" =~ ^[0-9a-f]{64}$ ]] || {
-        echo "✗ Failed to fetch release/checksum info for Mjolnir"
-        return 1
-    }
-
-    # Keep the complete release bundle together: mj locates its desktop,
-    # voice, and portable target workers alongside its own executable.
-    download_and_extract "Mjolnir" "mjolnir" "$url" "$version" 1 "$sum" "mj" \
-        "mj-desktop mj-voice-worker mj-worker-x86_64-unknown-linux-musl mj-worker-aarch64-unknown-linux-musl"
 }
 
 install_codex() {
@@ -614,56 +800,6 @@ install_claude() {
         "$url" "$version" "$archive_sum" "$binary_sum" "$binary_size"
 }
 
-install_grok() {
-    # Official Grok Build CLI (https://x.ai/cli). Source is open on GitHub
-    # (xai-org/grok-build) but prebuilt binaries are published only via the
-    # x.ai/cli CDN / GCS bucket — no GitHub release assets.
-    local version arch platform url meta md5_b64 md5_hex
-    local base_primary="https://x.ai/cli"
-    local base_fallback="https://storage.googleapis.com/grok-build-public-artifacts/cli"
-
-    version=$(curl -fLsS --max-time 30 "${base_primary}/stable" 2>/dev/null \
-        | tr -d '\r' | head -n1 | tr -d '[:space:]') || version=
-    if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9._]+)?$ ]]; then
-        version=$(curl -fLsS --max-time 30 "${base_fallback}/stable" 2>/dev/null \
-            | tr -d '\r' | head -n1 | tr -d '[:space:]') || version=
-    fi
-    [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9._]+)?$ ]] || {
-        echo "✗ Failed to fetch version for Grok"
-        return 1
-    }
-
-    case "$(uname -m)" in
-        x86_64|amd64) arch=x86_64 ;;
-        aarch64|arm64) arch=aarch64 ;;
-        *)
-            echo "✗ Grok does not publish a Linux binary for architecture $(uname -m)"
-            return 1
-            ;;
-    esac
-
-    platform="linux-${arch}"
-    url="${base_primary}/grok-${version}-${platform}"
-
-    # Publisher ships no separate SHA-256 file; GCS object metadata includes
-    # the object MD5 (same integrity model as the official install.sh which
-    # only smoke-runs --version after download).
-    meta=$(curl -fLsS --max-time 30 \
-        "https://storage.googleapis.com/storage/v1/b/grok-build-public-artifacts/o/cli%2Fgrok-${version}-${platform}" \
-        2>/dev/null) || true
-    md5_b64=$(grep -oP '"md5Hash": "\K[^"]+' <<<"$meta" | head -1)
-    if [ -n "$md5_b64" ]; then
-        md5_hex=$(printf '%s' "$md5_b64" | base64 -d 2>/dev/null | od -An -tx1 | tr -d ' \n')
-    fi
-    [[ "$md5_hex" =~ ^[0-9a-f]{32}$ ]] || {
-        echo "✗ Failed to fetch checksum for Grok"
-        return 1
-    }
-
-    download_single_binary "Grok" "grok" "$url" "$version" "md5:${md5_hex}" \
-        "${base_fallback}/grok-${version}-${platform}"
-}
-
 install_obsidian() {
     # Some Obsidian releases are mobile-only, so the repository's /latest
     # endpoint is not necessarily the latest Linux desktop release.
@@ -695,7 +831,7 @@ install_obsidian() {
     }
 
     download_and_extract "Obsidian" "obsidian" "$url" "$version" 1 "$sum" "obsidian"
-    create_desktop_file "obsidian" "Obsidian" "$BASE_DIR/obsidian/obsidian --no-sandbox" "$BASE_DIR/obsidian/resources/icon.png" "Obsidian Notes"
+    create_desktop_file "obsidian" "Obsidian" "$BASE_DIR/bin/obsidian" "$BASE_DIR/obsidian/resources/icon.png" "Obsidian Notes"
 }
 
 install_fresh() {
@@ -721,7 +857,7 @@ install_fresh() {
         return 1
     }
 
-    download_single_binary "Fresh Editor" "fresh" "$url" "$version" "$sum" "" \
+    download_single_binary "Fresh Editor" "fresh" "$url" "$version" "$sum" \
         "${file%.tar.gz}/fresh"
 }
 
@@ -780,12 +916,16 @@ install_gradle() (
     download_file "$url" "$temp_dir/gradle.zip"
     verify_file "$temp_dir/gradle.zip" "$sum"
     unzip -q "$temp_dir/gradle.zip" -d "$temp_dir"
+    rm -f "$temp_dir/gradle.zip"
+    normalize_tree_permissions "$temp_dir"
 
     [ -x "$temp_dir/gradle-${version}/bin/gradle" ] || {
         echo "✗ Gradle archive does not contain bin/gradle"
         return 1
     }
     printf '%s\n' "$version" > "$temp_dir/gradle-${version}/.version"
+    chmod 0755 "$temp_dir/gradle-${version}"
+    chmod 0644 "$temp_dir/gradle-${version}/.version"
     activate_staged_directory "$temp_dir/gradle-${version}" "$BASE_DIR/gradle" gradle
     echo "✓ Gradle $version installed"
 )
@@ -808,14 +948,14 @@ install_maven() {
     download_and_extract "Maven" "maven" "$url" "$version" 1 "sha512:$sum" "bin/mvn"
 }
 
-# expected is the publisher checksum. fallback_url is used for Grok's mirror.
-# archive_member optionally extracts one file from a .tar.gz into the final
-# binary path; this keeps mostly-static tools such as Fresh as one-file installs.
+# expected is the publisher checksum. archive_member optionally extracts one
+# file from a .tar.gz into the final binary path; this keeps mostly-static
+# tools such as Fresh as one-file installs.
 download_single_binary() (
     set -e
     set -o pipefail
     local name=$1 binary=$2 url=$3 version=$4 expected=${5:-}
-    local fallback_url=${6:-} archive_member=${7:-} used_fallback=0
+    local archive_member=${6:-}
     local version_file="$BASE_DIR/.versions/$binary"
     local digest_file="$BASE_DIR/.versions/$binary.sha256"
     local current_version="" lock_fd temp_file
@@ -835,20 +975,10 @@ download_single_binary() (
     make_shared_directory "$BASE_DIR/.versions"
     temp_file=$(mktemp "$BASE_DIR/bin/.${binary}.staging.XXXXXX")
     trap 'rm -f "$temp_file" "$temp_file.aria2" "$temp_file.extracted"' EXIT
-    if ! download_file "$url" "$temp_file"; then
-        [ -n "$fallback_url" ] || return 1
-        echo "→ Primary download failed; trying publisher fallback"
-        rm -f "$temp_file" "$temp_file.aria2"
-        download_file "$fallback_url" "$temp_file"
-        used_fallback=1
-    fi
-    if [ -n "$expected" ] && ! verify_file "$temp_file" "$expected"; then
-        [ -n "$fallback_url" ] && [ "$used_fallback" -eq 0 ] || return 1
-        echo "→ Primary checksum failed; trying publisher fallback"
-        rm -f "$temp_file" "$temp_file.aria2"
-        download_file "$fallback_url" "$temp_file"
+    download_file "$url" "$temp_file"
+    if [ -n "$expected" ]; then
         verify_file "$temp_file" "$expected"
-    elif [ -z "$expected" ]; then
+    else
         echo "  ⚠ $name: publisher provides no checksum — installing unverified"
     fi
     if [ -n "$archive_member" ]; then
@@ -972,7 +1102,7 @@ install_ffmpeg() {
 }
 
 # Default install set; pass tool names as arguments to install a subset.
-ALL_TOOLS=(idea nushell herdr mjolnir codex grok pi claude obsidian fresh gradle maven
+ALL_TOOLS=(idea nushell herdr codex pi claude obsidian fresh gradle maven
            kubectl kind k9s helm stern skaffold jq yq ffmpeg corretto_all)
 
 if [ $# -gt 0 ]; then
@@ -988,6 +1118,40 @@ for tool in "${TOOLS[@]}"; do
     fi
 done
 
+# Defense in depth: nothing optupdate manages may keep a setuid or setgid bit,
+# including trees installed by older versions. Other /opt software (browser
+# sandboxes from vendor packages) is left alone. Runs before the installs, so a
+# failing tool cannot leave a legacy setuid file behind, and again after them.
+sweep_setuid_bits() {
+    local path privileged
+    local -a managed_paths=()
+    for path in idea nushell codex pi claude obsidian gradle maven k9s helm \
+        stern ffmpeg jdk bin .versions applications; do
+        [ -e "$BASE_DIR/$path" ] && managed_paths+=("$BASE_DIR/$path")
+    done
+    [ "${#managed_paths[@]}" -gt 0 ] || return 0
+    while IFS= read -r -d '' privileged; do
+        echo "⚠ Removing setuid/setgid bit: $privileged"
+        chmod ug-s -- "$privileged"
+    done < <(find "${managed_paths[@]}" -xdev \( -perm -4000 -o -perm -2000 \) ! -type l -print0)
+}
+
+sweep_setuid_bits
+
+# Grok and Mjolnir are no longer managed; remove what older versions installed
+# (only trees and links that carry optupdate's own markers).
+if [ -f "$BASE_DIR/.versions/grok" ]; then
+    rm -f -- "$BASE_DIR/bin/grok" "$BASE_DIR/.versions/grok" "$BASE_DIR/.versions/grok.sha256"
+    echo "→ Removed the retired Grok CLI"
+fi
+if [ -f "$BASE_DIR/mjolnir/.version" ] && [ ! -L "$BASE_DIR/mjolnir" ]; then
+    rm -rf -- "$BASE_DIR/mjolnir"
+    echo "→ Removed the retired Mjolnir bundle"
+fi
+if [ -L "$BASE_DIR/bin/mj" ] && [ "$(readlink -- "$BASE_DIR/bin/mj")" = "$BASE_DIR/mjolnir/mj" ]; then
+    rm -f -- "$BASE_DIR/bin/mj"
+fi
+
 echo "Starting software installation in $BASE_DIR..."
 for tool in "${TOOLS[@]}"; do
     "install_${tool}"
@@ -1002,14 +1166,33 @@ chmod 0755 "$BASE_DIR/bin"
 [ -f "$BASE_DIR/helm/helm" ] && ln -sf "$BASE_DIR/helm/helm" "$BASE_DIR/bin/helm"
 [ -f "$BASE_DIR/stern/stern" ] && ln -sf "$BASE_DIR/stern/stern" "$BASE_DIR/bin/stern"
 [ -f "$BASE_DIR/idea/bin/idea.sh" ] && ln -sf "$BASE_DIR/idea/bin/idea.sh" "$BASE_DIR/bin/idea"
-[ -f "$BASE_DIR/obsidian/obsidian" ] && ln -sf "$BASE_DIR/obsidian/obsidian" "$BASE_DIR/bin/obsidian"
+if [ -f "$BASE_DIR/obsidian/obsidian" ]; then
+    # The setuid bit on Electron's chrome-sandbox helper is stripped, so
+    # Obsidian sandboxes itself with unprivileged user namespaces. Ubuntu's
+    # AppArmor denies those to unconfined programs; only there does the
+    # launcher fall back to --no-sandbox. Decided at run time because VMs may
+    # share this /opt with a host running a different distribution.
+    obsidian_bin=$(printf '%q' "$BASE_DIR/obsidian/obsidian")
+    rm -f -- "$BASE_DIR/bin/obsidian.new"
+    cat > "$BASE_DIR/bin/obsidian.new" <<EOF
+#!/bin/sh
+# Generated by optupdate.
+if [ "\$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null)" = 1 ]; then
+    exec $obsidian_bin --no-sandbox "\$@"
+fi
+exec $obsidian_bin "\$@"
+EOF
+    chmod 0755 "$BASE_DIR/bin/obsidian.new"
+    mv -f -- "$BASE_DIR/bin/obsidian.new" "$BASE_DIR/bin/obsidian"
+fi
 [ -f "$BASE_DIR/ffmpeg/bin/ffmpeg" ] && ln -sf "$BASE_DIR/ffmpeg/bin/ffmpeg" "$BASE_DIR/bin/ffmpeg"
 [ -f "$BASE_DIR/ffmpeg/bin/ffplay" ] && ln -sf "$BASE_DIR/ffmpeg/bin/ffplay" "$BASE_DIR/bin/ffplay"
 [ -f "$BASE_DIR/ffmpeg/bin/ffprobe" ] && ln -sf "$BASE_DIR/ffmpeg/bin/ffprobe" "$BASE_DIR/bin/ffprobe"
 [ -f "$BASE_DIR/codex/bin/codex" ] && ln -sf "$BASE_DIR/codex/bin/codex" "$BASE_DIR/bin/codex"
 [ -f "$BASE_DIR/pi/pi" ] && ln -sf "$BASE_DIR/pi/pi" "$BASE_DIR/bin/pi"
 [ -f "$BASE_DIR/claude/claude" ] && ln -sf "$BASE_DIR/claude/claude" "$BASE_DIR/bin/claude"
-[ -f "$BASE_DIR/mjolnir/mj" ] && ln -sf "$BASE_DIR/mjolnir/mj" "$BASE_DIR/bin/mj"
+
+sweep_setuid_bits
 
 cat > "$BASE_DIR/env.sh" <<EOF
 # Generated by optupdate

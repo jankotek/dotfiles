@@ -54,6 +54,7 @@ EXTRA_FS=$(cat <<EOF
       <driver type='virtiofs'/>
       <source dir='${OPT_JAN}/'/>
       <target dir='opt-jan'/>
+      <readonly/>
     </filesystem>
 EOF
 )

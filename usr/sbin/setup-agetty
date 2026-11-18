@@ -24,6 +24,24 @@ if [[ ! -d /run/systemd/system ]]; then
     exit 1
 fi
 
+# True when a PAM service's session stack reaches pam_systemd.so, following
+# include/substack lines (setup-lab-hardening turns common-session into an
+# include of pam-config's common-session-pc).
+pam_session_has_systemd() {
+    local file=$1 depth=${2:-0} included dir
+    (( depth <= 8 )) || return 1
+    grep -Eq '^[[:space:]]*-?session[[:space:]].*pam_systemd\.so([[:space:]]|$)' "$file" && return 0
+    while read -r included; do
+        for dir in /etc/pam.d /usr/etc/pam.d /usr/lib/pam.d; do
+            if [[ -r $dir/$included ]]; then
+                pam_session_has_systemd "$dir/$included" $((depth + 1)) && return 0
+                break
+            fi
+        done
+    done < <(awk '($1 == "session" || $1 == "-session") && ($2 == "include" || $2 == "substack") { print $3 }' "$file")
+    return 1
+}
+
 # The login PAM service is what registers the shell (and therefore Plasma
 # after exec) as a logind session and creates /run/user/UID.
 login_pam=
@@ -35,12 +53,7 @@ for candidate in /etc/pam.d/login /usr/etc/pam.d/login /usr/lib/pam.d/login; do
 done
 [[ -n $login_pam ]] || { echo "ERROR: the login PAM service is missing" >&2; exit 1; }
 
-if grep -Eq '^[[:space:]]*session[[:space:]].*pam_systemd\.so([[:space:]]|$)' "$login_pam"; then
-    :
-elif grep -Eq '^[[:space:]]*session[[:space:]]+(include|substack)[[:space:]]+common-session([[:space:]]|$)' "$login_pam" \
-    && grep -Eq '^[[:space:]]*session[[:space:]].*pam_systemd\.so([[:space:]]|$)' /etc/pam.d/common-session; then
-    :
-else
+if ! pam_session_has_systemd "$login_pam"; then
     echo "ERROR: the login PAM stack does not include pam_systemd.so" >&2
     exit 1
 fi

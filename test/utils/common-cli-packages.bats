@@ -17,15 +17,18 @@ packages_for() {
     [[ $status == 0 ]]
 }
 
-@test "Tumbleweed selects xz and leaves Go optional with apt compatibility" {
+@test "Tumbleweed selects xz and git-core and leaves Go optional with apt compatibility" {
     packages_for 1
-    [[ $output == *$'\ndistro=xz' ]]
+    [[ $output == *$'\ndistro=xz git-core' ]]
+    # openSUSE's git meta package only adds perl-Git; git-core is the command.
+    [[ ! $output =~ (^|[[:space:]=])git([[:space:]]|$) ]]
     [[ ! $output =~ (^|[[:space:]=])(go|golang-go)([[:space:]]|$) ]]
     [[ $output != *xz-utils* ]]
 }
 
-@test "Ubuntu selects xz-utils and leaves Go optional" {
+@test "Ubuntu selects xz-utils and git and leaves Go optional" {
     packages_for 0
-    [[ $output == *$'\ndistro=xz-utils' ]]
+    [[ $output == *$'\ndistro=xz-utils git' ]]
+    [[ $output != *git-core* ]]
     [[ ! $output =~ (^|[[:space:]=])(go|golang-go)([[:space:]]|$) ]]
 }

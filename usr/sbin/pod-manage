@@ -83,7 +83,10 @@ if ! id "$NAME" &>/dev/null; then
 fi
 
 USER_UID=$(id -u "$NAME")
-SVC_NAME=$(cat "${HOME_DIR}/.service-name" 2>/dev/null || echo "${NAME}-app.service")
+# Derived, not read from the pod-owned .service-name: the pod account can
+# replace that file with a link to anything root can read.
+SVC_NAME="${NAME}-app.service"
+[[ -e "${HOME_DIR}/.config/containers/systemd/${NAME}.pod" ]] && SVC_NAME="${NAME}-pod.service"
 
 shift 2 || shift $#  # consume pod name and command, rest are args
 

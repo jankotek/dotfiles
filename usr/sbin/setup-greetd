@@ -79,6 +79,24 @@ if ! getent passwd greeter >/dev/null; then
     exit 1
 fi
 
+# True when a PAM service's session stack reaches pam_systemd.so, following
+# include/substack lines (setup-lab-hardening turns common-session into an
+# include of pam-config's common-session-pc).
+pam_session_has_systemd() {
+    local file=$1 depth=${2:-0} included dir
+    (( depth <= 8 )) || return 1
+    grep -Eq '^[[:space:]]*-?session[[:space:]].*pam_systemd\.so([[:space:]]|$)' "$file" && return 0
+    while read -r included; do
+        for dir in /etc/pam.d /usr/etc/pam.d /usr/lib/pam.d; do
+            if [[ -r $dir/$included ]]; then
+                pam_session_has_systemd "$dir/$included" $((depth + 1)) && return 0
+                break
+            fi
+        done
+    done < <(awk '($1 == "session" || $1 == "-session") && ($2 == "include" || $2 == "substack") { print $3 }' "$file")
+    return 1
+}
+
 # On Tumbleweed the vendor greetd PAM service includes common-session, whose
 # pam_systemd entry creates session-N.scope, /run/user/UID, and the user systemd
 # manager. Refuse to deploy if that integration has been removed locally.
@@ -94,12 +112,7 @@ if [[ -z "$greetd_pam" ]]; then
     exit 1
 fi
 
-if grep -Eq '^[[:space:]]*session[[:space:]].*pam_systemd\.so([[:space:]]|$)' "$greetd_pam"; then
-    :
-elif grep -Eq '^[[:space:]]*session[[:space:]]+(include|substack)[[:space:]]+common-session([[:space:]]|$)' "$greetd_pam" \
-    && grep -Eq '^[[:space:]]*session[[:space:]].*pam_systemd\.so([[:space:]]|$)' /etc/pam.d/common-session; then
-    :
-else
+if ! pam_session_has_systemd "$greetd_pam"; then
     echo "ERROR: the greetd PAM session stack does not include pam_systemd.so" >&2
     echo "       repair Tumbleweed's common-session PAM configuration first" >&2
     exit 1

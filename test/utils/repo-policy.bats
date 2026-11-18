@@ -143,11 +143,10 @@ load ../helpers
 
 @test "skills live under agent/skills and are discovered via per-skill symlinks" {
     local skill dir
-    local repo_dirs=(.agents/skills .claude/skills .grok/skills .pi/skills)
+    local repo_dirs=(.agents/skills .claude/skills .pi/skills)
     local skel_dirs=(
         skel/home/.agents/skills
         skel/home/.claude/skills
-        skel/home/.grok/skills
         skel/home/.pi/agent/skills
     )
     for dir in "${repo_dirs[@]}" "${skel_dirs[@]}"; do

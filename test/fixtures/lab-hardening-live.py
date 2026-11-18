@@ -144,26 +144,32 @@ OPT_JAN=/opt/jan bats /opt/jan/test/utils/lab-hardening.bats /opt/jan/test/utils
         def isolation_checks():
             guest("systemd-run --unit=lab-test-root-sleeper /bin/sleep infinity")
             pid = guest("systemctl show lab-test-root-sleeper -p MainPID --value").stdout.strip()
+            # Ordinary users share the normal /tmp; lab sessions get their own.
             ssh("worker", f"test -d /proc/{pid}; echo worker > /tmp/lab-private-marker")
-            guest("test ! -e /tmp/lab-private-marker")
+            guest("test -e /tmp/lab-private-marker")
             script = f"test ! -e /proc/{pid}; test ! -e /tmp/lab-private-marker; "
             script += r'''uid=$(id -u)
 test "$(findmnt -n -o FSTYPE -T /sys/fs/cgroup/user.slice)" = tmpfs
 test "$(findmnt -n -o FSTYPE -T /sys/fs/cgroup/user.slice/user-$uid.slice)" = cgroup2
 test "$(ls /sys/fs/cgroup/user.slice)" = "user-$uid.slice"
 systemd-run --user --wait --pipe /bin/bash -ec 'test "$(findmnt -n -o FSTYPE -T /sys/fs/cgroup/user.slice)" = tmpfs'
+! busctl call org.freedesktop.systemd1 /org/freedesktop/systemd1 org.freedesktop.systemd1.Manager GetUnitProcesses s system.slice >/dev/null 2>&1
+! busctl call org.freedesktop.systemd1 /org/freedesktop/systemd1/unit/system_2eslice org.freedesktop.systemd1.Slice GetProcesses >/dev/null 2>&1
 '''
             ssh("lab1", script)
-            guest("systemctl stop lab-test-root-sleeper")
-            report("PASS: real SSH and systemd user sessions hide root processes, private tmp, other cgroups")
+            # Each lab login gets a fresh /tmp.
+            ssh("lab1", "echo lab1 > /tmp/lab-session-marker")
+            ssh("lab1", "test ! -e /tmp/lab-session-marker")
+            guest("rm -f /tmp/lab-private-marker; systemctl stop lab-test-root-sleeper")
+            report("PASS: real SSH and systemd user sessions hide root processes (incl. via systemd D-Bus), private tmp, other cgroups")
 
         isolation_checks()
         # Ordinary users remain able to log in while either custom mount operation fails.
-        original = guest("base64 -w0 /etc/security/jan-lab-session").stdout.strip()
+        original = guest("base64 -w0 /usr/local/libexec/jan/lab-session").stdout.strip()
         for operation in ("mount -t proc", "mount --bind"):
             modified = base64.b64decode(original).decode().replace(operation, "false # injected mount failure: " + operation)
             value = base64.b64encode(modified.encode()).decode()
-            guest(f"printf %s {shlex.quote(value)} | base64 -d > /etc/security/jan-lab-session")
+            guest(f"printf %s {shlex.quote(value)} | base64 -d > /usr/local/libexec/jan/lab-session")
             try:
                 failed = ssh("lab1", "touch /home/lab1/SHOULD_NOT_RUN", check=False)
                 assert failed.returncode != 0, "lab login survived failed isolation"
@@ -171,7 +177,7 @@ systemd-run --user --wait --pipe /bin/bash -ec 'test "$(findmnt -n -o FSTYPE -T 
                 ssh("worker", "true")
                 report(f"PASS: {operation} failure rejects lab login and keeps ordinary logins working")
             finally:
-                guest(f"printf %s {shlex.quote(original)} | base64 -d > /etc/security/jan-lab-session")
+                guest(f"printf %s {shlex.quote(original)} | base64 -d > /usr/local/libexec/jan/lab-session")
         # Real loopback connections, rather than assertions about generated nft text.
         server = "import socket,time; s=[]\nfor p in (9999,10080):\n x=socket.socket(); x.bind(('0.0.0.0',p)); x.listen(); s.append(x)\ntime.sleep(180)"
         value = base64.b64encode(server.encode()).decode()
@@ -204,7 +210,7 @@ systemd-run --user --wait --pipe /bin/bash -ec 'test "$(findmnt -n -o FSTYPE -T 
             if time.monotonic() > deadline:
                 raise RuntimeError("guest did not complete a new boot")
             time.sleep(1)
-        boot = guest("systemctl is-active tmp-clean.service systemd-tmpfiles-setup.service proc-hidepid.service jan-lab-local-network.service; test -d /tmp/tmp-inst; journalctl -b --no-pager | grep -i 'ordering cycle' || true").stdout
+        boot = guest("systemctl is-active tmp-clean.service systemd-tmpfiles-setup.service proc-hidepid.service jan-lab-local-network.service; test -d /var/tmp/tmp-inst; journalctl -b --no-pager | grep -i 'ordering cycle' || true").stdout
         assert boot.splitlines() == ["active"] * 4, boot
         isolation_checks()
         report("PASS: reboot completes with tmp-clean, tmpfiles, proc-hidepid and firewall active; login isolation survives")

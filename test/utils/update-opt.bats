@@ -52,65 +52,6 @@ teardown() {
     [[ "$output" == *"Herdr already at version $version"* ]]
 }
 
-@test "optupdate installs and tracks the complete Mjolnir archive" {
-    local target="$BATS_TEST_TMPDIR/opt"
-    mkdir -p "$target"
-
-    run env JAN_OPT="$target" "$OPT_JAN/usr/sbin/optupdate" mjolnir
-    if [[ "$status" -ne 0 ]]; then
-        echo "$output" >&2
-    fi
-    [[ "$status" -eq 0 ]]
-    [[ -x "$target/bin/mj" ]]
-    [[ -s "$target/mjolnir/.version" ]]
-    [[ -s "$target/mjolnir/.installed-sha256" ]]
-    [[ "$output" == *"sha256 verified"* ]]
-
-    local binary
-    for binary in mj mj-desktop mj-voice-worker \
-        mj-worker-x86_64-unknown-linux-musl \
-        mj-worker-aarch64-unknown-linux-musl; do
-        [[ -x "$target/mjolnir/$binary" ]] || {
-            echo "Missing Mjolnir bundle executable: $target/mjolnir/$binary" >&2
-            return 1
-        }
-    done
-
-    run "$target/bin/mj" --version
-    [[ "$status" -eq 0 ]]
-
-    local version
-    version=$(<"$target/mjolnir/.version")
-    run env JAN_OPT="$target" "$OPT_JAN/usr/sbin/optupdate" mjolnir
-    [[ "$status" -eq 0 ]]
-    [[ "$output" == *"Mjolnir already at version $version"* ]]
-}
-
-@test "optupdate installs and tracks Grok" {
-    # Grok stable is ~160 MiB — network integration only.
-    local target="$BATS_TEST_TMPDIR/opt"
-    mkdir -p "$target"
-
-    run env JAN_OPT="$target" "$OPT_JAN/usr/sbin/optupdate" grok
-    if [[ "$status" -ne 0 ]]; then
-        echo "$output" >&2
-    fi
-    [[ "$status" -eq 0 ]]
-    [[ -x "$target/bin/grok" ]]
-    [[ -s "$target/.versions/grok" ]]
-    [[ -s "$target/.versions/grok.sha256" ]]
-    [[ "$output" == *"md5 verified"* ]]
-
-    run "$target/bin/grok" --version
-    [[ "$status" -eq 0 ]]
-
-    local version
-    version=$(<"$target/.versions/grok")
-    run env JAN_OPT="$target" "$OPT_JAN/usr/sbin/optupdate" grok
-    [[ "$status" -eq 0 ]]
-    [[ "$output" == *"Grok already at version $version"* ]]
-}
-
 @test "optupdate installs and tracks Codex" {
     local target="$BATS_TEST_TMPDIR/opt"
     mkdir -p "$target"
@@ -221,7 +162,11 @@ teardown() {
         echo "$output" >&2
     fi
     [[ "$status" -eq 0 ]]
-    [[ -x "$target/bin/obsidian" ]]
+    [[ -x "$target/bin/obsidian" && ! -L "$target/bin/obsidian" ]]
+    # Sandboxed except where Ubuntu's AppArmor blocks user namespaces.
+    grep -q 'apparmor_restrict_unprivileged_userns' "$target/bin/obsidian"
+    grep -qx "exec $target/obsidian/obsidian \"\$@\"" "$target/bin/obsidian"
+    grep -qx "Exec=$target/bin/obsidian" "$target/applications/obsidian.desktop"
     [[ -s "$target/obsidian/.version" ]]
     [[ -s "$target/obsidian/.installed-sha256" ]]
     [[ "$output" == *"sha256 verified"* ]]

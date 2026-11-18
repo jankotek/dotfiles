@@ -45,6 +45,16 @@ if systemd-detect-virt -q -v; then
 fi
 
 REPO_DIR="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+
+# The checkout is linked into /usr/local and /etc/profile.d, so root runs it
+# from then on. On a real host it must be root-owned (VMs get it as a mount
+# owned by the host user).
+if ! systemd-detect-virt -q -v \
+        && [[ -n $(find "$REPO_DIR" -maxdepth 0 ! -user root -print; \
+                   find "$REPO_DIR/usr" "$REPO_DIR/setup" ! -user root -print -quit) ]]; then
+    echo "ERROR: ${REPO_DIR} is not root-owned; run setup from a root-owned checkout such as /opt/jan" >&2
+    exit 1
+fi
 # shellcheck source=/dev/null
 source "${REPO_DIR}/setup/common-cli-packages.sh"
 
@@ -81,6 +91,13 @@ zypper -n refresh
 LOCK_PKGS=(
     PackageKit emacs icewm vim vim-small xterm xterm-bin
     xorg-x11-server xorg-x11-server-wrapper
+    # Display manager: Plasma starts from agetty logins instead.
+    sddm sddm-qt6
+    # Baloo file indexer and balooctl. The Baloo libraries and KIO workers
+    # stay: Dolphin and kinfocenter link against them.
+    kf6-baloo-file kf6-baloo-tools
+    # DrKonqi crash reporter and its coredump/Sentry upload units.
+    drkonqi6
 )
 echo "==> Removing and locking unwanted packages"
 for pkg in "${LOCK_PKGS[@]}"; do
@@ -107,10 +124,44 @@ zypper -n install --no-recommends \
     "${JAN_COMMON_CLI_PACKAGES[@]}" zim "${JAN_DISTRO_CLI_PACKAGES[@]}" zypper-aptitude \
     sshpass jq yq dconf \
     NetworkManager-tui jetbrains-mono-fonts \
+    e2fsprogs compsize smartmontools nvme-cli sysstat systemd-resolved \
     java-17-openjdk-devel maven
 
 fc-cache -f
 systemctl enable --now power-profiles-daemon.service
+
+# passt-selinux's scriptlet can fail to load its modules (seen 2026-11:
+# "Failed to resolve roleattributeset ... pasta"), which leaves all of them
+# out. passt then runs unconfined while QEMU stays confined, and session VMs
+# get no DHCP under enforcing. Load each missing module on its own, then
+# relabel the binaries.
+if command -v selinuxenabled >/dev/null && selinuxenabled \
+    && rpm -q passt-selinux >/dev/null 2>&1; then
+    echo "==> Loading passt SELinux modules individually"
+    mapfile -t pending < <(rpm -ql passt-selinux | grep -E '/targeted/[^/]+\.pp$')
+    # The modules use each other's types (passt-repair needs passt), so retry
+    # in passes until a pass loads nothing new. Priority 200 matches the
+    # package scriptlet, so later package updates replace these copies.
+    progress=1
+    while (( progress && ${#pending[@]} )); do
+        progress=0
+        remaining=()
+        for module_file in "${pending[@]}"; do
+            # Always (re)install: a name that is already listed may be a stale
+            # module left by a failed package upgrade.
+            if semodule -X 200 -i "$module_file" 2>/dev/null; then
+                progress=1
+            else
+                remaining+=("$module_file")
+            fi
+        done
+        pending=("${remaining[@]}")
+    done
+    for module_file in "${pending[@]}"; do
+        echo "WARNING: SELinux module $(basename "$module_file" .pp) failed to load" >&2
+    done
+    restorecon -F /usr/bin/passt* /usr/bin/pasta* 2>/dev/null || true
+fi
 
 # Seed future accounts (including lab users) with the curated common,
 # Plasma-safe, and XFCE-safe defaults. openSUSE continues to merge its vendor
@@ -121,8 +172,20 @@ systemctl enable --now power-profiles-daemon.service
 # Plasma is started from agetty logins (below). The rest are simply not used.
 # Guard each: a fresh install may not have all of these units.
 echo "==> Masking unused services"
-for unit in sddm.service fwupd.service forgejo-runner.service; do
+for unit in sddm.service fwupd.service forgejo-runner.service \
+    drkonqi-coredump-processor@.service; do
     systemctl mask "$unit" 2>/dev/null || true
+done
+# Per-user units for every account, even if a package brings them back. The
+# Baloo KRunner provider ships in plasma6-workspace, so it is masked rather
+# than locked; usr/etc/xdg/krunnerrc also disables its search plugin.
+for unit in plasma-baloorunner.service kde-baloo.service \
+    kde-baloo-idle-monitor.service \
+    drkonqi-coredump-launcher.socket drkonqi-coredump-launcher@.service \
+    drkonqi-coredump-pickup.service drkonqi-coredump-cleanup.service \
+    drkonqi-coredump-cleanup.timer drkonqi-sentry-postman.path \
+    drkonqi-sentry-postman.service drkonqi-sentry-postman.timer; do
+    systemctl --global mask "$unit"
 done
 
 # ---------- Cross-distro setup helpers ----------
@@ -136,11 +199,89 @@ setup-plasma-defaults   || echo "WARNING: Plasma defaults setup failed (non-fata
 console-framebuffer
 setup-pkg-safety        || echo "WARNING: pkg safety setup failed (non-fatal)"
 setup-kernel-tweaks     || echo "WARNING: kernel tweaks setup failed (non-fatal)"
+setup-nm-tailscale
 setup-agetty
 setup-ac-no-suspend
 install-tty12-menu      || echo "WARNING: tty12 menu setup failed (non-fatal)"
 # Patch virt-manager/remote-viewer to run under XWayland (fractional scaling fix).
 fix-virtman-scaling     || echo "WARNING: virt-manager scaling fix failed (non-fatal)"
+
+# ---------- Writeback cache limit ----------
+# The default ratios (10% background, 20% blocking) let tens of GiB of dirty
+# page cache build up on a large-memory host; flushing it stalls every writer
+# and can freeze the desktop. Absolute limits keep writeback small and steady.
+echo "==> Limiting the dirty page cache"
+cat > /etc/sysctl.d/60-jan-writeback.conf <<'EOF'
+# Managed by setup/host-weed-kde.
+# Start background writeback at 256 MiB of dirty pages; block writers at 1 GiB.
+vm.dirty_background_bytes = 268435456
+vm.dirty_bytes = 1073741824
+EOF
+chmod 0644 /etc/sysctl.d/60-jan-writeback.conf
+sysctl -q -p /etc/sysctl.d/60-jan-writeback.conf
+
+# ---------- DNS: systemd-resolved ----------
+# Tailscale and NetworkManager used to take turns rewriting /etc/resolv.conf.
+# Every session VM's passt keeps the resolver it read at start, so each rewrite
+# broke DNS in running VMs. With systemd-resolved, both push per-link DNS to
+# resolved over D-Bus and /etc/resolv.conf stays a symlink to its stub
+# (127.0.0.53), which never changes. rc-manager=unmanaged keeps NetworkManager
+# off the file, and an empty NETCONFIG_DNS_POLICY keeps openSUSE's netconfig
+# from rewriting it.
+echo "==> Switching DNS to systemd-resolved"
+install -d -m 0755 /etc/NetworkManager/conf.d
+cat > /etc/NetworkManager/conf.d/90-jan-dns-resolved.conf <<'EOF'
+# Managed by setup/host-weed-kde.
+# NetworkManager sends DNS to systemd-resolved; /etc/resolv.conf is its stub.
+[main]
+dns=systemd-resolved
+rc-manager=unmanaged
+EOF
+chmod 0644 /etc/NetworkManager/conf.d/90-jan-dns-resolved.conf
+if [[ -f /etc/sysconfig/network/config ]]; then
+    sed -i 's/^NETCONFIG_DNS_POLICY=.*/NETCONFIG_DNS_POLICY=""/' /etc/sysconfig/network/config
+fi
+# avahi-daemon (with nss-mdns) already answers .local names. resolved's own
+# mDNS responder would compete with it for UDP port 5353, so leave mDNS to
+# avahi.
+install -d -m 0755 /etc/systemd/resolved.conf.d
+cat > /etc/systemd/resolved.conf.d/90-jan-mdns-avahi.conf <<'EOF'
+# Managed by setup/host-weed-kde.
+# avahi-daemon owns mDNS (.local); keep systemd-resolved off UDP 5353.
+[Resolve]
+MulticastDNS=no
+EOF
+chmod 0644 /etc/systemd/resolved.conf.d/90-jan-mdns-avahi.conf
+systemctl enable systemd-resolved.service
+# Pick up the drop-in on a rerun too (resolved rereads it on reload).
+systemctl reload-or-restart systemd-resolved.service
+ln -sfn ../run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+restorecon -F /etc/resolv.conf /etc/NetworkManager/conf.d/90-jan-dns-resolved.conf \
+    /etc/systemd/resolved.conf.d/90-jan-mdns-avahi.conf 2>/dev/null || true
+# A restart (not a reload) switches NetworkManager's DNS backend; existing
+# connections are kept across it.
+if systemctl is-active --quiet NetworkManager.service; then
+    systemctl restart NetworkManager.service
+fi
+# tailscaled picks its DNS mode at startup; restart a running one so it
+# programs tailscale0's DNS into resolved instead of overwriting the file.
+systemctl try-restart tailscaled.service 2>/dev/null || true
+
+# ---------- Firewall: allow mosh ----------
+# mosh authenticates over SSH, then talks UDP 60000-61000 to mosh-server.
+# Open firewalld's stock mosh service in the default zone (tailscale0 is
+# unmanaged by NetworkManager, so it lands there too). Skipped without firewalld.
+if command -v firewall-cmd >/dev/null 2>&1; then
+    echo "==> Allowing mosh through firewalld"
+    if firewall-cmd --state >/dev/null 2>&1; then
+        # Permanent and runtime separately: a reload would drop an
+        # administrator's runtime-only changes.
+        firewall-cmd -q --permanent --add-service=mosh
+        firewall-cmd -q --add-service=mosh
+    else
+        firewall-offline-cmd -q --add-service=mosh
+    fi
+fi
 
 # AMD Strix Halo unified-memory tuning — only on matching hardware.
 if lspci -nn 2>/dev/null | grep -qi 'Strix Halo'; then

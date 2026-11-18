@@ -13,6 +13,10 @@ if [ "$EUID" -ne 0 ]; then
     echo "must run as root" >&2
     exit 1
 fi
+if ! systemd-detect-virt -q -v; then
+    echo "ERROR: $(basename "$0") is for VM guests only" >&2
+    exit 1
+fi
 
 SERVICE_FILE_CONTENT="[Unit]
 Description=Root terminal on TTY11

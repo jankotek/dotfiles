@@ -11,7 +11,6 @@ load ../helpers
     for dir in \
         skel/home/.agents/skills \
         skel/home/.claude/skills \
-        skel/home/.grok/skills \
         skel/home/.pi/agent/skills; do
         [[ -d $OPT_JAN/$dir && ! -L $OPT_JAN/$dir ]]
         [[ $(readlink -- "$OPT_JAN/$dir/host-lab-vm-cli") == /opt/jan/agent/skills/host-lab-vm-cli ]]
@@ -54,6 +53,11 @@ load ../helpers
     rm -rf "$home"
     [[ ${lines[0]} == screen-256color ]]
     [[ $(tr ':' '\n' <<<"${lines[1]}" | grep -cx "$home/.local/bin") -eq 1 ]]
+    if [[ -d /opt/bin ]]; then
+        # optupdate tools are reachable but never shadow distro commands.
+        [[ $(tr ':' '\n' <<<"${lines[1]}" | grep -cx /opt/bin) -eq 1 ]]
+        [[ ${lines[1]} == *:/opt/bin ]]
+    fi
 }
 
 @test "bash keeps a large, immediately saved history" {

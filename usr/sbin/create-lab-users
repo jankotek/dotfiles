@@ -9,8 +9,8 @@
 #
 # setup-lab-hardening then hides other users' processes and app names from
 # lab sessions, caps their memory, CPU, and tasks, blocks their connections
-# to this host's own services, denies cron and at, kills their processes at
-# logout, and gives every user a private /tmp.
+# to this host's own services, denies cron and at, and gives lab users a
+# fresh /tmp per session (everyone but root a private /var/tmp).
 
 set -Eeuo pipefail
 
@@ -64,7 +64,8 @@ zypper -n install --no-recommends \
     libvirt-client \
     libvirt-daemon-qemu \
     qemu-x86 \
-    qemu-tools >&2
+    qemu-tools \
+    crun >&2
 
 for required_command in chage pgrep useradd usermod pwgen virsh visudo nft; do
     if ! command -v "$required_command" >/dev/null; then
@@ -229,6 +230,10 @@ cat > "$dbus_stage" <<'EOF'
   <policy group="lab">
     <deny send_destination="org.bluez"/>
     <deny receive_sender="org.bluez"/>
+    <!-- PID 1 answers these from its own view, bypassing hidepid: they
+         list every process (with command lines) in any unit or slice. -->
+    <deny send_destination="org.freedesktop.systemd1" send_member="GetUnitProcesses"/>
+    <deny send_destination="org.freedesktop.systemd1" send_member="GetProcesses"/>
   </policy>
 </busconfig>
 EOF

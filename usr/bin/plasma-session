@@ -31,14 +31,12 @@ session_properties=$(/usr/bin/loginctl show-session "$XDG_SESSION_ID" \
 [[ $session_properties == *$'TTY='"${tty_path#/dev/}"* ]] \
     || die "logind session is not attached to $tty_path"
 
-# With `exec plasma-session`, the process which login originally started
-# as Bash has this script's image and login remains its parent.  If Bash is
-# still the parent, the caller forgot exec and Plasma would return to a shell.
-parent_comm=$(<"/proc/$PPID/comm")
-case $parent_comm in
-    login|login.*) ;;
-    *) die "an executable cannot replace its parent shell; run: exec plasma-session" ;;
-esac
+# login starts the shell as a session leader. With `exec plasma-session`
+# this script keeps that PID; run without exec it is a child of the shell and
+# Plasma would return to it. Only our own /proc entry is read, so this also
+# works under hidepid, where the root-owned login parent is invisible.
+[[ $(ps -o sid= -p $$) -eq $$ ]] \
+    || die "an executable cannot replace its parent shell; run: exec plasma-session"
 
 [[ -x /usr/bin/startplasma-wayland ]] || die "/usr/bin/startplasma-wayland is missing"
 [[ -x /usr/local/bin/greetd-session ]] || die "greetd-session is missing"

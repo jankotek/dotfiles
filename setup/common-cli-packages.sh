@@ -6,7 +6,7 @@
 readonly -a JAN_COMMON_CLI_PACKAGES=(
     mc
     htop
-    git
+    btop
     fzf
     lazygit
     curl
@@ -30,15 +30,21 @@ readonly -a JAN_COMMON_CLI_PACKAGES=(
     pwgen
     telnet
     jdupes
+    hashdeep
     just
     bats
+    # Claude Code's Linux sandbox needs both; Codex brings its own bwrap.
+    bubblewrap
+    socat
 )
 
-# xz has different package names on Debian and openSUSE.
+# xz has different package names on Debian and openSUSE. openSUSE's git is a
+# meta package that adds perl-Git for git-svn and send-email; git-core is the
+# git command itself. Debian and Ubuntu have no git-core package.
 if command -v zypper >/dev/null 2>&1; then
-    readonly -a JAN_DISTRO_CLI_PACKAGES=(xz)
+    readonly -a JAN_DISTRO_CLI_PACKAGES=(xz git-core)
 else
-    readonly -a JAN_DISTRO_CLI_PACKAGES=(xz-utils)
+    readonly -a JAN_DISTRO_CLI_PACKAGES=(xz-utils git)
 fi
 
 # zypper's apt frontend parses options before the action and uses aptitude's spelling.

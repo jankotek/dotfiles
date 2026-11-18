@@ -48,9 +48,12 @@ rm -f /etc/systemd/system/jan-console-font.service \
 cat > /usr/local/sbin/console-font-apply <<SCRIPT
 #!/bin/sh
 # Re-apply terminus font to vconsole.conf if it was overwritten
-grep -q "FONT=${FONT}" /etc/vconsole.conf 2>/dev/null && exit 0
-sed -i "s/^FONT=.*/FONT=${FONT}/" /etc/vconsole.conf 2>/dev/null || \
+grep -qx "FONT=${FONT}" /etc/vconsole.conf 2>/dev/null && exit 0
+if grep -q '^FONT=' /etc/vconsole.conf 2>/dev/null; then
+    sed -i "s/^FONT=.*/FONT=${FONT}/" /etc/vconsole.conf
+else
     echo "FONT=${FONT}" >> /etc/vconsole.conf
+fi
 setfont ${FONT} 2>/dev/null || true
 SCRIPT
 chmod +x /usr/local/sbin/console-font-apply

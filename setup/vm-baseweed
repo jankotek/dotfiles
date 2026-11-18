@@ -48,6 +48,7 @@ apt "${JAN_APT_INSTALL_OPTIONS[@]}" install \
 install-tty11-root
 install-guest-cleanup
 setup-kernel-tweaks initcall_blacklist=sysfb_init,simpledrm_platform_driver_init
+setup-nm-tailscale
 /usr/local/sbin/qga-guard release "$guest_agent_owner_token"
 guest_agent_owner_token=
 unset JAN_QGA_GUARD_TOKEN

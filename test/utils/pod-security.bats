@@ -319,3 +319,55 @@ run_as_pod() {
     val=$(cat /proc/sys/net/ipv4/ip_unprivileged_port_start)
     [[ "$val" -ge 1024 ]]
 }
+
+# --- Rerun safety ---
+
+_rerun_pod_setup() {
+    if [[ -x "$OPT_JAN/usr/sbin/pod-setup" ]]; then
+        "$OPT_JAN/usr/sbin/pod-setup" "$POD_NAME" >/dev/null 2>&1
+    else
+        pod-setup "$POD_NAME" >/dev/null 2>&1
+    fi
+}
+
+@test "everything in the pod home belongs to the pod user" {
+    run find "$POD_HOME" -mindepth 1 ! -user "$POD_NAME" -print
+    [[ "$status" -eq 0 ]]
+    [[ -z "$output" ]]
+}
+
+@test "rerun replaces file symlinks the pod user planted" {
+    local target="$BATS_TEST_TMPDIR/root-target" before
+    printf 'root data\n' > "$target"
+    chmod 0644 "$target"
+    before=$(stat -c '%U:%G %a' "$target")
+    run_as_pod "ln -sfn '$target' '$POD_HOME/.config/containers/containers.conf'
+                ln -sfn '$target' '$POD_HOME/bin/status'
+                ln -sfn '$target' '$POD_HOME/.service-name'"
+    _rerun_pod_setup
+    [[ "$(cat "$target")" == "root data" ]]
+    [[ "$(stat -c '%U:%G %a' "$target")" == "$before" ]]
+    local f
+    for f in .config/containers/containers.conf bin/status .service-name; do
+        [[ -f "$POD_HOME/$f" && ! -L "$POD_HOME/$f" ]]
+        [[ "$(stat -c %U "$POD_HOME/$f")" == "$POD_NAME" ]]
+    done
+}
+
+@test "rerun never changes a directory the pod user linked in" {
+    local target="$BATS_TEST_TMPDIR/root-dir" before
+    install -d -m 0755 "$target"
+    before=$(stat -c '%U:%G %a' "$target")
+    run_as_pod "rm -rf '$POD_HOME/.tmp' && ln -sfn '$target' '$POD_HOME/.tmp'"
+    # pod-setup may refuse the sabotaged home; it must not touch the target.
+    _rerun_pod_setup || true
+    [[ "$(stat -c '%U:%G %a' "$target")" == "$before" ]]
+    run_as_pod "rm -f '$POD_HOME/.tmp'"
+    _rerun_pod_setup
+}
+
+@test "rerun keeps an edited Quadlet container file" {
+    run_as_pod "printf '# operator edit\n' >> '$POD_HOME/.config/containers/systemd/${POD_NAME}-app.container'"
+    _rerun_pod_setup
+    grep -qx '# operator edit' "$POD_HOME/.config/containers/systemd/${POD_NAME}-app.container"
+}

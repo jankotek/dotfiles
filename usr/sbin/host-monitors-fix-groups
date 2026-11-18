@@ -29,6 +29,9 @@ for d in /home/*; do
     esac
     pgrp=$(id -gn "$user")
     [[ "$pgrp" == "$user" ]] && continue
+    # Lab accounts keep exactly users+lab; logind grants seat devices to
+    # their local sessions without group membership.
+    id -nG "$user" | tr ' ' '\n' | grep -qxF lab && continue
 
     for grp in render video; do
         if ! id -nG "$user" 2>/dev/null | tr ' ' '\n' | grep -qxF "$grp"; then

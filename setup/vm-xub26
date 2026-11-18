@@ -171,6 +171,7 @@ setup-kernel-tweaks \
     initcall_blacklist=sysfb_init,simpledrm_platform_driver_init \
     || echo "WARNING: kernel tweaks setup failed (non-fatal)"
 setup-pkg-safety || echo "WARNING: pkg safety setup failed (non-fatal)"
+setup-nm-tailscale
 
 
 
@@ -206,6 +207,11 @@ for home_dir in /home/*/; do
 done
 chown jan:users -R /home/jan
 rm -rf /home/jan/.cache/sessions
+
+# The owner's git identity belongs in the owner's VM only; /etc/skel (and so
+# every lab or other host account) stays identity-free. Written as the user.
+su - jan -c 'grep -q "^\[user\]" ~/.config/git/config 2>/dev/null ||
+    printf "[user]\n\tname = Jan Kotek\n\temail = jan@kotek.net\n" >> ~/.config/git/config'
 
 configure-user-dirs() {
     local user=$1

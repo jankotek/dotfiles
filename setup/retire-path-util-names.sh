@@ -62,7 +62,9 @@ retired_sbin=(
     jan-update-opt
     jan-upgrade
     install-brave-origin
+    install-podman-clean-sockets
     install-vivaldi
+    setup-kernel-zbook
     vm-cleanup
 )
 
@@ -72,6 +74,16 @@ done
 for name in "${retired_sbin[@]}"; do
     rm -f "/usr/local/sbin/$name"
 done
+
+# install-podman-clean-sockets wrote this unit. Its cleanup ran a root
+# rm -rf under /var/pods (and the last version could expand to /*).
+clean_unit=/etc/systemd/system/podman-clean-sockets.service
+if [[ -f $clean_unit ]] && grep -q 'Cleanup stale Podman sockets in /var/pods' "$clean_unit"; then
+    systemctl disable --now podman-clean-sockets.service 2>/dev/null || true
+    rm -f "$clean_unit"
+    systemctl daemon-reload
+    systemctl reset-failed podman-clean-sockets.service 2>/dev/null || true
+fi
 
 # Starship was once vendored as usr/bin/starship; the distro package now
 # provides /usr/bin/starship. Drop only the dangling repo symlink, never a

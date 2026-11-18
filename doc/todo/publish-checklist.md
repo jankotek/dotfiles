@@ -4,9 +4,10 @@ Before pushing this repo to a public location.
 
 ## Strip personal info
 
-- `skel/home/.config/git/config` lines 2–3 contain real name `Jan Kotek` and
-  email `jan@kotek.net`. Decide: keep (publishing under that identity
-  anyway), or templatize.
+- `setup/vm-cli` and `setup/vm-xub26` write the real name `Jan Kotek` and
+  email `jan@kotek.net` into the owner's VM git config (skel no longer
+  carries them). Decide: keep (publishing under that identity anyway), or
+  templatize.
 - `test/vm/dotfiles.bats:56,60` hardcode the same name/email in
   assertions. Update to match whatever is decided above.
 - `doc/todo/monitors.md` references the name `adam` (third-party) and the

@@ -1,12 +1,20 @@
 #!/bin/bash
 #
 # Harden the lab1..lab10 accounts created by create-lab-users, and give every
-# user a private /tmp and /var/tmp.
+# user but root a private /var/tmp.
 #
-#   private tmp   pam_namespace gives each user (root excepted) their own
-#                 /tmp and /var/tmp, so no one sees or fills another user's
-#                 temporary files. Instances live in /tmp/tmp-inst/USER and
-#                 /var/tmp/tmp-inst/USER behind 0000 parent directories.
+#   private tmp   pam_namespace gives each lab session a fresh tmpfs /tmp (up
+#                 to 10 GiB and 4M inodes, so tests can run there instead of
+#                 on the SSD; pages count against the lab user's memory cap).
+#                 It is a fresh mount, not a bind of a shared instance
+#                 directory: Codex's bwrap sandbox derives paths from the
+#                 mount root and fails on a bound /tmp/tmp-inst/USER.
+#                 Concurrent sessions of one lab user therefore do not share
+#                 /tmp (use $XDG_RUNTIME_DIR for per-user sockets). Other
+#                 users keep the normal shared /tmp, so tmux, Plasma and
+#                 Codex see one /tmp across their sessions; lab users cannot
+#                 see it. Every user but root gets a private /var/tmp, kept
+#                 under /var/tmp/tmp-inst/USER behind a 0000 parent directory.
 #   processes     lab sessions mount their own /proc with hidepid=invisible:
 #                 they see only their own processes and command lines. Other
 #                 users keep the normal view.
@@ -23,41 +31,52 @@
 #                 of reach. DNS to a local resolver still works, and so do
 #                 ports 10000 and up, where a lab user's own VMs (libvirt
 #                 qemu:///session with user-mode networking) forward guest
-#                 ports. Keep private local services below 10000.
+#                 ports. Keep private local services below 10000. They
+#                 cannot use tailscale0 either: the tailnet would see them
+#                 as this host.
 #   cron, at      lab accounts are listed in /etc/cron.deny and /etc/at.deny.
-#   logout        logind kills every lab process when the session ends, and
-#                 linger is turned off, so nothing keeps running afterwards.
+#   logout        processes may outlive the login session (mosh-server must
+#                 survive the SSH login that starts it), so logind does not
+#                 kill them. Linger stays off: the user's systemd --user
+#                 manager and its units (podman scopes, session VMs) stop
+#                 once the last session ends.
 #
 # Lab sessions fail closed: if their namespace cannot be set up, the login is
-# refused. For other users a failure is ignored and they keep the shared /tmp.
+# refused. For other users a failure is ignored and they keep the shared
+# /var/tmp.
 #
 # Targets openSUSE Tumbleweed (pam-config layout). Idempotent.
 #
 set -euo pipefail
 
 ETC=${ETC:-/etc}
+# pam_exec runs the session helper. Under SELinux enforcing it must have an
+# executable type (bin_t); files under /etc/security are etc_t and refused.
+LIBEXEC=${LIBEXEC:-/usr/local/libexec/jan}
+SESSION_HELPER=$LIBEXEC/lab-session
 VENDOR_PAM_DIRS=${VENDOR_PAM_DIRS:-"/usr/etc/pam.d /usr/lib/pam.d"}
 readonly LAB_GROUP=lab
 readonly MARKER='# Managed by /opt/jan/usr/sbin/setup-lab-hardening'
 
-# write_namespace_config: polyinstantiate /tmp and /var/tmp for all but root.
+# write_namespace_config USER...: a fresh tmpfs /tmp for the given lab users
+# only, and a private /var/tmp for all but root.
 write_namespace_config() {
+    local lab_list
+    lab_list=$(IFS=,; echo "$*")
     install -d -m 0755 "$ETC/security" "$ETC/tmpfiles.d"
     cat > "$ETC/security/namespace.conf" <<EOF
 $MARKER
-# polydir   instance prefix      method  users without a private copy
-/tmp        /tmp/tmp-inst/       user    root
-/var/tmp    /var/tmp/tmp-inst/   user    root
+# polydir   instance prefix      method  users (~list: only these; else: all but these)
+/tmp        /tmp/tmp-inst/       tmpfs:mntopts=nosuid,nodev,size=10g,nr_inodes=4m   ~$lab_list
+/var/tmp    /var/tmp/tmp-inst/   user                                               root
 EOF
     chmod 0644 "$ETC/security/namespace.conf"
 
-    # pam_namespace needs the instance parents to exist at every login. /tmp
-    # is a fresh tmpfs after boot, so recreate them there; X keeps the
-    # directories themselves from age-based cleanup, not their contents.
+    # pam_namespace needs the /var/tmp instance parent at every login; X keeps
+    # the directory itself from age-based cleanup, not its contents. The /tmp
+    # tmpfs method needs no instance parent.
     cat > "$ETC/tmpfiles.d/jan-namespace.conf" <<EOF
 $MARKER
-d /tmp/tmp-inst 0000 root root -
-X /tmp/tmp-inst
 d /var/tmp/tmp-inst 0000 root root -
 X /var/tmp/tmp-inst
 EOF
@@ -68,11 +87,13 @@ EOF
 # propagates errors; pam_namespace ignores a normally exited init helper's
 # nonzero status. Leave the distro namespace.init (X11 socket setup) intact.
 write_lab_session() {
-    cat > "$ETC/security/jan-lab-session" <<EOF
+    install -d -m 0755 "$LIBEXEC"
+    cat > "$SESSION_HELPER.new" <<EOF
 #!/bin/bash
 $MARKER
 # Required pam_exec open_session helper, after required pam_namespace.
-# Replace /proc with a hidepid instance and prune the cgroup view for lab users.
+# Replace /proc with a hidepid instance, prune the cgroup view, and hide the
+# NetworkManager applet for lab users.
 set -euo pipefail
 [[ \${PAM_TYPE:-} == open_session ]] || exit 0
 user=\${PAM_USER:?}
@@ -91,8 +112,18 @@ mount -t tmpfs -o mode=0755,size=64k,nosuid,nodev,noexec jan-lab-cgroup "\$cgrou
 mkdir "\$cgroup_root/user-\$uid.slice"
 mount --move "\$stash" "\$cgroup_root/user-\$uid.slice"
 rmdir "\$stash"
+
+# Plasma's NetworkManager applet and its kded module (notifications, secret
+# agent) do not load in lab sessions; PolicyKit already denies lab users
+# NetworkManager changes. Other users' sessions are unaffected.
+for plugin in \\
+    /usr/lib64/qt6/plugins/plasma/applets/org.kde.plasma.networkmanagement.so \\
+    /usr/lib64/qt6/plugins/kf6/kded/networkmanagement.so; do
+    [[ ! -e \$plugin ]] || mount --bind /dev/null "\$plugin"
+done
 EOF
-    chmod 0755 "$ETC/security/jan-lab-session"
+    chmod 0755 "$SESSION_HELPER.new"
+    mv -f -- "$SESSION_HELPER.new" "$SESSION_HELPER"
 }
 
 # The session lines every PAM stack below includes. Lab users must get the
@@ -104,9 +135,14 @@ session [success=2 default=ignore] pam_succeed_if.so quiet user ingroup $LAB_GRO
 session optional pam_namespace.so mount_private
 session [default=2] pam_permit.so
 session requisite pam_namespace.so mount_private
-session required pam_exec.so quiet type=open_session $ETC/security/jan-lab-session
+session required pam_exec.so quiet type=open_session $SESSION_HELPER
 EOF
     chmod 0644 "$ETC/pam.d/jan-namespace"
+    # Earlier versions ran the helper from a non-executable etc_t file. Remove
+    # it only once PAM points at the new location.
+    if is_managed "$ETC/security/jan-lab-session"; then
+        rm -f -- "$ETC/security/jan-lab-session"
+    fi
 }
 
 is_managed() {
@@ -183,14 +219,13 @@ write_lab_policies() {
         uids+=("$(id -u -- "$user")")
     done
 
-    install -d -m 0755 "$ETC/systemd/logind.conf.d" "$ETC/systemd/system"
-    cat > "$ETC/systemd/logind.conf.d/60-jan-lab.conf" <<EOF
-$MARKER
-[Login]
-KillUserProcesses=yes
-KillOnlyUsers=${users[*]}
-EOF
-    chmod 0644 "$ETC/systemd/logind.conf.d/60-jan-lab.conf"
+    install -d -m 0755 "$ETC/systemd/system"
+    # Earlier versions killed lab processes at logout, which also killed
+    # mosh-server. KillOnlyUsers= overrides KillUserProcesses=no, so remove
+    # the whole drop-in rather than flipping the switch.
+    if is_managed "$ETC/systemd/logind.conf.d/60-jan-lab.conf"; then
+        rm -f -- "$ETC/systemd/logind.conf.d/60-jan-lab.conf"
+    fi
 
     for uid in "${uids[@]}"; do
         install -d -m 0755 "$ETC/systemd/system/user-$uid.slice.d"
@@ -218,8 +253,23 @@ Conflicts=shutdown.target
 EOF
     chmod 0644 "$ETC/systemd/system/tmp-clean.service.d/50-jan-namespace.conf"
 
+    # Rootless containers run their non-root users under the account's
+    # subordinate UIDs; with --network host those sockets carry a subuid, so
+    # the ranges join the account UIDs in the firewall set.
+    local -a fw_ids=("${uids[@]}")
+    local name start count i
+    if [[ -r $ETC/subuid ]]; then
+        while IFS=: read -r name start count; do
+            [[ $start =~ ^[0-9]+$ && $count =~ ^[1-9][0-9]*$ ]] || continue
+            for i in "${!users[@]}"; do
+                if [[ $name == "${users[i]}" || $name == "${uids[i]}" ]]; then
+                    fw_ids+=("$start-$((start + count - 1))")
+                fi
+            done
+        done < "$ETC/subuid"
+    fi
     local uid_set
-    uid_set=$(IFS=,; echo "${uids[*]}")
+    uid_set=$(IFS=,; echo "${fw_ids[*]}")
     install -d -m 0755 "$ETC/jan"
     cat > "$ETC/jan/lab-local-network.nft" <<EOF
 $MARKER
@@ -235,6 +285,9 @@ table inet jan_lab {
         meta skuid { $uid_set } oifname "lo" meta l4proto { tcp, udp } th dport 53 accept
         meta skuid { $uid_set } oifname "lo" meta l4proto { tcp, udp } th dport >= 10000 accept
         meta skuid { $uid_set } oifname "lo" ct state new counter reject
+        # The tailnet sees this host, not the local user: keep lab accounts
+        # off it entirely.
+        meta skuid { $uid_set } oifname "tailscale0" counter reject
     }
 }
 EOF
@@ -251,6 +304,9 @@ Wants=network-pre.target
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/sbin/nft -f $ETC/jan/lab-local-network.nft
+# The rule file replaces the table in one transaction; reload never leaves
+# lab sessions without it.
+ExecReload=/usr/sbin/nft -f $ETC/jan/lab-local-network.nft
 ExecStop=/usr/sbin/nft delete table inet jan_lab
 
 [Install]
@@ -265,6 +321,22 @@ EOF
             grep -qx -- "$user" "$ETC/$list" || echo "$user" >> "$ETC/$list"
         done
         chmod 0600 "$ETC/$list"
+    done
+
+    # Rootless podman: runc fails in lab sessions. Its systemd driver cannot
+    # find the user manager through the hidepid /proc and falls back to the
+    # system bus, and its cgroupfs walk refuses the pruned cgroup view's
+    # mounts (openat2 EXDEV). crun with cgroupfs works; containers then stay
+    # in the session's cgroup, under the slice caps above.
+    for uid in "${uids[@]}"; do
+        install -d -m 0755 "$ETC/containers/containers.rootless.conf.d/$uid"
+        cat > "$ETC/containers/containers.rootless.conf.d/$uid/50-jan-lab.conf" <<EOF
+$MARKER
+[engine]
+cgroup_manager = "cgroupfs"
+runtime = "crun"
+EOF
+        chmod 0644 "$ETC/containers/containers.rootless.conf.d/$uid/50-jan-lab.conf"
     done
 }
 
@@ -284,14 +356,25 @@ main() {
         return 1
     fi
     command -v nft >/dev/null || { echo "ERROR: nft is required (nftables)" >&2; return 1; }
+    # Lab podman is configured for crun (see write_lab_policies).
+    command -v crun >/dev/null || { echo "ERROR: crun is required (zypper install crun)" >&2; return 1; }
 
+    # PAM selects lab sessions by group, everything else by this user list;
+    # refuse a member the list would miss rather than half-harden it.
+    local member
+    for member in $(getent group "$LAB_GROUP" | cut -d: -f4 | tr ',' ' '); do
+        if [[ ! $member =~ ^lab([1-9]|10)$ ]]; then
+            echo "ERROR: $LAB_GROUP member $member is not lab1..lab10" >&2
+            return 1
+        fi
+    done
     local -a users
     mapfile -t users < <(lab_users)
     (( ${#users[@]} )) || { echo "ERROR: group $LAB_GROUP has no lab members" >&2; return 1; }
     local cpu_quota
     cpu_quota="$(( $(nproc) * 80 ))%"
 
-    for file in "$ETC/security/namespace.conf" "$ETC/security/jan-lab-session"; do
+    for file in "$ETC/security/namespace.conf" "$SESSION_HELPER"; do
         if [[ -e $file ]] && ! is_managed "$file" \
             && grep -qv '^[[:space:]]*\(#.*\)\?$' "$file"; then
             echo "ERROR: refusing to replace administrator-managed $file" >&2
@@ -299,7 +382,7 @@ main() {
         fi
     done
 
-    write_namespace_config
+    write_namespace_config "${users[@]}"
     write_lab_session
     write_pam_snippet
     install_systemd_user
@@ -308,13 +391,13 @@ main() {
 
     if command -v selinuxenabled >/dev/null && selinuxenabled; then
         setsebool -P polyinstantiation_enabled on
-        restorecon -RF "$ETC/security" "$ETC/pam.d" "$ETC/tmpfiles.d" \
-            "$ETC/systemd" "$ETC/jan" "$ETC/cron.deny" "$ETC/at.deny"
+        restorecon -RF "$ETC/security" "$LIBEXEC" "$ETC/pam.d" "$ETC/tmpfiles.d" \
+            "$ETC/systemd" "$ETC/jan" "$ETC/containers" "$ETC/cron.deny" "$ETC/at.deny"
     fi
     systemd-tmpfiles --create "$ETC/tmpfiles.d/jan-namespace.conf"
     systemctl daemon-reload
     systemctl enable jan-lab-local-network.service >/dev/null 2>&1
-    systemctl restart jan-lab-local-network.service
+    systemctl reload-or-restart jan-lab-local-network.service
     # logind rereads its configuration on reload; never restart it.
     systemctl reload systemd-logind.service
     local user

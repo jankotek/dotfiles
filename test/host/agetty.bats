@@ -55,7 +55,16 @@ MANAGED_LOGIN_TTYS=(2 3 4 5 6 7 8 9 10)
         return 0
     fi
     grep -Eq '^[[:space:]]*session[[:space:]]+(include|substack)[[:space:]]+common-session' "$pam_file"
-    grep -Eq '^[[:space:]]*session[[:space:]].*pam_systemd\.so' /etc/pam.d/common-session
+    # Lab hardening makes common-session include pam-config's
+    # common-session-pc, so follow one level of session includes.
+    local file target
+    for file in /etc/pam.d/common-session; do
+        grep -Eq '^[[:space:]]*session[[:space:]].*pam_systemd\.so' "$file" && return 0
+        while read -r target; do
+            grep -Eq '^[[:space:]]*session[[:space:]].*pam_systemd\.so' "/etc/pam.d/$target" && return 0
+        done < <(awk '$1 == "session" && ($2 == "include" || $2 == "substack") { print $3 }' "$file")
+    done
+    return 1
 }
 
 @test "agetty banner shows local system information" {
@@ -101,13 +110,13 @@ MANAGED_LOGIN_TTYS=(2 3 4 5 6 7 8 9 10)
 
 @test "Full HD framebuffer settings survive repeat setup" {
     assert_file_contains /proc/cmdline 'video=1920x1080'
-    if [[ -f /etc/default/grub ]]; then
+    if [[ -f /etc/kernel/cmdline ]]; then
+        [[ $(grep -Eo '(^|[[:space:]])video=1920x1080($|[[:space:]])' /etc/kernel/cmdline | wc -l) -eq 1 ]]
+    else
         [[ $(grep -Ec '^GRUB_GFXMODE=' /etc/default/grub) -eq 1 ]]
         [[ $(grep -Ec '^GRUB_GFXPAYLOAD_LINUX=' /etc/default/grub) -eq 1 ]]
         assert_file_contains /etc/default/grub '^GRUB_GFXMODE="1920x1080,auto"$'
         assert_file_contains /etc/default/grub '^GRUB_GFXPAYLOAD_LINUX="1920x1080"$'
         [[ $(grep -Eo '(^|[[:space:]])video=1920x1080($|[[:space:]"])' /etc/default/grub | wc -l) -eq 1 ]]
-    else
-        [[ $(grep -Eo '(^|[[:space:]])video=1920x1080($|[[:space:]])' /etc/kernel/cmdline | wc -l) -eq 1 ]]
     fi
 }

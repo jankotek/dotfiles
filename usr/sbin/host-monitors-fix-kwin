@@ -14,12 +14,12 @@ fi
 set -euo pipefail
 
 # Apply the two relevant keys via kwriteconfig5/kwriteconfig6 if available
-# (preserves any other config); fall back to plain ini block append.
+# (preserves any other config).
 apply_dpms() {
     local user="$1" home="$2"
-    local kwinrc="$home/.config/kwinrc"
 
-    install -d -m 0700 -o "$user" -g "$(id -gn "$user")" "$home/.config"
+    # As the user: root must not follow links inside a user's home.
+    sudo -u "$user" mkdir -p -m 0700 "$home/.config"
 
     # Try kwriteconfig (Plasma's official tool) — atomic and conflict-aware.
     local writer=""
@@ -36,15 +36,8 @@ apply_dpms() {
         return
     fi
 
-    # Fallback: append the [section]/key pairs if not already there.
-    if ! grep -q '^\[Effect-dpms\]' "$kwinrc" 2>/dev/null; then
-        printf '\n[Effect-dpms]\nLockAfterLockScreen=false\n' >> "$kwinrc"
-    fi
-    if ! grep -q '^\[Wayland\]' "$kwinrc" 2>/dev/null; then
-        printf '\n[Wayland]\nDpmsLockAfterLockScreen=false\n' >> "$kwinrc"
-    fi
-    chown "$user":"$(id -gn "$user")" "$kwinrc"
-    echo "==> $user: kwinrc appended (raw ini fallback)"
+    echo "ERROR: kwriteconfig6/kwriteconfig5 not found" >&2
+    return 1
 }
 
 count=0

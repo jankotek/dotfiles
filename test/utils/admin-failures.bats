@@ -4,6 +4,8 @@
 setup() {
     export CALLS="$BATS_TEST_TMPDIR/calls"
     export SYSTEMD_DIR="$BATS_TEST_TMPDIR/systemd"
+    export OS_RELEASE="$BATS_TEST_TMPDIR/os-release"
+    printf 'ID="opensuse-leap"\n' > "$OS_RELEASE"
     mkdir -p "$SYSTEMD_DIR"
     cat > "$BATS_TEST_TMPDIR/stubs.sh" <<'SH'
 record() {
@@ -49,6 +51,15 @@ apt-get|apt-get autoremove -y
 apt-get|apt-get clean
 apt|apt upgrade -y
 CASES
+}
+
+@test "Tumbleweed upgrades with zypper dup" {
+    printf 'NAME="openSUSE Tumbleweed"\nID="opensuse-tumbleweed"\n' > "$OS_RELEASE"
+    export MANAGER=zypper
+    : > "$CALLS"
+    run_admin distro-upgrade upgrade_system
+    [[ $status == 0 ]]
+    [[ $(cat "$CALLS") == "zypper --non-interactive dup" ]]
 }
 
 @test "successful package-manager runs still report completion" {

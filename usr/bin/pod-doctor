@@ -117,11 +117,9 @@ check_pod() {
     if (( ${#quadlet_files[@]} == 0 )); then
         warn "$name has no quadlet files"
     else
+        # Derived, not read from the pod-owned .service-name.
         svc=${name}-app.service
-        if [[ -f $home/.service-name ]]; then
-            IFS= read -r svc < "$home/.service-name" || true
-            [[ -n ${svc:-} ]] || svc=${name}-app.service
-        fi
+        [[ -e $home/.config/containers/systemd/$name.pod ]] && svc=${name}-pod.service
         load_state=""
         if command -v systemctl >/dev/null 2>&1; then
             if ! load_state=$(systemctl --machine="${name}@" --user show "$svc" \

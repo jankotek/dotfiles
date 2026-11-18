@@ -49,6 +49,13 @@ if id "$NAME" &>/dev/null; then
     USER_UID=$(id -u "$NAME")
 fi
 
+# userdel -r removes the account's real home; refuse anything that is not a
+# pod account (a mistyped name could match a regular user).
+if [[ -n $USER_UID && $(getent passwd "$NAME" | cut -d: -f6) != "$HOME_DIR" ]]; then
+    echo "ERROR: '$NAME' is not a pod account (its home is not $HOME_DIR)" >&2
+    exit 1
+fi
+
 if [[ ! -d "$HOME_DIR" ]] && [[ -z "$USER_UID" ]]; then
     echo "Nothing to destroy: pod '$NAME' has no user and no $HOME_DIR." >&2
     exit 0

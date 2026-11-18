@@ -26,6 +26,11 @@ for dir in "$HOME/.bin" "$HOME/.local/bin"; do
   esac
 done
 unset dir
+# optupdate's shared tools (codex, claude, idea, ...) come after distro commands.
+case ":$PATH:" in
+  *":/opt/bin:"*) ;;
+  *) [ -d /opt/bin ] && PATH="$PATH:/opt/bin" ;;
+esac
 
 ### CHANGE TITLE OF TERMINALS
 case ${TERM} in

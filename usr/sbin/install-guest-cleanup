@@ -1,5 +1,15 @@
 #!/bin/bash
 
+if [ "$EUID" -ne 0 ]; then
+    echo "Please run as root" >&2
+    exit 1
+fi
+# Deletes firmware, docs and packaged files: VM guests only.
+if ! systemd-detect-virt -q -v; then
+    echo "ERROR: $(basename "$0") is for VM guests only" >&2
+    exit 1
+fi
+
 systemctl disable --now vm-cleanup.service 2>/dev/null || true
 rm -f /etc/systemd/system/vm-cleanup.service
 
